@@ -1,0 +1,283 @@
+# yaml-language-server: $schema=./agent-config.schema.json
+llm:
+  fallback_chain:
+    - openrouter/google/gemma-4-26b-a4b-it:free
+    - openrouter/z-ai/glm-5.2:free
+    - openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    - cloudflare/@cf/meta/llama-3.1-8b-instruct
+  temperature: 0.7
+  max_tokens: 6000
+  # Canonical site URL used for author sameAs links and JSON-LD publisher
+  site_url: https://gworky.com
+  # EEAT author personas by pillar (must exist in the authors table)
+  author_slugs:
+    money: david-sterling
+    body: maya-okafor
+    home: marcus-chen
+    life: priya-nair
+    tech: sofia-reyes
+  # EEAT reviewers by pillar (must exist in the authors table, role_type=reviewer)
+  reviewer_slugs:
+    money: elena-vasquez
+    body: sarah-lin
+    home: marcus-vance
+    life: james-thorne
+    tech: chloe-chen
+
+quality:
+  min_content_length: 400
+  min_title_length: 10
+  min_output_words: 850
+  # Dynamic per-pillar threshold: Tier-1 depth across high-yield pillars
+  min_output_words_by_pillar:
+    money: 900
+    body: 900
+    home: 850
+    life: 800
+    tech: 800
+
+media:
+  # Agent 4 — 4-tier visual pipeline (self-hosted R2 / Unsplash hotlink / OG / AI).
+  enabled: true
+  min_source_width: 600
+  target_width: 1200
+  target_height: 675
+  webp_quality: 82
+
+keyword_scout:
+  # Agent 4 — keyword mining via public SearXNG instances (JSON API).
+  # Intent classification uses llm.fallback_chain when enrich_with_llm is true.
+  searxng_instance: https://searx.be
+  max_queries_per_run: 15
+  results_per_query: 10
+  min_signal: 2
+  enrich_with_llm: true
+  timeout_seconds: 8
+  retries: 1
+  max_candidates_per_run: 60
+  seeds:
+    money:
+      - refinance mortgage rates
+      - high yield savings account
+      - life insurance quotes
+      - how to pay off credit card debt
+    body:
+      - best treadmill for home
+      - how to lower blood pressure
+      - daily protein intake
+      - sleep hygiene tips
+    home:
+      - solar panel cost
+      - heat pump installation
+      - whole home generator
+      - smart door lock
+    life:
+      - travel insurance comparison
+      - estate planning checklist
+      - how to negotiate salary
+      - best car insurance rates
+    tech:
+      - best mesh wifi router
+      - ai note taking apps
+      - how to build a pc
+      - smart home hub comparison
+
+keyword_graph:
+  # Agent 5 — keyword graph: expand via free Google Autocomplete, cluster with
+  # union-find (char-bigram similarity + co-occurrence), upsert to keywords.
+  # Seeds fall back to keyword_scout.seeds when omitted.
+  suggest_endpoint: https://suggestqueries.google.com/complete/search
+  suggest_client: firefox
+  suggest_hl: en
+  suggest_gl: us
+  max_suggestions_per_seed: 20
+  noise_markers: [adalah, bca, singapore, "hong kong", india, canada, germany]
+  alphabet_expand: false
+  alphabet_expand_chars: 0
+  min_similarity: 0.35
+  co_occurrence_min: 2
+  max_nodes: 500
+  min_cluster_size: 3
+  brand_terms: [gworky, groundwork]
+envoy:
+  # Agent 6 (Tier 4) — Automated Digital PR. Ingest journalist queries from
+  # free-tier platforms (HARO/Featured.com, Source of Sources, Qwoted,
+  # Help a B2B Writer). Score against persona bios and generate expert pitches.
+  enabled: true
+  min_relevance_score: 0.65
+  max_pitches_per_run: 10
+  dry_run: true # Set to false when EMAIL_FROM / Resend is configured for outbound PR
+  harvesters:
+    - name: Featured.com RSS
+      feed_url: https://featured.com/feed
+      format: rss
+    - name: Source of Sources
+      feed_url: https://sourceofsources.com/feed/
+      format: rss
+    - name: Help a B2B Writer
+      feed_url: https://helpab2bwriter.com/feed/
+      format: rss
+  prompt_template: |
+    You are {expert_name}, {expert_title} at Groundwork (gworky.com).
+    A journalist at {outlet} is asking: "{query_title}"
+    Details: {query_details}
+
+    Write a concise, high-value expert pitch (max 200 words) that:
+    1. Directly answers the journalist's question with actionable insight.
+    2. Includes a specific data point or real-world benchmark from Groundwork research.
+    3. Mentions {expert_name}'s role and links naturally to relevant research at gworky.com.
+    4. Is professional, devoid of fluff, and immediately quotable.
+
+# Content sources for Agent 1 (The Scouter)
+# Sources are categorized by pillar (money, body, home, life, tech)
+# Enforces strict 5x10x10 Decision Matrix (zero entertainment / pop culture drift)
+sources:
+  # ── MONEY (Priority High-CPM & Regulatory Decisions) ───────────────
+  - name: Federal Reserve Economic Research
+    feed_url: https://www.federalreserve.gov/feeds/press_monetary.xml
+    pillar: money
+    max_items: 8
+
+  - name: St. Louis Fed FRED Economic Research
+    feed_url: https://fredblog.stlouisfed.org/feed/
+    pillar: money
+    max_items: 6
+
+  - name: Kiplinger Personal Finance
+    feed_url: https://www.kiplinger.com/feeds/rss
+    pillar: money
+    max_items: 6
+
+  - name: CNBC Personal Finance
+    feed_url: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000398
+    pillar: money
+    max_items: 8
+
+  - name: MarketWatch Personal Finance
+    feed_url: https://feeds.content.dowjones.io/public/rss/mw_personal_finance
+    pillar: money
+    max_items: 8
+
+  - name: NerdWallet Personal Finance
+    feed_url: https://www.nerdwallet.com/blog/feed/?topic=personal-finance
+    pillar: money
+    max_items: 8
+
+  - name: SEC Press Releases
+    feed_url: https://www.sec.gov/news/pressreleases.rss
+    pillar: money
+    max_items: 6
+
+  # ── BODY (Evidence-Based Health & Longevity) ────────────────────────
+  - name: MedRxiv Clinical Preprints
+    feed_url: https://connect.medrxiv.org/medrxiv_xml.php?subject=all
+    pillar: body
+    max_items: 8
+
+  - name: ScienceDaily Health & Medicine
+    feed_url: https://www.sciencedaily.com/rss/health_medicine.xml
+    pillar: body
+    max_items: 8
+
+  - name: Healthline
+    feed_url: https://www.healthline.com/rss/health-news
+    pillar: body
+    max_items: 8
+
+  - name: MedicalXpress Clinical Research
+    feed_url: https://medicalxpress.com/rss-feed/
+    pillar: body
+    max_items: 8
+
+  - name: MedlinePlus What's New
+    feed_url: https://medlineplus.gov/feeds/whatsnew.xml
+    pillar: body
+    max_items: 8
+
+  - name: WHO News
+    feed_url: https://www.who.int/rss-feeds/news-english.xml
+    pillar: body
+    max_items: 6
+
+  # ── HOME (Energy, Solar, HVAC & Renovation ROI) ─────────────────────
+  - name: CleanTechnica Energy & Solar
+    feed_url: https://cleantechnica.com/feed/
+    pillar: home
+    max_items: 6
+
+  - name: Solar Power World
+    feed_url: https://www.solarpowerworldonline.com/feed/
+    pillar: home
+    max_items: 6
+
+  - name: Family Handyman
+    feed_url: https://www.familyhandyman.com/feed/
+    pillar: home
+    max_items: 6
+
+  - name: Bob Vila
+    feed_url: https://www.bobvila.com/feed
+    pillar: home
+    max_items: 6
+
+  - name: Energy.gov
+    feed_url: https://www.energy.gov/rss/articles.xml
+    pillar: home
+    max_items: 6
+
+  - name: Renewable Energy World
+    feed_url: https://www.renewableenergyworld.com/feed/
+    pillar: home
+    max_items: 6
+
+  - name: Green Building Advisor
+    feed_url: https://www.greenbuildingadvisor.com/feed/
+    pillar: home
+    max_items: 4
+
+  # ── LIFE (Employment, Legal, Estate & Insurance) ────────────────────
+  - name: ABA Journal Legal News
+    feed_url: https://www.abajournal.com/rss
+    pillar: life
+    max_items: 6
+
+  - name: The Points Guy
+    feed_url: https://thepointsguy.com/feed/
+    pillar: life
+    max_items: 6
+
+  - name: Money Under 30
+    feed_url: https://www.moneyunder30.com/feed
+    pillar: life
+    max_items: 6
+
+  - name: CNBC Make It
+    feed_url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+    pillar: life
+    max_items: 6
+
+  # ── TECH (AI Tools, Privacy, Cyber & Practical Tech) ────────────────
+  - name: arXiv AI & Computer Science
+    feed_url: https://export.arxiv.org/rss/cs.AI
+    pillar: tech
+    max_items: 4
+
+  - name: Ars Technica
+    feed_url: https://feeds.arstechnica.com/arstechnica/index
+    pillar: tech
+    max_items: 5
+
+  - name: TechCrunch Enterprise & AI
+    feed_url: https://techcrunch.com/category/artificial-intelligence/feed/
+    pillar: tech
+    max_items: 4
+
+  - name: Wired Science & Security
+    feed_url: https://www.wired.com/feed/category/security/latest/rss
+    pillar: tech
+    max_items: 4
+
+  - name: How-To Geek
+    feed_url: https://www.howtogeek.com/feed/
+    pillar: tech
+    max_items: 3

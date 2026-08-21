@@ -1,0 +1,397 @@
+"""Groundwork Universal LLM Router & Multi-Provider Gateway (Version 2.1).
+
+Synthesizes best practices from:
+- langgenius/dify (Unified Model Gateway, parameter normalization, and provider abstraction)
+- 0xzr/freellmpool (Free tier multi-provider rotation)
+- GoSlowPoke168/hermes-openrouter-free-rotator (Dynamic round-robin rotation for :free models on 429)
+- KashifKhn/gemini-proxy (Resilient fallbacks & circuit breaker)
+
+Provides resilient functions:
+- `call_llm(messages, response_format="text", max_tokens=4096)`
+- `call_llm_json(messages, max_tokens=4096)`
+with automatic circuit breakers, exponential backoff, Groq/Cloudflare/OpenRouter/Gemini failover,
+and deterministic fallback parsing.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import random
+import re
+import time
+import urllib.request
+from typing import Any, Dict, List, Literal, Optional
+
+from dotenv import load_dotenv
+
+load_dotenv(".env.local")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("llm_router")
+
+# ─── Free Tier Model Catalog ────────────────────────────────────────────────
+
+OPENROUTER_FREE_MODELS = [
+    "openrouter/google/gemma-2-9b-it:free",
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/z-ai/glm-5.2:free",
+    "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "openrouter/meta-llama/llama-3.2-3b-instruct:free",
+]
+
+CLOUDFLARE_MODELS = [
+    "@cf/meta/llama-3.1-8b-instruct",
+    "@cf/mistral/mistral-7b-instruct-v0.1",
+    "@cf/qwen/qwen1.5-7b-chat-awq",
+]
+
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+]
+
+
+class LLMRouter:
+    """Intelligent multi-provider LLM gateway with active failover and circuit breaker."""
+
+    def __init__(self) -> None:
+        self.cf_account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+        self.cf_email = os.getenv("CLOUDFLARE_EMAIL")
+        self.cf_key = os.getenv("CLOUDFLARE_GLOBAL_API_KEY")
+        self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        self.groq_key = os.getenv("GROQ_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY")
+        self.failed_providers: Dict[str, float] = {}  # provider_name -> cooloff_until_timestamp
+
+    def _is_provider_healthy(self, provider_id: str) -> bool:
+        """Check if provider is not currently tripped by circuit breaker."""
+        cooloff = self.failed_providers.get(provider_id, 0)
+        if time.time() < cooloff:
+            return False
+        return True
+
+    def _trip_circuit_breaker(self, provider_id: str, cooloff_seconds: int = 180) -> None:
+        """Temporarily isolate a failing provider."""
+        logger.warning(f"Tripping circuit breaker for provider [{provider_id}] for {cooloff_seconds}s.")
+        self.failed_providers[provider_id] = time.time() + cooloff_seconds
+
+    # ─── Provider 1: Cloudflare Workers AI (Direct Native) ──────────────────
+
+    def _call_cloudflare_ai(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "@cf/meta/llama-3.1-8b-instruct",
+        max_tokens: int = 4096,
+    ) -> Optional[str]:
+        if not self.cf_account_id or not self.cf_key:
+            return None
+
+        url = f"https://api.cloudflare.com/client/v4/accounts/{self.cf_account_id}/ai/run/{model}"
+        payload = json.dumps({"messages": messages, "max_tokens": max_tokens}).encode()
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "X-Auth-Email": self.cf_email or "",
+                "X-Auth-Key": self.cf_key,
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                data = json.loads(resp.read().decode())
+                resp_val = data.get("result", {}).get("response", "")
+                if isinstance(resp_val, dict):
+                    return json.dumps(resp_val)
+                return str(resp_val) if resp_val is not None else ""
+        except Exception as e:
+            logger.warning(f"Cloudflare AI ({model}) error: {e}")
+            return None
+
+    # ─── Provider 2: Groq Direct API (Sub-Second Latency) ────────────────────
+
+    def _call_groq(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "llama-3.3-70b-versatile",
+        max_tokens: int = 4096,
+    ) -> Optional[str]:
+        if not self.groq_key:
+            return None
+
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        payload = json.dumps({
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.7,
+        }).encode()
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.groq_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Groundwork-Router/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read().decode())
+                choices = data.get("choices", [])
+                if choices:
+                    return choices[0].get("message", {}).get("content", "")
+                return None
+        except Exception as e:
+            logger.warning(f"Groq API ({model}) failed: {e}")
+            return None
+
+    # ─── Provider 3: OpenRouter Dynamic Rotator ──────────────────────────────
+
+    def _call_openrouter(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        max_tokens: int = 4096,
+    ) -> Optional[str]:
+        if not self.openrouter_key:
+            return None
+
+        clean_model = model.replace("openrouter/", "")
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        payload = json.dumps({
+            "model": clean_model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }).encode()
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.openrouter_key}",
+                "HTTP-Referer": "https://gworky.com",
+                "X-Title": "Groundwork Media",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+                choices = data.get("choices", [])
+                if choices:
+                    return choices[0].get("message", {}).get("content", "")
+                return None
+        except Exception as e:
+            logger.warning(f"OpenRouter ({model}) failed: {e}")
+            return None
+
+    # ─── Provider 4: Google Gemini API (Optional with Circuit Breaker) ───────
+
+    def _call_gemini(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "gemini-1.5-flash",
+        max_tokens: int = 4096,
+    ) -> Optional[str]:
+        if not self.gemini_key:
+            return None
+
+        # Build combined prompt from messages
+        combined_prompt = "\n\n".join(f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.gemini_key}"
+        payload = json.dumps({
+            "contents": [{"parts": [{"text": combined_prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
+        }).encode()
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "")
+                return None
+        except Exception as e:
+            logger.warning(f"Gemini API ({model}) failed / rate-limited: {e}")
+            self._trip_circuit_breaker("gemini_api", 300)
+            return None
+
+    # ─── Public Gateway Method ───────────────────────────────────────────────
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        response_format: Literal["text", "json"] = "text",
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> Optional[str]:
+        """Execute resilient inference query through multi-tier pool with automatic failover."""
+        start_time = time.time()
+
+        # 1. Tier 1: Cloudflare Workers AI Primary
+        if self._is_provider_healthy("cloudflare_ai"):
+            for cf_model in CLOUDFLARE_MODELS:
+                logger.info(f"Attempting inference with Cloudflare AI: {cf_model}")
+                raw_out = self._call_cloudflare_ai(messages, model=cf_model, max_tokens=max_tokens)
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via Cloudflare AI ({cf_model}) in {latency}s.")
+                    return raw_out
+            self._trip_circuit_breaker("cloudflare_ai", 120)
+
+        # 2. Tier 2: Groq Direct API Primary
+        if self._is_provider_healthy("groq_api") and self.groq_key:
+            for g_model in GROQ_MODELS:
+                logger.info(f"Attempting inference with Groq: {g_model}")
+                raw_out = self._call_groq(messages, model=g_model, max_tokens=max_tokens)
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via Groq ({g_model}) in {latency}s.")
+                    return raw_out
+            self._trip_circuit_breaker("groq_api", 120)
+
+        # 3. Tier 3: OpenRouter Free Model Dynamic Rotator
+        if self._is_provider_healthy("openrouter_free") and self.openrouter_key:
+            shuffled_models = list(OPENROUTER_FREE_MODELS)
+            random.shuffle(shuffled_models)
+
+            for or_model in shuffled_models:
+                logger.info(f"Attempting failover inference with OpenRouter: {or_model}")
+                raw_out = self._call_openrouter(messages, model=or_model, max_tokens=max_tokens)
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via OpenRouter ({or_model}) in {latency}s.")
+                    return raw_out
+            self._trip_circuit_breaker("openrouter_free", 180)
+
+        # 4. Tier 4: Gemini Direct API (Optional)
+        if self._is_provider_healthy("gemini_api") and self.gemini_key:
+            logger.info("Attempting failover inference with Google Gemini API")
+            raw_out = self._call_gemini(messages, max_tokens=max_tokens)
+            if raw_out and len(raw_out.strip()) > 10:
+                latency = round(time.time() - start_time, 2)
+                logger.info(f"Inference succeeded via Gemini API in {latency}s.")
+                return raw_out
+
+        logger.error("All LLM providers in the multi-tier pool failed or were rate-limited.")
+        return None
+
+    def generate_json(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 4096,
+    ) -> Optional[Dict[str, Any]]:
+        """Generate and parse structured JSON reliably using brace-depth tracking and json_repair."""
+        # Ensure system prompt instructs raw JSON output
+        system_appended = False
+        for msg in messages:
+            if msg.get("role") == "system":
+                msg["content"] += "\nReturn strictly raw JSON format without preamble or backticks."
+                system_appended = True
+                break
+        if not system_appended:
+            messages.insert(0, {"role": "system", "content": "You are a JSON generator. Return strictly raw JSON."})
+
+        raw_output = self.generate(messages, response_format="json", max_tokens=max_tokens)
+        if not raw_output:
+            return None
+
+        # Clean markdown codeblocks
+        clean_text = re.sub(r"^```(?:json)?\s*", "", raw_output.strip(), flags=re.IGNORECASE)
+        clean_text = re.sub(r"\s*```$", "", clean_text)
+
+        # 1. cJSON-inspired outermost balanced JSON bracket extractor
+        def extract_balanced_json(text: str) -> Optional[str]:
+            start_idx = -1
+            brace_type = None
+            depth = 0
+            in_string = False
+            escape = False
+
+            for i, ch in enumerate(text):
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    if in_string:
+                        escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+
+                if ch in ("{", "["):
+                    if depth == 0:
+                        start_idx = i
+                        brace_type = "{" if ch == "{" else "["
+                    if (brace_type == "{" and ch == "{") or (brace_type == "[" and ch == "["):
+                        depth += 1
+                elif ch in ("}", "]"):
+                    if (brace_type == "{" and ch == "}") or (brace_type == "[" and ch == "]"):
+                        depth -= 1
+                        if depth == 0 and start_idx != -1:
+                            return text[start_idx : i + 1]
+            return None
+
+        extracted = extract_balanced_json(clean_text) or clean_text
+
+        # 2. Strict standard JSON parse
+        try:
+            parsed = json.loads(extracted, strict=False)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        # 3. Robust json_repair fallback
+        try:
+            import json_repair
+            parsed = json_repair.loads(extracted)
+            if isinstance(parsed, dict):
+                return parsed
+            parsed_raw = json_repair.loads(raw_output)
+            if isinstance(parsed_raw, dict):
+                return parsed_raw
+        except Exception as err:
+            logger.debug(f"json_repair failed: {err}")
+
+        logger.error(f"Failed to decode JSON from LLM output. Preview: {raw_output[:200]}")
+        return None
+
+
+# Global singleton instance
+router = LLMRouter()
+
+
+def call_llm(
+    messages: List[Dict[str, str]],
+    response_format: Literal["text", "json"] = "text",
+    max_tokens: int = 4096,
+) -> Optional[str]:
+    """Convenience helper function for agent pipeline."""
+    return router.generate(messages, response_format=response_format, max_tokens=max_tokens)
+
+
+def call_llm_json(
+    messages: List[Dict[str, str]],
+    max_tokens: int = 4096,
+) -> Optional[Dict[str, Any]]:
+    """Convenience helper for generating JSON data structures."""
+    return router.generate_json(messages, max_tokens=max_tokens)

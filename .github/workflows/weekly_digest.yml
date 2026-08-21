@@ -1,0 +1,33 @@
+name: Weekly Subscriber Digest (The Weekly Brief)
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Every Monday at 08:00 UTC
+  workflow_dispatch: # Manual trigger
+
+concurrency:
+  group: weekly-digest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-digest:
+    name: Dispatch The Weekly Brief
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Trigger Weekly Digest Cron Endpoint
+        env:
+          SITE_URL: "https://gworky.com"
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+        run: |
+          echo "Dispatching Weekly Digest to active subscribers..."
+          AUTH_TOKEN="${CRON_SECRET:-$REVALIDATE_SECRET}"
+          RESPONSE=$(curl -s -X POST "${SITE_URL}/api/cron/digest" \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            -H "Content-Type: application/json")
+          echo "Response: $RESPONSE"
