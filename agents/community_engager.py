@@ -39,7 +39,6 @@ _load_env_local()
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_FOUNDER_CHAT_ID", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
 REDDIT_UA = "script:groundwork-community-engager:v1 (by /u/GroundworkResearch)"
@@ -80,6 +79,8 @@ QUESTION_SIGNALS = re.compile(
     r"anyone (used|tried|know))\b",
     re.IGNORECASE,
 )
+
+DRAFT_FALLBACK_CHAIN = ["groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"]
 
 DRAFT_SYSTEM_PROMPT = """You are the Groundwork research team's community voice.
 Write a native, value-first answer to a community question (Reddit/HN style).
@@ -244,26 +245,29 @@ def score_candidate(c: ThreadCandidate) -> float:
 
 
 async def draft_answer(question_title: str, pillar: str) -> dict[str, Any] | None:
-    if not GEMINI_API_KEY:
-        return None
     try:
-        import litellm
-
-        res = await litellm.acompletion(
-            model="gemini/gemini-2.0-flash",
-            api_key=GEMINI_API_KEY,
-            messages=[
-                {"role": "system", "content": DRAFT_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Pillar: {pillar}\nCommunity question: {question_title}",
-                },
-            ],
-            temperature=0.6,
-            max_tokens=500,
-            response_format={"type": "json_object"},
+        from agents.scribe import (
+            DEFAULT_FALLBACK_CHAIN,
+            call_llm_with_fallback,
+            clean_json_response,
         )
-        return json.loads(res.choices[0].message.content)
+
+        raw = await asyncio.to_thread(
+            call_llm_with_fallback,
+            f"Pillar: {pillar}\nCommunity question: {question_title}",
+            DRAFT_FALLBACK_CHAIN + list(DEFAULT_FALLBACK_CHAIN),
+            0.6,
+            900,
+            system_prompt=DRAFT_SYSTEM_PROMPT,
+        )
+        parsed = clean_json_response(raw)
+        if isinstance(parsed, dict) and parsed.get("answer"):
+            return {"answer": str(parsed["answer"]), "mentions_brand": bool(parsed.get("mentions_brand", False))}
+        # Model ignored the JSON contract but returned usable prose — degrade gracefully.
+        text = raw.strip()
+        if len(text) >= 200:
+            return {"answer": text, "mentions_brand": "gworky" in text.lower()}
+        return None
     except Exception:
         return None
 

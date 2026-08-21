@@ -8,3 +8,4 @@ agents/input/*.csv
 .env.*
 *.log
 .DS_Store
+state/
