@@ -9,9 +9,6 @@ Human-Centric Editorial Architecture:
 
 from __future__ import annotations
 
-import hashlib
-import html
-import json
 import logging
 import os
 import re
@@ -80,7 +77,7 @@ def get_nav_header_html(active_pillar: str = "all", root_prefix: str = ".") -> s
     ]:
         active_cls = "nav-link active" if p == active_pillar else "nav-link"
         p_links.append(f'<a href="{root_prefix}/{p}/" class="{active_cls}">{label}</a>')
-    
+
     links_html = "\n".join(p_links)
 
     return f"""
@@ -999,7 +996,7 @@ def build_and_push_github_pages(
         for i, art in enumerate(articles):
             art_dir = os.path.join(tmp_dir, art["slug"])
             os.makedirs(art_dir, exist_ok=True)
-            
+
             prev_art = articles[i - 1] if i > 0 else None
             next_art = articles[i + 1] if i < len(articles) - 1 else None
 
@@ -1044,7 +1041,7 @@ def build_and_push_github_pages(
         for j, dig in enumerate(news_digests):
             dig_dir = os.path.join(digest_base_dir, dig.slug)
             os.makedirs(dig_dir, exist_ok=True)
-            
+
             prev_dig = news_digests[j - 1] if j > 0 else None
             next_dig = news_digests[j + 1] if j < len(news_digests) - 1 else None
 

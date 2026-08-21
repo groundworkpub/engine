@@ -10,15 +10,12 @@ from __future__ import annotations
 import logging
 import os
 import re
-import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-
-from agents.authority_injector import _load_env_local, get_supabase_client
+from agents.authority_injector import _load_env_local
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("news_harvester")
