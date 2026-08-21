@@ -1,0 +1,79 @@
+name: SEO Observer — Indexation Control Plane
+
+on:
+  workflow_dispatch:
+    inputs:
+      inspect_url:
+        description: "Single URL to inspect (optional)"
+        required: false
+      limit:
+        description: "Max articles to process"
+        required: false
+        default: "200"
+      dry_run:
+        description: "Dry run (no DB writes)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  seo-observe:
+    name: SEO Observer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install httpx cryptography
+          # Attempt to install optional rich logging
+          pip install rich || true
+
+      - name: Run SEO Observer — Single URL inspection
+        if: ${{ github.event.inputs.inspect_url != '' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GSC_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON_B64 }}
+          GSC_PROPERTY: ${{ secrets.GSC_PROPERTY }}
+          NEXT_PUBLIC_SITE_URL: "https://gworky.com"
+          BING_WEBMASTER_KEY: ${{ secrets.BING_WEBMASTER_KEY }}
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+        run: |
+          python agents/seo_observer.py \
+            --inspect-url "${{ github.event.inputs.inspect_url }}"
+
+      - name: Run SEO Observer — Batch (P0 + P1, max ${{ github.event.inputs.limit || 200 }})
+        if: ${{ github.event.inputs.inspect_url == '' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GSC_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON_B64 }}
+          GSC_PROPERTY: ${{ secrets.GSC_PROPERTY }}
+          NEXT_PUBLIC_SITE_URL: "https://gworky.com"
+          BING_WEBMASTER_KEY: ${{ secrets.BING_WEBMASTER_KEY }}
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python agents/seo_observer.py \
+            --batch-inspect \
+            --limit "${{ github.event.inputs.limit || 200 }}" \
+            --priority-max 1 \
+            $DRY_RUN_FLAG
+

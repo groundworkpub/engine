@@ -1,0 +1,26 @@
+name: Newsletter Digest
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Weekly, Mon 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-digest:
+    name: Send weekly email digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Trigger digest endpoint
+        env:
+          EMAIL_SECRET: ${{ secrets.EMAIL_SECRET }}
+          SITE_URL: https://gworky.com
+        run: |
+          curl -fsS -X POST "${SITE_URL}/api/email/digest" \
+            -H "x-email-secret: ${EMAIL_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}' || echo "Digest send failed or returned non-2xx (check logs)."

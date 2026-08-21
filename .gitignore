@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+agents/output/*
+!agents/output/.gitkeep
+agents/input/*.csv
+.env
+.env.*
+*.log
+.DS_Store

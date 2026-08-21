@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gworky.com/schemas/agent-config.schema.json",
+  "title": "Groundwork Agent Pipeline Configuration Schema",
+  "description": "JSON Schema specification for agents/config.yml (Scouter, Critic, Scribe, Herald, Keyword Scout)",
+  "type": "object",
+  "properties": {
+    "llm": {
+      "type": "object",
+      "properties": {
+        "fallback_chain": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 500
+        },
+        "site_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "author_slugs": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "reviewer_slugs": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["fallback_chain", "temperature", "max_tokens"]
+    },
+    "quality": {
+      "type": "object",
+      "properties": {
+        "min_content_length": { "type": "integer" },
+        "min_title_length": { "type": "integer" },
+        "min_output_words": { "type": "integer" },
+        "min_output_words_by_pillar": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "min_source_width": { "type": "integer" },
+        "target_width": { "type": "integer" },
+        "target_height": { "type": "integer" },
+        "webp_quality": { "type": "integer" }
+      }
+    },
+    "keyword_scout": {
+      "type": "object",
+      "properties": {
+        "searxng_instance": { "type": "string" },
+        "max_queries_per_run": { "type": "integer" },
+        "results_per_query": { "type": "integer" },
+        "min_signal": { "type": "integer" },
+        "enrich_with_llm": { "type": "boolean" },
+        "timeout_seconds": { "type": "integer" },
+        "retries": { "type": "integer" },
+        "max_candidates_per_run": { "type": "integer" },
+        "seeds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "pillar": {
+            "type": "string",
+            "enum": ["money", "body", "home", "life", "tech"]
+          },
+          "type": {
+            "type": "string",
+            "enum": ["rss", "dom", "api"]
+          },
+          "priority": { "type": "integer" }
+        },
+        "required": ["name", "url", "pillar"]
+      }
+    }
+  },
+  "required": ["llm", "quality"]
+}
