@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import litellm
+from agents.density import audit_density
 from agents.eval_tracer import OpikTracer
 from agents.headroom_compressor import HeadroomCompressor
 from agents.humanizer import HUMAN_SCORE_THRESHOLD, EditorialHumanizer
@@ -240,12 +241,43 @@ class ReasoningEngine:
             critiques.append("Strengthen H2/H3 subheadings and ensure the opening paragraph answers the core search query directly.")
 
         # 3. Evidence, data, and numerical benchmarks (0-25)
-        has_numbers_or_pct = bool(re.search(r"(\$\d[\d,]*|\b\d+(\.\d+)?%|\b\d+\s*(?:years|months|studies|products|participants|hours|days)\b)", content, re.IGNORECASE))
-        if has_numbers_or_pct:
-            score += 25
+        # T2.2 statistics density (target >= 10 stats / 1k words) +
+        # T2.3 named-entity density (target >= 15 distinct entities).
+        density = audit_density(content)
+        if density.stats_per_1k >= 10:
+            score += 20
+        elif density.stats_per_1k >= 6:
+            score += 14
+            critiques.append(
+                f"Statistics density is {density.stats_per_1k}/1k words (target >= 10). "
+                "Add primary-source figures (BLS, NIH, CFPB, Fed) with units."
+            )
+        elif density.stats_per_1k >= 3:
+            score += 8
+            critiques.append(
+                f"Statistics density is low ({density.stats_per_1k}/1k words vs target >= 10). "
+                "Inject empirical data points, percentages, and dollar benchmarks."
+            )
         else:
-            score += 10
-            critiques.append("Inject empirical data points, statistical percentages, or mathematical benchmarks.")
+            score += 3
+            critiques.append(
+                f"Statistics density is near zero ({density.stats_per_1k}/1k words vs "
+                "target >= 10). Add statistical percentages, dollar amounts, and "
+                "mathematical benchmarks from primary sources."
+            )
+        if density.entity_count >= 15:
+            score += 5
+        elif density.entity_count >= 10:
+            score += 3
+            critiques.append(
+                f"Named-entity count is {density.entity_count} (target >= 15). "
+                "Reference specific institutions, products, laws, and studies by name."
+            )
+        else:
+            critiques.append(
+                f"Named-entity count is very low ({density.entity_count} vs target >= 15). "
+                "Name the people, agencies, companies, and standards behind every claim."
+            )
 
         # 4. Anti-slop & actionable tone (0-25)
         found_slop = EditorialHumanizer.find_slop_words(content)
