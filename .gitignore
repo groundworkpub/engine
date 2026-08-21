@@ -9,3 +9,4 @@ agents/input/*.csv
 *.log
 .DS_Store
 state/
+.cache/
