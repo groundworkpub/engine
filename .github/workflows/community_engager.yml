@@ -1,0 +1,57 @@
+name: Community Answer Engine — Discovery & Approval Queue
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_drafts:
+        description: "Max drafts to queue this run"
+        required: false
+        default: "3"
+  schedule:
+    - cron: "30 13 * * *" # daily 13:30 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: community-engager
+  cancel-in-progress: false
+
+jobs:
+  engage:
+    name: Discover & Draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install httpx litellm json_repair
+
+      - name: Restore engagement state
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: state/
+          key: community-engager-${{ github.run_id }}
+          restore-keys: |
+            community-engager-
+
+      - name: Process approvals & discover new threads
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_FOUNDER_CHAT_ID: ${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+        run: |
+          python agents/community_engager.py \
+            --max-drafts "${{ github.event.inputs.max_drafts || '3' }}"

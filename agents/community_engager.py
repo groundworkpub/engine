@@ -233,11 +233,23 @@ async def discover_hn(client: httpx.AsyncClient, cluster: str, queries: list[str
     return candidates
 
 
+def _cluster_relevance(title: str, terms: list[str]) -> float:
+    """Fraction-based phrase overlap using exact word tokens (substring-safe)."""
+    title_words = set(re.findall(r"[a-z0-9]+", title.lower()))
+    hits = 0.0
+    for term in terms:
+        term_words = [w for w in re.findall(r"[a-z0-9]+", term) if len(w) >= 3]
+        if not term_words:
+            continue
+        matched = sum(1 for w in term_words if w in title_words)
+        hits += matched / len(term_words)
+    return min(hits, 5.0)
+
+
 def score_candidate(c: ThreadCandidate) -> float:
-    text = f"{c.title}"
     cluster_terms = KEYWORD_CLUSTERS.get(c.matched_cluster, [])
-    term_hits = sum(1 for t in cluster_terms if any(w in text.lower() for w in t.split()))
-    question_signal = 1.5 if QUESTION_SIGNALS.search(text) else 0.0
+    term_hits = _cluster_relevance(c.title, cluster_terms)
+    question_signal = 1.5 if QUESTION_SIGNALS.search(c.title) else 0.0
     engagement = min((c.num_comments + c.score) / 50.0, 2.0)
     age_days = max((time.time() - c.created_utc) / 86400, 0.01) if c.created_utc else 30.0
     freshness = max(0.0, 1.0 - age_days / 7)
@@ -312,7 +324,81 @@ def build_clients() -> tuple[httpx.AsyncClient, httpx.AsyncClient]:
     return httpx.AsyncClient(**base), httpx.AsyncClient(**base)
 
 
+CB_PATTERN = re.compile(r"^(approve|reject)_answer:(.+)$")
+
+
+async def process_pending_callbacks() -> int:
+    """Drain Telegram approve/reject callback queries and update draft state.
+
+    Returns the number of updates consumed. Safe to run before every discovery
+    cycle so approval decisions made between runs are never lost.
+    """
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return 0
+    state = load_state()
+    offset = int(state.get("tg_update_offset", 0))
+    processed = 0
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.get(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+                params={
+                    "allowed_updates": json.dumps(["callback_query"]),
+                    "offset": offset,
+                    "timeout": 0,
+                },
+            )
+            if res.status_code != 200:
+                return 0
+            for update in res.json().get("result", []):
+                state["tg_update_offset"] = int(update["update_id"]) + 1
+                cb = update.get("callback_query") or {}
+                match = CB_PATTERN.match(cb.get("data", ""))
+                if not match or cb.get("data") == "noop":
+                    continue
+                action, draft_id = match.groups()
+                draft = state.get("drafts", {}).get(draft_id)
+                if not draft:
+                    continue
+                approved = action == "approve"
+                draft["status"] = "approved" if approved else "rejected"
+                if approved:
+                    key = f"{draft['platform']}:{today_key()}"
+                    counts = state.setdefault("daily_counts", {})
+                    counts[key] = int(counts.get(key, 0)) + 1
+                await client.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cb.get("id", "")},
+                )
+                msg = cb.get("message") or {}
+                chat_id, message_id = msg.get("chat", {}).get("id"), msg.get("message_id")
+                if chat_id and message_id:
+                    await client.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup",
+                        json={
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "reply_markup": {
+                                "inline_keyboard": [
+                                    [
+                                        {
+                                            "text": "✅ Approved — paste manually" if approved else "❌ Rejected",
+                                            "callback_data": "noop",
+                                        }
+                                    ]
+                                ]
+                            },
+                        },
+                    )
+                processed += 1
+    except Exception:
+        return processed
+    save_state(state)
+    return processed
+
+
 async def run(max_drafts: int = MAX_DRAFTS_PER_RUN) -> list[AnswerDraft]:
+    await process_pending_callbacks()
     state = load_state()
     seen: dict[str, Any] = state.setdefault("seen_threads", {})
     all_candidates: list[ThreadCandidate] = []
