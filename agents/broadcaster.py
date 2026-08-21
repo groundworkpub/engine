@@ -26,7 +26,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from agents.authority_injector import _load_env_local, get_supabase_client
-from agents.gsc_manager import list_gsc_sites, submit_gsc_sitemap
+from agents.gsc_manager import submit_gsc_sitemap
 from agents.podcast_syndicator import ping_podcast_index_hub
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")

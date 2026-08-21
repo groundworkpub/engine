@@ -216,7 +216,7 @@ def match_groundwork_resource(
     search_query = generate_search_query(title)
     search_url = f"{SITE_URL}/search?q={urllib.parse.quote_plus(search_query)}"
     wire_url = f"{SITE_URL}/wire"
-    
+
     author_name = "Groundwork Editorial"
     author_url = f"{SITE_URL}"
     subscribe_url = f"{SITE_URL}/subscribe"
