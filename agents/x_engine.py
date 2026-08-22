@@ -326,28 +326,47 @@ class XEngine:
 
     # ── browser session ──────────────────────────────────────────────────────
 
-    def _resolve_proxy(self) -> str | None:
-        """Explicit X_PROXY_URL wins; else sticky DataImpulse residential (same IP on any machine)."""
-        if self.proxy_url:
-            return self.proxy_url
-        try:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from egress_dataimpulse import DataImpulseProxyRouter
+    def _resolve_proxy(self) -> tuple[str, str | None, str | None] | None:
+        """Explicit X_PROXY_URL wins; else sticky DataImpulse residential (same IP on any machine).
 
+        Returns (server, username, password); Playwright rejects credentials
+        embedded in the server URL, so they are split out here."""
+        target = self.proxy_url
+        if not target:
+            login = os.getenv("DATAIMPULSE_LOGIN")
+            pwd = os.getenv("DATAIMPULSE_PASSWORD")
+            if not login or not pwd:
+                logger.warning("No residential proxy configured; using direct egress")
+                return None
             session_id = os.getenv("X_STICKY_SESSION_ID", "gworky-x-01")
-            return DataImpulseProxyRouter.get_proxy_url(country="us", session_id=session_id)
-        except Exception as exc:  # noqa: BLE001 - direct egress better than crash
-            logger.warning("Residential proxy unavailable (%s); using direct egress", exc)
-            return None
+            host = os.getenv("DATAIMPULSE_HOST", "gw.dataimpulse.com")
+            port = os.getenv("DATAIMPULSE_PORT", "823")
+            target = f"http://{login}__cr.us__sessid.{session_id}:{pwd}@{host}:{port}"
+        parsed = urllib.parse.urlparse(target)
+        return (
+            f"{parsed.scheme or 'http'}://{parsed.hostname}:{parsed.port}",
+            parsed.username,
+            parsed.password,
+        )
 
     def _open_session(self):
         from playwright.sync_api import sync_playwright
 
         self._pw = sync_playwright().start()
         launch_kwargs: dict[str, Any] = {"headless": True}
-        proxy_target = self._resolve_proxy()
-        if proxy_target:
-            launch_kwargs["proxy"] = {"server": proxy_target}
+        proxy_resolved = self._resolve_proxy()
+        if proxy_resolved:
+            server, p_user, p_pass = proxy_resolved
+            proxy_cfg: dict[str, Any] = {"server": server}
+            if p_user:
+                proxy_cfg["username"] = p_user
+                proxy_cfg["password"] = p_pass or ""
+            launch_kwargs["proxy"] = proxy_cfg
+            logger.info(
+                "Egress: residential proxy %s (user=%s…)",
+                server,
+                (p_user or "")[:12],
+            )
         self._browser = self._pw.chromium.launch(**launch_kwargs)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         context = self._browser.new_context(
