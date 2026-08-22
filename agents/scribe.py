@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
+# Hard bound on any single LLM inference call. Prevent a hung provider from
+# stalling the whole pipeline indefinitely (GitHub Actions step has no per-LLM
+# quota). LiteLLM default request_timeout is None (wait forever) — this is the
+# root cause of the "Run Groundwork Content Pipeline" step hanging ~25min+.
+LLM_CALL_TIMEOUT_SECONDS = float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "90"))
+
 # ─── Autonomous Learning Loop (§5 review) ──────────────────────────────────
 
 def fetch_learning_signals(supabase: Any) -> str:
@@ -491,6 +497,9 @@ def call_llm_with_fallback(
                     ],
                     "temperature": temperature,
                     "max_tokens": max_tokens,
+                    # LiteLLM's per-request timeout for the upstream provider.
+                    # Prevents a hung/rate-limited provider from stalling the run.
+                    "request_timeout": LLM_CALL_TIMEOUT_SECONDS,
                 }
                 if not skip_json_format and attempt == 0:
                     kwargs["response_format"] = {"type": "json_object"}
