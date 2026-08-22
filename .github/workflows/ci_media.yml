@@ -1,0 +1,62 @@
+name: CI (media mirror)
+
+# Groundworkpub/media is a PRIVATE repo whose GitHub Actions minutes are
+# exhausted. This public-repo mirror runs the media quality gate nightly and
+# on demand by checking the private repo out with a scoped token.
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # nightly, off-peak
+  workflow_dispatch:
+
+concurrency:
+  group: ci-media-mirror
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Type-check + Lint + Tests (media)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout media (private)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Groundworkpub/media
+          ref: main
+          token: ${{ secrets.MEDIA_CI_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+      - name: Secret scan (gitleaks)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz -C /tmp
+          /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner --redact
+
+      - name: Type check (TS)
+        run: npm run type-check
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Format check (Prettier)
+        run: npm run format:check
+
+      - name: Unit tests (Vitest)
+        run: npm test
+
+      # Next.js production build is validated by Vercel on every push.
