@@ -16,7 +16,7 @@ jobs:
   run-pipeline:
     name: Scouter → Critic → Scribe
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -177,7 +177,13 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SITE_URL: "https://gworky.com"
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DATAIMPULSE_LOGIN: ${{ secrets.DATAIMPULSE_LOGIN }}
+          DATAIMPULSE_PASSWORD: ${{ secrets.DATAIMPULSE_PASSWORD }}
+          DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
+          DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
         run: PYTHONPATH=. python agents/organic_simulator.py --limit=4
 
   proactive-hunter-outreach:
