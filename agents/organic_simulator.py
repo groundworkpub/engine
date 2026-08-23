@@ -159,20 +159,22 @@ def _build_stealth_script(persona: BrowserPersona) -> str:
 
 
 def _get_playwright(engine: str):
-    """Return the async_playwright entrypoint for the requested engine.
+    """Return (async_playwright_entrypoint, extra_launch_kwargs) for the engine.
 
-    ``patchright`` is a drop-in Playwright API fork (system Chrome w/ stealth
-    patches) — same ``async_playwright`` surface. The experimental engines
-    (nodriver/camoufox) use a different API and are intentionally NOT wired
-    here yet; they raise a clear error so no silent wrong-engine behaviour.
+    ``patchright`` is a drop-in Playwright API fork. The 2026 benchmark shows
+    the real lever is the browser channel, not the patch: running the SYSTEM
+    Chrome (``channel="chrome"``) exposes real plugin/chrome objects that a
+    bundled patched fork hides. So patchright launches with ``channel="chrome"``
+    by default, falling back to its bundled patched Chromium if system Chrome is
+    unavailable. nodriver/camoufox use a different API and are NOT wired yet.
     """
     if engine in ("playwright", "patchright"):
         try:
             if engine == "patchright":
                 from patchright.async_api import async_playwright as pw
-            else:
-                from playwright.async_api import async_playwright as pw
-            return pw
+                return pw, {"channel": "chrome"}
+            from playwright.async_api import async_playwright as pw
+            return pw, {}
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError(
                 f"Engine '{engine}' requested but its library is not installed. "
@@ -600,10 +602,12 @@ class AdvancedOrganicSimulator:
         )
 
         try:
-            async with _get_playwright(self._engine)() as p:
+            _driver, _extra_launch_kwargs = _get_playwright(self._engine)
+            async with _driver() as p:
                 launch_kwargs: dict[str, Any] = {
                     "headless": True,
                     "args": stealth_launch_args(),
+                    **_extra_launch_kwargs,
                 }
                 if self.proxy_url:
                     launch_kwargs["proxy"] = {"server": self.proxy_url}
@@ -920,8 +924,6 @@ async def main() -> None:
             except Exception as e:
                 logger.debug(f"Benchmark proxy fallback: {e}")
 
-        from playwright.async_api import async_playwright
-
         # ── SOV Benchmark: brand share-of-voice vs big brands (no browser) ────────
         if args.benchmark == "sov":
             import json
@@ -970,12 +972,14 @@ async def main() -> None:
 
         passed_total = 0
         failed_total = 0
+        _bench_driver, _bench_extra = _get_playwright(effective_engine)
         for persona in random.sample(TIER1_PERSONAS, k=min(3, len(TIER1_PERSONAS))):
             logger.info(f"\n=== BENCHMARK — Persona: {persona.name} ({persona.platform}) ===")
-            async with async_playwright() as p:
+            async with _bench_driver() as p:
                 launch_kwargs: dict[str, Any] = {
                     "headless": True,
                     "args": stealth_launch_args(),
+                    **_bench_extra,
                 }
                 if benchmark_proxy:
                     launch_kwargs["proxy"] = {"server": benchmark_proxy}

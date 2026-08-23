@@ -16,6 +16,7 @@ boto3>=1.34.0
 pyjwt>=2.8.0
 cryptography>=42.0.0
 playwright>=1.40.0
+patchright>=1.62.0
 json-repair>=0.63.2
 socksio>=1.0.0
 fastembed>=0.4.0
