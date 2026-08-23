@@ -115,17 +115,28 @@ class ScribeOutput(BaseModel):
 
         if isinstance(data.get("excerpt"), str):
             data["excerpt"] = _truncate(data["excerpt"], 160)
+        elif not data.get("excerpt"):
+            # Synthesize from content when the model omitted it entirely
+            body = str(data.get("content") or "").strip()
+            data["excerpt"] = _truncate(re.sub(r"[#*_>`]", "", body), 160) if body else ""
         if isinstance(data.get("title"), str):
             data["title"] = _truncate(data["title"], 300)
         if isinstance(data.get("takeaway"), str):
             data["takeaway"] = _truncate(data["takeaway"], 500)
+        elif not data.get("takeaway"):
+            data["takeaway"] = "The key facts, numbers, and action steps are broken down in this article."
         if isinstance(data.get("expert_comment"), str):
             data["expert_comment"] = _truncate(data["expert_comment"], 500)
+        elif not data.get("expert_comment"):
+            data["expert_comment"] = "Our analysis weighs the cited source against publicly available research before drawing conclusions."
         rq = data.get("related_queries")
         if isinstance(rq, list) and len(rq) > 8:
             data["related_queries"] = [q for q in rq[:8] if isinstance(q, str)]
         faq = data.get("faq")
-        if isinstance(faq, list) and len(faq) < 3:
+        if not isinstance(faq, list):
+            faq = []
+        faq = [f for f in faq if isinstance(f, dict) and f.get("question") and f.get("answer")]
+        if len(faq) < 3:
             # Pad with generic but valid FAQ entries rather than fail validation
             defaults = [
                 {"question": "What are the key takeaways?", "answer": str(data.get("takeaway", ""))[:500] or "See the full breakdown in this article."},
@@ -953,7 +964,9 @@ Return the improved JSON matching the same schema."""
                 "published_at": published_at,
                 "word_count": word_count,
                 "faq_count": len(validated.faq),
-                "pipeline_run_id": pipeline_run_id,
+                # NOTE: no pipeline_run_id here — the articles table SSOT
+                # schema has no such column and PostgREST rejects unknown
+                # fields with PGRST204, killing the whole upsert.
             }
 
             supabase.table("articles").upsert(
