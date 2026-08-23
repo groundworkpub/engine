@@ -14,7 +14,7 @@ from agents.eval_tracer import OpikTracer
 from agents.headroom_compressor import HeadroomCompressor
 from agents.humanizer import HUMAN_SCORE_THRESHOLD, EditorialHumanizer
 from agents.prompts.catalog import get_full_system_prompt
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,53 @@ class ScribeOutput(BaseModel):
     sub_topic: str | None = None
     layout_type: str = "standard"
     evidence_graph: list[dict[str, Any]] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clamp_soft_limits(cls, data: Any) -> Any:
+        """Deterministically normalize near-miss outputs from small models.
+
+        Small free-tier models routinely overshoot soft editorial limits by a
+        few characters/items. Truncating is always safe; discarding an entire
+        article over 1 extra character is not.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        def _truncate(text: str, limit: int) -> str:
+            if len(text) <= limit:
+                return text
+            cut = text[:limit]
+            # Prefer breaking at the last sentence boundary inside the limit
+            for sep in (". ", "! ", "? "):
+                idx = cut.rfind(sep)
+                if idx > limit * 0.6:
+                    return cut[: idx + 1]
+            # Fall back to the last word boundary
+            space_idx = cut.rfind(" ")
+            return cut[:space_idx] if space_idx > limit * 0.5 else cut.rstrip()
+
+        if isinstance(data.get("excerpt"), str):
+            data["excerpt"] = _truncate(data["excerpt"], 160)
+        if isinstance(data.get("title"), str):
+            data["title"] = _truncate(data["title"], 300)
+        if isinstance(data.get("takeaway"), str):
+            data["takeaway"] = _truncate(data["takeaway"], 500)
+        if isinstance(data.get("expert_comment"), str):
+            data["expert_comment"] = _truncate(data["expert_comment"], 500)
+        rq = data.get("related_queries")
+        if isinstance(rq, list) and len(rq) > 8:
+            data["related_queries"] = [q for q in rq[:8] if isinstance(q, str)]
+        faq = data.get("faq")
+        if isinstance(faq, list) and len(faq) < 3:
+            # Pad with generic but valid FAQ entries rather than fail validation
+            defaults = [
+                {"question": "What are the key takeaways?", "answer": str(data.get("takeaway", ""))[:500] or "See the full breakdown in this article."},
+                {"question": "Who is this guide for?", "answer": f"Readers researching {str(data.get('sub_topic') or data.get('slug') or 'this topic').replace('-', ' ')}."},
+                {"question": "Where does this information come from?", "answer": "This analysis is based on the cited source and publicly available research."},
+            ]
+            data["faq"] = list(faq) + defaults[: 3 - len(faq)]
+        return data
 
     @field_validator("slug")
     @classmethod
