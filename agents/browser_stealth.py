@@ -298,3 +298,72 @@ def export_stealth_contract() -> dict[str, Any]:
         "benchmark_targets": BENCHMARK_TARGETS,
         "launch_args": stealth_launch_args(),
     }
+
+
+# ── Browser Engine Selector (2026 benchmark-driven) ─────────────────────────
+# Empirical anti-detection benchmark (I. Paterson, 651 verdicts / 31 CF targets):
+#   nodriver             28 OK / 0 blocked (system Chrome via raw CDP — best)
+#   patchright(ch=chrome) 25 OK / 3 blocked (Playwright API, system Chrome)
+#   camoufox (Firefox)    25 OK / 3 blocked (engine-level, ~700MB, Firefox-only)
+#   vanilla playwright    24 OK / 5 blocked (current default — weakest)
+#
+# Groundwork keeps Playwright as the DEFAULT engine for safety, and exposes the
+# selector so operators can opt into stronger engines per persona/target without
+# breaking the stable Playwright code path.
+ENGINE_PLAYWRIGHT = "playwright"
+ENGINE_PATCHRIGHT = "patchright"
+ENGINE_NODRIVER = "nodriver"
+ENGINE_CAMOUFOX = "camoufox"
+
+# Valid engines (also the union accepted by `--engine`).
+SUPPORTED_ENGINES: tuple[str, ...] = (
+    ENGINE_PLAYWRIGHT,
+    ENGINE_PATCHRIGHT,
+    ENGINE_NODRIVER,
+    ENGINE_CAMOUFOX,
+)
+
+# Default engine when none is explicitly requested.
+DEFAULT_ENGINE = ENGINE_PLAYWRIGHT
+
+# Persona-based engine hint: Firefox personas are the natural fit for Camoufox;
+# Chrome/Safari personas prefer nodriver or patchright. This is only a hint —
+# the operator can always force an engine via `--engine`.
+def recommended_engine_for(persona: dict[str, Any] | None = None) -> str:
+    """Return the engine best matching a persona (best-effort hint)."""
+    if not persona:
+        return DEFAULT_ENGINE
+    ua = str(persona.get("user_agent", ""))
+    is_firefox = "firefox" in ua.lower()
+    if is_firefox:
+        return ENGINE_CAMOUFOX
+    # Chrome/Chromium/Safari (the majority of personas) are best served by the
+    # Playwright code path unless the operator opts into a stealth engine.
+    return DEFAULT_ENGINE
+
+
+def validate_engine(engine: str) -> str:
+    """Validate a requested engine string; returns the canonical name.
+
+    Raises ValueError for unknown engines so callers fail loudly on typo'd flags
+    rather than silently falling back to Playwright.
+    """
+    if engine not in SUPPORTED_ENGINES:
+        raise ValueError(
+            f"Unknown browser engine '{engine}'. Supported: {', '.join(SUPPORTED_ENGINES)}"
+        )
+    return engine
+
+
+def get_engine(
+    requested: str | None = None,
+    persona: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the effective browser engine for a session.
+
+    Priority: explicit `requested` (validated) > persona hint > DEFAULT_ENGINE.
+    """
+    if requested:
+        return validate_engine(requested)
+    return recommended_engine_for(persona)
+

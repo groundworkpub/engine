@@ -21,14 +21,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from supabase import create_client
+
 from browser_stealth import (
     AD_BLOCK_DOMAINS,
     BENCHMARK_TARGETS,
     build_stealth_script,
     domain_is_blocked,
+    get_engine,
     stealth_launch_args,
 )
-from supabase import create_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -153,6 +155,33 @@ def _build_stealth_script(persona: BrowserPersona) -> str:
         is_mobile=persona.is_mobile,
         is_firefox="Firefox" in persona.user_agent,
         session_seed=f"{persona.name}-{persona.city}",
+    )
+
+
+def _get_playwright(engine: str):
+    """Return the async_playwright entrypoint for the requested engine.
+
+    ``patchright`` is a drop-in Playwright API fork (system Chrome w/ stealth
+    patches) — same ``async_playwright`` surface. The experimental engines
+    (nodriver/camoufox) use a different API and are intentionally NOT wired
+    here yet; they raise a clear error so no silent wrong-engine behaviour.
+    """
+    if engine in ("playwright", "patchright"):
+        try:
+            if engine == "patchright":
+                from patchright.async_api import async_playwright as pw
+            else:
+                from playwright.async_api import async_playwright as pw
+            return pw
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                f"Engine '{engine}' requested but its library is not installed. "
+                f"pip install {'patchright' if engine == 'patchright' else 'playwright'}"
+            ) from exc
+
+    raise RuntimeError(
+        f"Engine '{engine}' is not yet wired in the simulator (playwright/patchright "
+        "only). Install + adapter required for nodriver/camoufox.",
     )
 
 
@@ -519,12 +548,14 @@ class AdvancedOrganicSimulator:
     """
 
     def __init__(
-        self, supabase: Any, dry_run: bool = False, use_browser: bool = False, proxy_url: str | None = None
+        self, supabase: Any, dry_run: bool = False, use_browser: bool = False, proxy_url: str | None = None, engine: str | None = None
     ) -> None:
         self.supabase = supabase
         self.dry_run = dry_run
         self.use_browser = use_browser
         self.proxy_url = proxy_url or os.environ.get("SIMULATOR_PROXY_URL")
+        # Engine resolved at construction (validated); default = playwright.
+        self._engine = get_engine(engine)
 
     def resolve_proxy(self, geo_region: str, session_id: str) -> str | None:
         if self.proxy_url:
@@ -554,8 +585,6 @@ class AdvancedOrganicSimulator:
         referral: ReferralContext,
     ) -> SessionTelemetry:
         """Runs a full-DOM Playwright session with CDP stealth and AdSense firewall."""
-        from playwright.async_api import async_playwright
-
         session_id = f"gw_sess_{uuid.uuid4().hex[:12]}"
         telemetry = SessionTelemetry(
             session_id=session_id,
@@ -571,7 +600,7 @@ class AdvancedOrganicSimulator:
         )
 
         try:
-            async with async_playwright() as p:
+            async with _get_playwright(self._engine)() as p:
                 launch_kwargs: dict[str, Any] = {
                     "headless": True,
                     "args": stealth_launch_args(),
@@ -865,7 +894,17 @@ async def main() -> None:
         action="store_true",
         help="Use DataImpulse residential egress during benchmark (US geo)",
     )
+    parser.add_argument(
+        "--engine",
+        type=str,
+        default=None,
+        choices=["playwright", "patchright", "nodriver", "camoufox"],
+        help="Browser stealth engine (default: playwright). patchright/nodriver/camoufox are experimental (2026 benchmark) — patchright keeps the Playwright API.",
+    )
     args = parser.parse_args()
+
+    effective_engine = get_engine(args.engine, persona=None)
+    logger.info("🔧 Browser engine selected: %s", effective_engine)
 
     # ── Benchmark Mode: fingerprint verification against detection suites ──────
     if args.benchmark:
@@ -1031,6 +1070,7 @@ async def main() -> None:
         dry_run=args.dry_run,
         use_browser=args.browser,
         proxy_url=proxy_url,
+        engine=args.engine,
     )
 
     targets = resolve_simulation_targets(supabase, limit=args.limit, specific_slug=args.slug)
