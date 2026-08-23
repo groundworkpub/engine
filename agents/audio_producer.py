@@ -632,10 +632,12 @@ Return strict JSON matching schema:
 
         # 4. Render Audio Dialogue
         duration_sec, duration_formatted = await self.render_dialogue_audio(script, mp3_path)
-        file_size = os.path.getsize(mp3_path) if os.path.exists(mp3_path) else 0
 
-        # 5. Embed ID3 Tags
+        # 5. Embed ID3 Tags (must run BEFORE measuring file_size — embedded
+        #    cover art changes the byte length reported in RSS enclosures;
+        #    a stale value makes YouTube/podcast importers fail the transfer)
         self.embed_id3_tags(mp3_path, title, pillar, cover_path)
+        file_size = os.path.getsize(mp3_path) if os.path.exists(mp3_path) else 0
 
         # 6. Render Video Audiogram (optional)
         video_url = None
