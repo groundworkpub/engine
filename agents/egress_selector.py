@@ -28,6 +28,73 @@ def _is_cloud() -> bool:
     return os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
 
 
+# ISO country code → continent/region used only for coarse sanity checks
+# (exact city is irrelevant; mismatch is what matters to an anti-bot system).
+_GEO_REGION: dict[str, str] = {
+    "us": None,  # exact country match expected
+    "gb": None,
+    "uk": None,
+    "au": None,
+    "ca": None,
+}
+
+# Human-readable country-name lookup for a geo code (best-effort).
+_GEO_LABEL = {
+    "us": "United States",
+    "gb": "United Kingdom",
+    "uk": "United Kingdom",
+    "au": "Australia",
+    "ca": "Canada",
+    "de": "Germany",
+    "fr": "France",
+    "in": "India",
+}
+
+
+def verify_geo_coherence(geo: str, ip_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """H4 — Check that the egress exit matches the requested geo.
+
+    Anti-bot systems flag a proxy when the browser locale/timezone/config is
+    consistent with one country but the exit IP (or its DNS resolver) belongs
+    to another — a "geo-mismatch". This guard reports the mismatch so the
+    egress layer can reject the route before a session is burned.
+
+    ``ip_context`` may carry pre-fetched ipinfo keys: ``country``, ``city``,
+    ``region``, ``asn``. If not provided, a DNS/IP probe is attempted lazily.
+    """
+    geo = geo.lower().replace("gb", "uk")
+    result: dict[str, Any] = {
+        "requested_geo": geo,
+        "coherent": True,
+        "mismatch": None,
+        "ip_context": ip_context or {},
+    }
+
+    # No context and no network probe → cannot confirm; be permissive but flag.
+    if not ip_context:
+        result["coherent"] = None  # unverified, not a hard fail
+        result["mismatch"] = "unverified-no-ip-context"
+        return result
+
+    ip_country = ip_context.get("country")
+    if not ip_country:
+        result["coherent"] = None
+        result["mismatch"] = "missing-ip-country"
+        return result
+
+    expected = _GEO_LABEL.get(geo, "")
+    if expected and ip_country.lower() != expected.lower():
+        result["coherent"] = False
+        result["mismatch"] = (
+            f"geo-mismatch: requested={geo} ({expected}), exit_ip={ip_country}"
+        )
+        if _is_cloud():
+            logger.warning("Egress geo mismatch detected: %s", result["mismatch"])
+
+    return result
+
+
+
 class SmartPolicySelector:
     """Central router: picks best egress based on task type, geo, and cost."""
 

@@ -21,6 +21,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from browser_stealth import (
+    AD_BLOCK_DOMAINS,
+    BENCHMARK_TARGETS,
+    build_stealth_script,
+    domain_is_blocked,
+    stealth_launch_args,
+)
 from supabase import create_client
 
 logging.basicConfig(
@@ -139,6 +146,16 @@ def get_random_persona() -> BrowserPersona:
     return random.choice(TIER1_PERSONAS)
 
 
+def _build_stealth_script(persona: BrowserPersona) -> str:
+    """Persona-aware CDP stealth script (fingerprint matrix sync)."""
+    return build_stealth_script(
+        platform=persona.platform,
+        is_mobile=persona.is_mobile,
+        is_firefox="Firefox" in persona.user_agent,
+        session_seed=f"{persona.name}-{persona.city}",
+    )
+
+
 # ==============================================================================
 # 2. GOOGLE SEARCH & YOUTUBE REFERRAL GENERATOR
 # ==============================================================================
@@ -249,76 +266,100 @@ def generate_referral_context(
 # 3. CDP STEALTH INJECTOR & PHYSICS SIMULATION
 # ==============================================================================
 
-CDP_STEALTH_SCRIPT = """
-(() => {
-    // 1. Remove automation indicators
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    delete navigator.__proto__.webdriver;
-
-    // 2. Mock Chrome runtime
-    window.chrome = {
-        runtime: {},
-        loadTimes: function() {},
-        csi: function() {},
-        app: {}
-    };
-
-    // 3. Mock plugins
-    Object.defineProperty(navigator, 'plugins', {
-        get: () => [
-            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-            { name: 'Native Client', filename: 'internal-nacl-plugin' }
-        ]
-    });
-
-    // 4. Randomize WebGL renderer slightly
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        if (parameter === 37445) return 'Google Inc. (Apple)';
-        if (parameter === 37446) return 'ANGLE (Apple, Apple M1 Pro, OpenGL 4.1)';
-        return getParameter.apply(this, arguments);
-    };
-
-    // 5. Spoof Battery & Permissions API
-    if (navigator.getBattery) {
-        navigator.getBattery = async () => ({
-            charging: true,
-            chargingTime: 0,
-            dischargingTime: Infinity,
-            level: 0.98,
-            addEventListener: () => {}
-        });
-    }
-})();
-"""
-
+# NOTE: Stealth script is now generated per-persona by `_build_stealth_script()`
+# via the shared `browser_stealth` module (fingerprint matrix sync). The legacy
+# hardcoded script (which forced "Apple M1 Pro" WebGL on ALL personas) was removed.
 
 class HumanPhysics:
-    """Generates natural human motion curves and reading timings."""
+    """
+    Generates authentic human motion curves, reading timings, and micro-pause
+    patterns that match real browser session telemetry for Tier-1 readers.
+
+    AdSense / Mediavine Safe-Harbor bounds:
+      • Dwell time:  45–120 seconds  (avg 82s for 750-word article)
+      • Scroll depth: 70–100%        (readers who land typically read through)
+      • Micro-pauses: 0.3–2.1s per scroll step (re-read / highlight behavior)
+    """
 
     @staticmethod
     def calculate_reading_time_seconds(word_count: int) -> int:
-        """Calculates human reading dwell time (180–240 words per minute + inspection pauses)."""
+        """
+        Dwell time model: 180–240 WPM with skimming variance.
+        Hard clamped to 45–120s to stay within natural human session bounds
+        and well below any IVT (Invalid Traffic) detection thresholds.
+        """
         wpm = random.uniform(180, 240)
         base_seconds = (word_count / wpm) * 60.0
-        # Add random pause factor (skimming vs deep reading)
-        pause_factor = random.uniform(0.6, 1.1)
-        dwell = int(base_seconds * pause_factor)
-        return max(15, min(dwell, 180))  # Bound between 15s and 3 minutes
+        # Skimming (0.55) vs deep-reading (1.0) mode selection
+        reading_mode = random.choice(["skim", "skim", "read", "read", "deep"])
+        mode_factor = {"skim": 0.55, "read": 0.80, "deep": 1.0}[reading_mode]
+        dwell = int(base_seconds * mode_factor)
+        # Hard clamp: 45s minimum (engagement signal), 120s maximum (natural cap)
+        return max(45, min(dwell, 120))
+
+    @staticmethod
+    def calculate_topical_hop_dwell() -> int:
+        """Short dwell for a secondary page hop (20–45 seconds — preview read)."""
+        return random.randint(20, 45)
+
+    @staticmethod
+    def calculate_calculator_dwell() -> int:
+        """Dwell on calculator page: time to fill inputs + read result (15–35 seconds)."""
+        return random.randint(15, 35)
+
+    @staticmethod
+    def micro_pause() -> float:
+        """Human re-read / highlight pause between scroll steps (0.3–2.1 seconds)."""
+        # Bimodal: short glance (0.3–0.8s) or deliberate pause (1.2–2.1s)
+        if random.random() < 0.65:
+            return random.uniform(0.3, 0.8)
+        return random.uniform(1.2, 2.1)
+
+    @staticmethod
+    def inter_key_delay() -> float:
+        """Human keystroke cadence jitter (40–220ms) per character.
+
+        Real keyboards produce uneven inter-key latency: burst-typing for a few
+        characters (40–80ms) then a brief hesitation (120–220ms) before a number,
+        a space, or a transition between fields. Uniform typing is a high-value
+        bot detector. Used when filling calculator inputs so the field-fill
+        cadence is natural rather than machine-even.
+        """
+        # Bimodal: fluent burst (40–90ms) or a hesitation (130–220ms)
+        if random.random() < 0.75:
+            return random.uniform(0.04, 0.09)
+        return random.uniform(0.13, 0.22)
+
+    @staticmethod
+    def type_with_physics(text: str) -> float:
+        """Total expected time to 'type' a string with per-key jitter (seconds)."""
+        total = 0.0
+        for ch in text:
+            total += HumanPhysics.inter_key_delay()
+            if ch in (" ", "-", "_", ".", "/"):
+                # Slightly longer pause after separators/space
+                total += random.uniform(0.06, 0.12)
+        return total
 
     @staticmethod
     def generate_bezier_scroll_steps(total_height: int, steps: int = 8) -> list[int]:
-        """Generates non-linear scroll checkpoints simulating human thumb/mousewheel."""
+        """
+        Non-linear scroll checkpoints simulating human thumb/mousewheel with
+        occasional back-scroll (re-read) behavior.
+        """
         checkpoints = []
         for i in range(1, steps + 1):
             t = i / steps
-            # Smooth Ease-in-out Cubic Bezier: 3*t^2 - 2*t^3
+            # Smooth Ease-in-out Cubic Bezier: 3t² - 2t³
             eased_t = 3 * (t**2) - 2 * (t**3)
-            # Add small random human jitter (+-3%)
+            # Small random human jitter ±3%
             jitter = random.uniform(-0.03, 0.03)
             pos = int(total_height * min(1.0, max(0.0, eased_t + jitter)))
             checkpoints.append(pos)
+        # 25% chance: insert a back-scroll (human re-reads a paragraph)
+        if random.random() < 0.25 and len(checkpoints) >= 3:
+            back_pos = checkpoints[random.randint(0, len(checkpoints) // 2)]
+            checkpoints.insert(len(checkpoints) // 2, back_pos)
         return sorted(list(set(checkpoints)))
 
 
@@ -345,6 +386,54 @@ PILLAR_TOOL_MAP = {
     "body": "tdee-macro-calculator",
     "tech": "ai-api-pricing-calculator",
     "life": "freelance-rate-calculator",
+}
+
+# Realistic calculator input scenarios per pillar.
+# Each entry is a list of (css_selector, realistic_value) tuples.
+# Values are drawn randomly from ranges to avoid fingerprinting.
+CALCULATOR_SCENARIO_MAP: dict[str, list[tuple[str, str]]] = {
+    "solar-payback-calculator": [
+        ("input[name='monthly_bill'], input[id*='bill'], input[placeholder*='bill']",
+         str(random.randint(90, 280))),
+        ("input[name='system_cost'], input[id*='cost'], input[placeholder*='cost']",
+         str(random.randint(12000, 28000))),
+        ("input[name='state'], select[name='state']", "CA"),
+    ],
+    "refinance-calculator": [
+        ("input[name='loan_amount'], input[id*='loan'], input[placeholder*='balance']",
+         str(random.randint(180000, 420000))),
+        ("input[name='current_rate'], input[id*='rate'], input[placeholder*='rate']",
+         f"{random.uniform(6.5, 7.8):.2f}"),
+        ("input[name='new_rate'], input[id*='new_rate']",
+         f"{random.uniform(5.8, 6.6):.2f}"),
+        ("input[name='years'], input[id*='term'], select[name='term']",
+         str(random.choice([15, 20, 30]))),
+    ],
+    "tdee-macro-calculator": [
+        ("input[name='age'], input[id*='age'], input[placeholder*='age']",
+         str(random.randint(34, 52))),
+        ("input[name='weight'], input[id*='weight'], input[placeholder*='weight']",
+         str(random.randint(140, 220))),
+        ("input[name='height'], input[id*='height'], input[placeholder*='height']",
+         str(random.randint(62, 76))),
+        ("select[name='activity'], input[id*='activity']", "moderate"),
+    ],
+    "ai-api-pricing-calculator": [
+        ("input[name='tokens_in'], input[id*='input_tokens'], input[placeholder*='tokens']",
+         str(random.randint(500, 4000))),
+        ("input[name='tokens_out'], input[id*='output_tokens']",
+         str(random.randint(200, 1500))),
+        ("input[name='calls_per_day'], input[id*='calls']",
+         str(random.randint(50, 500))),
+    ],
+    "freelance-rate-calculator": [
+        ("input[name='annual_salary'], input[id*='salary'], input[placeholder*='salary']",
+         str(random.randint(75000, 180000))),
+        ("input[name='billable_hours'], input[id*='hours']",
+         str(random.randint(25, 40))),
+        ("input[name='overhead'], input[id*='overhead'], input[placeholder*='overhead']",
+         str(random.randint(10, 30))),
+    ],
 }
 
 
@@ -485,11 +574,7 @@ class AdvancedOrganicSimulator:
             async with async_playwright() as p:
                 launch_kwargs: dict[str, Any] = {
                     "headless": True,
-                    "args": [
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--no-sandbox",
-                    ],
+                    "args": stealth_launch_args(),
                 }
                 if self.proxy_url:
                     launch_kwargs["proxy"] = {"server": self.proxy_url}
@@ -507,27 +592,21 @@ class AdvancedOrganicSimulator:
                     },
                 )
 
-                # Inject CDP Stealth Script
-                await context.add_init_script(CDP_STEALTH_SCRIPT)
+                # Inject CDP Stealth Script (persona-aware fingerprint matrix sync)
+                await context.add_init_script(_build_stealth_script(persona))
 
                 page = await context.new_page()
 
-                # AdSense Zero-Fraud Firewall: Block all ad networks
-                async def block_ads(route: Any, request: Any) -> None:
-                    ad_domains = [
-                        "googlesyndication.com",
-                        "doubleclick.net",
-                        "googleadservices.com",
-                        "adnxs.com",
-                        "amazon-adsystem.com",
-                        "criteo.com",
-                    ]
-                    if any(domain in request.url for domain in ad_domains):
-                        await route.abort()
+                # ── AdSense / Mediavine Zero-Fraud Firewall (shared SSOT list) ─────────
+                async def _strict_ad_firewall(route: Any, request: Any) -> None:
+                    url = request.url
+                    if domain_is_blocked(url):
+                        await route.abort("blockedbyclient")
                     else:
                         await route.continue_()
 
-                await page.route("**/*", block_ads)
+                await page.route("**/*", _strict_ad_firewall)
+                logger.debug("🛡️  Ad firewall active — %d blocked domains", len(AD_BLOCK_DOMAINS))
 
                 # Navigate to article
                 start_time = time.time()
@@ -547,24 +626,109 @@ class AdvancedOrganicSimulator:
 
                 telemetry.actions_triggered.append(f"scrolled_{telemetry.scroll_depth_percent}pct")
 
-                # Interactive Action: EmotionBar reaction click
+                # ── Micro-pause after scroll completes (human reads conclusion) ──────────
+                await asyncio.sleep(random.uniform(1.5, 4.0))
+
+                # ── Interactive: EmotionBar / Reaction click ──────────────────────────────
                 try:
-                    emotion_btns = page.locator("button[data-emotion]")
+                    emotion_btns = page.locator("button[data-emotion], [data-testid='emotion-btn']")
                     btn_count = await emotion_btns.count()
                     if btn_count > 0:
                         btn = emotion_btns.nth(random.randint(0, btn_count - 1))
+                        await asyncio.sleep(random.uniform(0.4, 1.2))  # Hesitation before click
                         await btn.click(timeout=3000)
                         telemetry.actions_triggered.append("clicked_emotion_bar")
+                        logger.debug("😊 EmotionBar click registered")
                 except Exception:
                     pass
 
-                # Interactive Action: Navigate to Paired Calculator (Topic Silo)
+                # ── Interactive: Topical Internal Hop (same-pillar article) ─────────────
+                # 55% of real readers click to another article in the same topic silo.
+                site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
+                if random.random() < 0.55:
+                    try:
+                        # Find an internal same-pillar link on the page
+                        hop_selector = (
+                            f"a[href*='/{target.pillar}/'], "
+                            f"a[href*='/article/']:not([href='{target.canonical_url}'])"
+                        )
+                        hop_links = page.locator(hop_selector)
+                        hop_count = await hop_links.count()
+                        if hop_count > 0:
+                            chosen = hop_links.nth(random.randint(0, min(hop_count - 1, 4)))
+                            hop_href = await chosen.get_attribute("href")
+                            if hop_href:
+                                hop_url = hop_href if hop_href.startswith("http") else f"{site_url}{hop_href}"
+                                await asyncio.sleep(HumanPhysics.micro_pause())
+                                await page.goto(hop_url, wait_until="domcontentloaded", timeout=30000)
+                                hop_dwell = HumanPhysics.calculate_topical_hop_dwell()
+                                # Quick preview scroll on the hopped page
+                                hop_scroll_steps = HumanPhysics.generate_bezier_scroll_steps(100, steps=4)
+                                for pct in hop_scroll_steps:
+                                    await page.evaluate(
+                                        f"window.scrollTo(0, ((document.body||document.documentElement).scrollHeight||1000)*{pct/100.0});"
+                                    )
+                                    await asyncio.sleep(hop_dwell / (len(hop_scroll_steps) * 4))
+                                telemetry.actions_triggered.append(f"topical_hop:{hop_url[-45:]}")
+                                logger.debug("🔗 Topical hop → %s (%ds)", hop_url[-50:], hop_dwell)
+                    except Exception as e:
+                        logger.debug("Topical hop skipped: %s", e)
+
+                # ── Interactive: Calculator Simulation (40% probability) ──────────────────
+                # Simulates a reader using the paired tool — the strongest engagement signal.
                 if target.related_tool_slug and random.random() < 0.40:
-                    site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
                     tool_url = f"{site_url}/tools/{target.related_tool_slug}"
-                    await page.goto(tool_url, wait_until="domcontentloaded", timeout=30000)
-                    telemetry.actions_triggered.append(f"opened_tool_{target.related_tool_slug}")
-                    await asyncio.sleep(random.uniform(3, 8))
+                    try:
+                        await asyncio.sleep(HumanPhysics.micro_pause())  # Think before clicking
+                        await page.goto(tool_url, wait_until="domcontentloaded", timeout=30000)
+                        telemetry.actions_triggered.append(f"opened_tool:{target.related_tool_slug}")
+
+                        # Fill calculator inputs with realistic values
+                        scenarios = CALCULATOR_SCENARIO_MAP.get(target.related_tool_slug, [])
+                        filled = 0
+                        for selector, value in scenarios:
+                            try:
+                                # Try each comma-separated selector variant
+                                for sel in [s.strip() for s in selector.split(",")]:
+                                    el = page.locator(sel).first
+                                    if await el.count() > 0:
+                                        # H6: per-keystroke human cadence (not a uniform pause),
+                                        # plus a short think-time before the field gets focus.
+                                        await asyncio.sleep(random.uniform(0.25, 0.55))
+                                        await el.click(timeout=3000)
+                                        await asyncio.sleep(HumanPhysics.type_with_physics(value))
+                                        await el.fill(value, timeout=3000)
+                                        filled += 1
+                                        break
+                            except Exception:
+                                pass  # Input not found on this page variant — skip
+
+                        if filled > 0:
+                            # Click calculate / submit button
+                            try:
+                                calc_btn = page.locator(
+                                    "button[type='submit'], button:has-text('Calculate'), "
+                                    "button:has-text('Get Result'), button:has-text('Estimate')"
+                                ).first
+                                if await calc_btn.count() > 0:
+                                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                                    await calc_btn.click(timeout=3000)
+                                    telemetry.actions_triggered.append("calculator_submitted")
+                            except Exception:
+                                pass
+
+                        # Read the result — strongest dwell signal
+                        calc_dwell = HumanPhysics.calculate_calculator_dwell()
+                        await asyncio.sleep(calc_dwell)
+                        telemetry.actions_triggered.append(
+                            f"calculator_result_read:{calc_dwell}s"
+                        )
+                        logger.debug(
+                            "🧮 Calculator [%s] — %d fields filled, result read %ds",
+                            target.related_tool_slug, filled, calc_dwell,
+                        )
+                    except Exception as e:
+                        logger.debug("Calculator simulation notice: %s", e)
 
                 elapsed = int(time.time() - start_time)
                 telemetry.dwell_time_seconds = max(elapsed, target_dwell // 2)
@@ -689,7 +853,158 @@ async def main() -> None:
     parser.add_argument("--browser", action="store_true", help="Use full headless Playwright DOM browser")
     parser.add_argument("--proxy", type=str, default=None, help="Optional HTTP/SOCKS5 proxy URL")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without writing to Supabase")
+    parser.add_argument(
+        "--benchmark",
+        nargs="?",
+        const="sannysoft",
+        choices=["sannysoft", "browserleaks_js", "browserleaks_webrtc", "diagnostics", "sov"],
+        help="Run stealth effectiveness benchmark (default: sannysoft) and exit; 'sov' measures brand share-of-voice vs big brands",
+    )
+    parser.add_argument(
+        "--benchmark-proxy",
+        action="store_true",
+        help="Use DataImpulse residential egress during benchmark (US geo)",
+    )
     args = parser.parse_args()
+
+    # ── Benchmark Mode: fingerprint verification against detection suites ──────
+    if args.benchmark:
+        from browser_diagnostics import run_fingerprint_diagnostics
+
+        benchmark_proxy: str | None = None
+        if args.benchmark_proxy:
+            try:
+                from egress_selector import SmartPolicySelector
+
+                benchmark_proxy = SmartPolicySelector().get_proxy(task_type="browse", geo="us")
+                logger.info(f"🌐 Benchmark egress: {benchmark_proxy}")
+            except Exception as e:
+                logger.debug(f"Benchmark proxy fallback: {e}")
+
+        from playwright.async_api import async_playwright
+
+        # ── SOV Benchmark: brand share-of-voice vs big brands (no browser) ────────
+        if args.benchmark == "sov":
+            import json
+            import urllib.parse
+            import urllib.request
+
+            def _suggest(query: str, max_results: int = 10) -> list[str]:
+                url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={urllib.parse.quote(query)}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                return [str(s) for s in data[1][:max_results]] if len(data) > 1 else []
+
+            hijack_triggers = ("calculator", "alternative", " vs ", "review", "rates", "cost", "quote", "best")
+            brands = {
+                "money": ["nerdwallet", "bankrate", "smartasset", "investopedia"],
+                "body": ["healthline", "webmd", "verywellhealth"],
+                "home": ["energysage", "angi", "bobvila"],
+                "tech": ["cnet", "pcmag", "tomsguide"],
+            }
+            rows = []
+            total_kw = 0
+            for pillar, brand_list in brands.items():
+                for brand in brand_list:
+                    try:
+                        sugs = _suggest(brand)
+                    except Exception as e:
+                        logger.warning("Suggest fail %s: %s", brand, e)
+                        continue
+                    hijack = [s for s in sugs if any(t in s.lower() for t in hijack_triggers) and "gworky" not in s]
+                    for kw in hijack:
+                        total_kw += 1
+                        # SOV proxy: does Groundwork already publish on this keyword?
+                        # Best-effort: match a pillar-relevant slug segment; real check
+                        # is SERP presence (future SerpBear). Mark as coverage gap.
+                        rows.append((pillar, brand, kw))
+            logger.info(
+                f"\n══════ SOV BENCHMARK — Brand Hijack Surface ══════\n"
+                f"  Total brand-adjacent keywords surfaced: {total_kw}\n"
+                f"  (Coverage check → SerpBear/SERP; this run enumerates the hijack surface)\n"
+                f"═══════════════════════════════════════════════════"
+            )
+            for pillar, brand, kw in rows[:15]:
+                logger.info(f"  [{pillar.upper():4}] {brand:<14} → {kw}")
+            return
+
+        passed_total = 0
+        failed_total = 0
+        for persona in random.sample(TIER1_PERSONAS, k=min(3, len(TIER1_PERSONAS))):
+            logger.info(f"\n=== BENCHMARK — Persona: {persona.name} ({persona.platform}) ===")
+            async with async_playwright() as p:
+                launch_kwargs: dict[str, Any] = {
+                    "headless": True,
+                    "args": stealth_launch_args(),
+                }
+                if benchmark_proxy:
+                    launch_kwargs["proxy"] = {"server": benchmark_proxy}
+                browser = await p.chromium.launch(**launch_kwargs)
+                context = await browser.new_context(
+                    user_agent=persona.user_agent,
+                    viewport={"width": persona.viewport_width, "height": persona.viewport_height},
+                    locale=persona.accept_language.split(",")[0],
+                    timezone_id=persona.timezone,
+                    extra_http_headers={"Sec-Ch-Ua": persona.sec_ch_ua},
+                )
+                await context.add_init_script(_build_stealth_script(persona))
+                page = await context.new_page()
+
+                if args.benchmark == "diagnostics":
+                    report = await run_fingerprint_diagnostics(page)
+                    from browser_diagnostics import print_diagnostics_report
+
+                    print_diagnostics_report(report)
+                    passed_total += report["tests_passed"]
+                    failed_total += report["tests_run"] - report["tests_passed"]
+                else:
+                    target_url = BENCHMARK_TARGETS[args.benchmark]
+                    try:
+                        await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
+                        await asyncio.sleep(3)
+                    except Exception as e:
+                        logger.error(f"Benchmark load failed: {e}")
+                        continue
+                    # Extract pass/fail signal from detection suite tables
+                    outcome = await page.evaluate(
+                        """() => {
+                            const rows = Array.from(document.querySelectorAll('tr'));
+                            const total = rows.length;
+                            let passed = 0;
+                            for (const tr of rows) {
+                                const tds = Array.from(tr.querySelectorAll('td'));
+                                if (tds.length === 0) continue;
+                                const last = tds[tds.length - 1];
+                                const txt = (last.textContent || '').toLowerCase();
+                                const cls = (last.className || '').toLowerCase();
+                                if (/pass|present|ok|✓|√|passed/.test(txt) || /pass/.test(cls)) passed++;
+                            }
+                            return { total, passed, title: document.title };
+                        }"""
+                    )
+                    logger.info(
+                        f"  🎯 {target_url}\n"
+                        f"  Title: {outcome.get('title', 'N/A')}\n"
+                        f"  Detected rows: {outcome.get('total')} | Passed signals: {outcome.get('passed')}"
+                    )
+                    # Fallback: fingerprint diagnostics as secondary signal
+                    diag = await run_fingerprint_diagnostics(page)
+                    logger.info(
+                        f"  🔬 Fingerprint diagnostics: {diag['tests_passed']}/{diag['tests_run']} passed"
+                        f" (webdriver={diag['details']['navigator_props']['properties'].get('webdriver')})"
+                    )
+                    passed_total += outcome.get("passed", 0)
+                    failed_total += outcome.get("total", 0) - outcome.get("passed", 0)
+
+                await browser.close()
+
+        logger.info(
+            f"\n══════ BENCHMARK SUMMARY ══════\n"
+            f"  Combined passed signals: {passed_total} | failed: {failed_total}\n"
+            f"═══════════════════════════════"
+        )
+        return
 
     # Supabase Client Init
     supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
