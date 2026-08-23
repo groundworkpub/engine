@@ -472,8 +472,137 @@ def find_related_articles(
     scored.sort(key=lambda x: x[0], reverse=True)
     return [art for _, art in scored[:top_n]]
 
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "is", "are",
+    "how", "what", "why", "when", "your", "you", "our", "we", "it", "its",
+    "with", "at", "by", "from", "that", "this", "guide", "best", "new",
+}
+
+# Words that must never START or END an anchor text — wrapping them reads
+# unnaturally ("[on Apple TV+ is]", "[challenge where]") and dilutes anchor SEO.
+_ANCHOR_EDGE_SW = {
+    "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at",
+    "for", "with", "from", "by", "is", "are", "was", "were", "be", "been",
+    "it", "its", "as", "that", "this", "these", "those", "where", "when",
+    "while", "if", "than", "then", "so", "such", "into", "about", "your",
+}
+
+
+def _topic_keywords(text: str) -> list[str]:
+    """Content-bearing words from a title, used to locate weave-in slots."""
+    return [w for w in re.findall(r"[a-z]+", text.lower()) if w not in _STOPWORDS and len(w) > 2]
+
+
+def _weave_link_into_prose(host_content: str, target_url: str, target_title: str) -> Optional[str]:
+    """Weave a contextual markdown link into an existing prose sentence.
+
+    Per §2.7 anti-spam rules this NEVER appends template sentences ("For related
+    guidance..."). Instead it finds the host sentence most similar to the target
+    topic and wraps an existing phrase of that sentence as the anchor text.
+    Returns updated content, or None when no natural slot exists.
+    """
+    target_kws = _topic_keywords(target_title)
+    if not target_kws:
+        return None
+
+    kw_set = set(target_kws)
+    # Ordered n-grams (4→2 words) of the target title for exact anchor phrases
+    ngrams: list[tuple[int, str]] = []
+    kws_len = len(target_kws)
+    for size in (4, 3, 2):
+        for i in range(kws_len - size + 1):
+            ngrams.append((size, " ".join(target_kws[i : i + size])))
+
+    paragraphs = host_content.split("\n\n")
+    best = None  # (score, para_idx, sent_start, sent_end, anchor_text)
+    for p_idx, para in enumerate(paragraphs):
+        p_strip = para.strip()
+        if (
+            not p_strip
+            or p_strip.startswith(("#", "```", "|", "-", ">"))
+            or "](" in para
+            or len(para) > 1200  # skip mega-paragraphs (likely tables/code)
+        ):
+            continue
+        for m in re.finditer(r"[^.!?]*[.!?]", para):
+            sentence = m.group(0)
+            low = sentence.lower()
+            overlap = sum(1 for w in re.findall(r"[a-z]+", low) if w in kw_set)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(target_kws), 1)
+            if best is None or score > best[0]:
+                best = (score, p_idx, m.start(), m.end(), sentence)
+
+    if not best or best[0] < 0.15:
+        return None
+
+    _, p_idx, s_start, s_end, sentence = best
+    para = paragraphs[p_idx]
+    low_sent = sentence.lower()
+
+    # 1) Prefer an existing multi-word phrase matching target n-grams.
+    #    Word-boundary + suffix absorption so plural/inflected forms
+    #    ("credits") are included in the anchor instead of cut mid-word.
+    #    N-grams derive from title content words, so edges are already clean.
+    anchor_span = None
+    for size, phrase in ngrams:
+        m = re.search(r"\b" + re.escape(phrase) + r"[a-z]{0,3}\b", low_sent)
+        if m:
+            anchor_span = (m.start(), m.end())
+            break
+
+    # 2) Fallback: wrap a run of consecutive CONTENT words containing the
+    #    strongest keyword hit. Never crosses clause punctuation (commas,
+    #    dashes) and never includes function words at the span edges — the
+    #    anchor stays grammatically self-contained ("airline fee credits",
+    #    not "on Apple TV+ is"). Nothing is deleted from the sentence.
+    if anchor_span is None:
+        hits = [(low_sent.find(w), w) for w in target_kws if low_sent.find(w) >= 0]
+        if not hits:
+            return None
+        hits.sort()
+        pos, word = hits[len(hits) // 2]
+        words_with_spans = [(mm.start(), mm.end()) for mm in re.finditer(r"[A-Za-z][A-Za-z'-]*", sentence)]
+        center = next((i for i, (a, b) in enumerate(words_with_spans) if a <= pos < b), None)
+        if center is None:
+            return None
+
+        def _is_content(i: int) -> bool:
+            w = words_with_spans[i]
+            tok = sentence[w[0] : w[1]].lower()
+            return tok not in _ANCHOR_EDGE_SW and tok not in _STOPWORDS
+
+        def _adjacent(i: int, j: int) -> bool:
+            return sentence[words_with_spans[i][1] : words_with_spans[j][0]] == " "
+
+        lo = hi = center
+        while hi - lo + 1 < 4 and lo > 0 and _adjacent(lo - 1, lo) and _is_content(lo - 1):
+            lo -= 1
+        while hi - lo + 1 < 4 and hi < len(words_with_spans) - 1 and _adjacent(hi, hi + 1) and _is_content(hi + 1):
+            hi += 1
+        anchor_span = (words_with_spans[lo][0], words_with_spans[hi][1])
+
+    a, b = anchor_span
+    anchor_text = sentence[a:b].strip(" ,.;:")
+    first_tok = anchor_text.split(" ")[0].strip(".,;:!?\"'").lower() if anchor_text else ""
+    last_tok = anchor_text.split(" ")[-1].strip(".,;:!?\"'").lower() if anchor_text else ""
+    if (
+        not anchor_text
+        or "\n" in anchor_text
+        or len(anchor_text.split()) < 2
+        or first_tok in _ANCHOR_EDGE_SW
+        or last_tok in _ANCHOR_EDGE_SW
+    ):
+        return None
+
+    linked_sentence = f"{sentence[:a]}[{anchor_text}]({target_url}){sentence[b:]}"
+    paragraphs[p_idx] = para[:s_start] + linked_sentence + para[s_end:]
+    return "\n\n".join(paragraphs)
+
+
 def inject_orphan_link(host_article: dict, target_article: dict, dry_run: bool) -> bool:
-    """Inject a contextual anchor link to target_article distributed naturally across host_article content."""
+    """Inject a contextual link to target_article woven into host_article prose."""
     host_content = host_article.get("content", "")
     target_url = f"{SITE_URL.rstrip('/')}/article/{target_article.get('slug', '')}"
     target_title = target_article.get("title", "")
@@ -489,39 +618,13 @@ def inject_orphan_link(host_article: dict, target_article: dict, dry_run: bool) 
     if host_content.count("/article/") >= 2:
         return False
 
-    phrasings = [
-        f" For related findings, explore our analysis on [{target_title}]({target_url}).",
-        f" See also our research guide on [{target_title}]({target_url}).",
-        f" For additional perspective, read our breakdown of [{target_title}]({target_url}).",
-        f" Related analysis: [{target_title}]({target_url}).",
-        f" Compare with our in-depth findings on [{target_title}]({target_url}).",
-    ]
-
-    import random
-    link_sentence = random.choice(phrasings)
-
-    # Split into paragraphs and find a balanced slot without existing links
-    paragraphs = host_content.split("\n\n")
-    if len(paragraphs) <= 1:
-        new_content = host_content + "\n\n" + link_sentence.strip()
-    else:
-        # Candidate paragraphs: avoid heading blocks (#), code blocks (```), and paragraphs already containing markdown links
-        candidate_indices = []
-        for idx, p in enumerate(paragraphs):
-            p_strip = p.strip()
-            if not p_strip.startswith("#") and not p_strip.startswith("```") and "http" not in p and "](" not in p:
-                candidate_indices.append(idx)
-
-        if candidate_indices:
-            # Pick a candidate paragraph towards the middle or second half if available
-            chosen_idx = candidate_indices[len(candidate_indices) // 2]
-            paragraphs[chosen_idx] = paragraphs[chosen_idx].rstrip() + link_sentence
-        else:
-            # Fallback: append to paragraph at index 1 or end
-            target_idx = min(1, len(paragraphs) - 1)
-            paragraphs[target_idx] = paragraphs[target_idx].rstrip() + link_sentence
-
-        new_content = "\n\n".join(paragraphs)
+    new_content = _weave_link_into_prose(host_content, target_url, target_title)
+    if new_content is None:
+        log.debug(
+            "No natural prose slot for '%s' → '%s'; skipping to avoid boilerplate.",
+            host_article.get("slug"), target_article.get("slug"),
+        )
+        return False
 
     if dry_run:
         log.info(
