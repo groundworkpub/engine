@@ -133,6 +133,13 @@ def main() -> None:
             return
 
         # Agent 3: Scribe
+        # Cap items per run so the CI job always finishes inside its timeout
+        # window even when every LLM provider is degraded (each item carries a
+        # worst-case wall-clock budget in llm_router).
+        max_items = int(os.getenv("SCRIBE_MAX_ITEMS", "8"))
+        if len(filtered) > max_items:
+            logger.info(f"Capping Scribe batch to {max_items} of {len(filtered)} candidates (SCRIBE_MAX_ITEMS).")
+            filtered = filtered[:max_items]
         logger.info(f"[3/3] Running Scribe on {len(filtered)} items...")
         written = run_scribe(
             filtered,

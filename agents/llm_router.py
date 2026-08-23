@@ -20,9 +20,10 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 import urllib.request
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
 
@@ -37,23 +38,23 @@ logger = logging.getLogger("llm_router")
 # ─── Free Tier Model Catalog ────────────────────────────────────────────────
 
 OPENROUTER_FREE_MODELS = [
-    "openrouter/google/gemma-2-9b-it:free",
-    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/google/gemma-4-31b-it:free",
+    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free",
     "openrouter/z-ai/glm-5.2:free",
+    "openrouter/thinkingmachines/inkling-small:free",
     "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "openrouter/meta-llama/llama-3.2-3b-instruct:free",
 ]
 
 CLOUDFLARE_MODELS = [
     "@cf/meta/llama-3.1-8b-instruct",
+    "@cf/meta/llama-3.2-3b-instruct",
     "@cf/mistral/mistral-7b-instruct-v0.1",
-    "@cf/qwen/qwen1.5-7b-chat-awq",
 ]
 
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
 ]
 
 
@@ -106,10 +107,22 @@ class LLMRouter:
         try:
             with urllib.request.urlopen(req, timeout=35) as resp:
                 data = json.loads(resp.read().decode())
-                resp_val = data.get("result", {}).get("response", "")
-                if isinstance(resp_val, dict):
-                    return json.dumps(resp_val)
-                return str(resp_val) if resp_val is not None else ""
+                result = data.get("result", {})
+                if isinstance(result, dict):
+                    # Current OpenAI-compatible shape: result.choices[0].message.content
+                    choices = result.get("choices")
+                    if choices and isinstance(choices, list):
+                        msg = choices[0].get("message", {})
+                        content = msg.get("content")
+                        if content:
+                            return str(content)
+                    # Legacy shape fallback: result.response
+                    legacy = result.get("response", "")
+                    if isinstance(legacy, dict):
+                        return json.dumps(legacy)
+                    if legacy:
+                        return str(legacy)
+                return ""
         except Exception as e:
             logger.warning(f"Cloudflare AI ({model}) error: {e}")
             return None
@@ -233,21 +246,62 @@ class LLMRouter:
 
     # ─── Public Gateway Method ───────────────────────────────────────────────
 
+    def _call_with_deadline(self, fn: Callable[[], Optional[str]], deadline_s: float) -> Optional[str]:
+        """Execute a provider call with a hard wall-clock deadline.
+
+        urllib's socket timeout does not cap slow-trickling streams (a reasoning
+        model can run 9+ minutes while emitting tokens). This wrapper abandons
+        any attempt that exceeds its budget so one slow model cannot starve the
+        whole pipeline run.
+        """
+        outcome: Dict[str, Optional[str]] = {}
+
+        def runner() -> None:
+            try:
+                outcome["value"] = fn()
+            except Exception as e:
+                logger.warning(f"Provider call raised: {e}")
+                outcome["value"] = None
+
+        worker = threading.Thread(target=runner, daemon=True)
+        worker.start()
+        worker.join(deadline_s)
+        if worker.is_alive():
+            logger.warning(f"Provider call abandoned after exceeding {deadline_s:.0f}s wall-clock deadline.")
+            return None
+        return outcome.get("value")
+
     def generate(
         self,
         messages: List[Dict[str, str]],
         response_format: Literal["text", "json"] = "text",
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        time_budget_s: float = 240.0,
     ) -> Optional[str]:
         """Execute resilient inference query through multi-tier pool with automatic failover."""
         start_time = time.time()
+        deadline = start_time + time_budget_s
+
+        def remaining() -> float:
+            return deadline - time.time()
+
+        def exhausted() -> bool:
+            if remaining() <= 0:
+                logger.warning(f"LLM router wall-clock budget ({time_budget_s:.0f}s) exhausted; aborting failover chain.")
+                return True
+            return False
 
         # 1. Tier 1: Cloudflare Workers AI Primary
         if self._is_provider_healthy("cloudflare_ai"):
             for cf_model in CLOUDFLARE_MODELS:
+                if exhausted():
+                    return None
                 logger.info(f"Attempting inference with Cloudflare AI: {cf_model}")
-                raw_out = self._call_cloudflare_ai(messages, model=cf_model, max_tokens=max_tokens)
+                raw_out = self._call_with_deadline(
+                    lambda m=cf_model: self._call_cloudflare_ai(messages, model=m, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
                 if raw_out and len(raw_out.strip()) > 10:
                     latency = round(time.time() - start_time, 2)
                     logger.info(f"Inference succeeded via Cloudflare AI ({cf_model}) in {latency}s.")
@@ -257,8 +311,13 @@ class LLMRouter:
         # 2. Tier 2: Groq Direct API Primary
         if self._is_provider_healthy("groq_api") and self.groq_key:
             for g_model in GROQ_MODELS:
+                if exhausted():
+                    return None
                 logger.info(f"Attempting inference with Groq: {g_model}")
-                raw_out = self._call_groq(messages, model=g_model, max_tokens=max_tokens)
+                raw_out = self._call_with_deadline(
+                    lambda m=g_model: self._call_groq(messages, model=m, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
                 if raw_out and len(raw_out.strip()) > 10:
                     latency = round(time.time() - start_time, 2)
                     logger.info(f"Inference succeeded via Groq ({g_model}) in {latency}s.")
@@ -271,8 +330,13 @@ class LLMRouter:
             random.shuffle(shuffled_models)
 
             for or_model in shuffled_models:
+                if exhausted():
+                    return None
                 logger.info(f"Attempting failover inference with OpenRouter: {or_model}")
-                raw_out = self._call_openrouter(messages, model=or_model, max_tokens=max_tokens)
+                raw_out = self._call_with_deadline(
+                    lambda m=or_model: self._call_openrouter(messages, model=m, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
                 if raw_out and len(raw_out.strip()) > 10:
                     latency = round(time.time() - start_time, 2)
                     logger.info(f"Inference succeeded via OpenRouter ({or_model}) in {latency}s.")
@@ -281,12 +345,16 @@ class LLMRouter:
 
         # 4. Tier 4: Gemini Direct API (Optional)
         if self._is_provider_healthy("gemini_api") and self.gemini_key:
-            logger.info("Attempting failover inference with Google Gemini API")
-            raw_out = self._call_gemini(messages, max_tokens=max_tokens)
-            if raw_out and len(raw_out.strip()) > 10:
-                latency = round(time.time() - start_time, 2)
-                logger.info(f"Inference succeeded via Gemini API in {latency}s.")
-                return raw_out
+            if not exhausted():
+                logger.info("Attempting failover inference with Google Gemini API")
+                raw_out = self._call_with_deadline(
+                    lambda: self._call_gemini(messages, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via Gemini API in {latency}s.")
+                    return raw_out
 
         logger.error("All LLM providers in the multi-tier pool failed or were rate-limited.")
         return None
@@ -295,6 +363,7 @@ class LLMRouter:
         self,
         messages: List[Dict[str, str]],
         max_tokens: int = 4096,
+        time_budget_s: float = 240.0,
     ) -> Optional[Dict[str, Any]]:
         """Generate and parse structured JSON reliably using brace-depth tracking and json_repair."""
         # Ensure system prompt instructs raw JSON output
@@ -307,9 +376,13 @@ class LLMRouter:
         if not system_appended:
             messages.insert(0, {"role": "system", "content": "You are a JSON generator. Return strictly raw JSON."})
 
-        raw_output = self.generate(messages, response_format="json", max_tokens=max_tokens)
+        raw_output = self.generate(messages, response_format="json", max_tokens=max_tokens, time_budget_s=time_budget_s)
         if not raw_output:
             return None
+
+        # Strip reasoning-model think tokens (e.g. <think>...</think>) which break JSON parsing
+        raw_output = re.sub(r"<think>.*?</think>", "", raw_output, flags=re.DOTALL | re.IGNORECASE)
+        raw_output = re.sub(r"<\|?thinking\|?>.*?<\|?/?thinking\|?>", "", raw_output, flags=re.DOTALL)
 
         # Clean markdown codeblocks
         clean_text = re.sub(r"^```(?:json)?\s*", "", raw_output.strip(), flags=re.IGNORECASE)
