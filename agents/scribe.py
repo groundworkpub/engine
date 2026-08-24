@@ -81,6 +81,7 @@ _LEGIT_CAMEL = {
     "arxiv", "medrxiv", "mmhg", "iphone", "ipad", "ipados", "imac", "icloud",
     "ios", "macos", "watchos", "youtube", "linkedin", "chatgpt", "ebos",
     "namedrop", "mcdonald's", "mcdonalds", "mymcdonald's", "galaxy", "pixelfy",
+    "openai", "anthropic", "deepseek", "gemini",
 }
 
 # Kata-fungsi yang menyatu deterministik — repair aman tanpa teks asli
