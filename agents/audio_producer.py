@@ -280,10 +280,136 @@ Return strict JSON matching schema:
 
     # ── Dynamic Cover Art Synthesis ───────────────────────────────────────────
 
-    def generate_cover_art(
+    @staticmethod
+    def _load_system_font(size: int, bold: bool = True):
+        """Load the crispest available TrueType font across macOS / Linux runners."""
+        font_candidates = [
+            "/System/Library/Fonts/SFProText-Bold.otf" if bold else "/System/Library/Fonts/SFProText-Regular.otf",
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+        for candidate in font_candidates:
+            if os.path.exists(candidate):
+                try:
+                    return ImageFont.truetype(candidate, size)
+                except Exception:
+                    pass
+        return ImageFont.load_default()
+
+    def _generate_shorts_cover(
         self, title: str, pillar: str, output_png_path: str, featured_image_url: str | None = None
     ) -> str:
-        """Render a broadcast-ready 3000x3000px high-contrast cover art with Pillow and TrueType typography."""
+        """Native 1080x1920 vertical composition for YouTube Shorts / TikTok renders.
+
+        Never crop the square podcast cover: text anchored at x=180 on a 3000px
+        canvas gets amputated by the 1080px center-crop and reads as a broken
+        landscape template. This builds the frame natively instead.
+        """
+        import io
+        import urllib.request
+
+        width, height = 1080, 1920
+        pillar_color = PILLAR_COLORS.get(pillar.lower(), (16, 185, 129))
+
+        img = Image.new("RGB", (width, height), color=(10, 12, 16))
+        if featured_image_url and featured_image_url.startswith("http"):
+            try:
+                req = urllib.request.Request(featured_image_url, headers={"User-Agent": "GroundworkAudio/1.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    feat_img = Image.open(io.BytesIO(resp.read())).convert("RGBA")
+                # Cover-fit 1080x1920: scale shortest side, center-crop the excess
+                ratio = max(width / feat_img.width, height / feat_img.height)
+                feat_img = feat_img.resize(
+                    (round(feat_img.width * ratio), round(feat_img.height * ratio)),
+                    Image.Resampling.LANCZOS,
+                )
+                left = (feat_img.width - width) // 2
+                top = (feat_img.height - height) // 2
+                feat_img = feat_img.crop((left, top, left + width, top + height))
+                dark_overlay = Image.new("RGBA", (width, height), (8, 11, 16, 215))
+                feat_img = Image.alpha_composite(feat_img, dark_overlay)
+                img.paste(feat_img.convert("RGB"), (0, 0))
+            except Exception as e:
+                logger.warning(f"Could not download article featured image for shorts cover: {e}")
+
+        draw = ImageDraw.Draw(img)
+
+        # Corner glow, scaled for the vertical frame
+        for r in range(520, 0, -24):
+            draw.ellipse(
+                (width - r, -r, width + r, r),
+                fill=(pillar_color[0] // 3, pillar_color[1] // 3, pillar_color[2] // 3),
+            )
+
+        margin = 84
+        font_brand = self._load_system_font(46, bold=True)
+        font_badge = self._load_system_font(36, bold=True)
+        font_title = self._load_system_font(92, bold=True)
+        font_host = self._load_system_font(40, bold=True)
+        font_footer = self._load_system_font(30, bold=False)
+
+        draw.text((margin, 100), "GROUNDWORK DEEP DIVES", fill=(255, 255, 255), font=font_brand)
+
+        badge_w = int(draw.textlength(f"● {pillar.upper()}", font=font_badge)) + 72
+        draw.rounded_rectangle((margin, 176, margin + badge_w, 258), radius=20, fill=pillar_color)
+        draw.text((margin + 32, 194), f"● {pillar.upper()}", fill=(10, 12, 16), font=font_badge)
+
+        # Pixel-measured word-wrap keeps glyphs inside the 1080px frame
+        clean_title = re.sub(r'["—]', "", title).strip()
+        max_text_w = width - 2 * margin
+        lines: list[str] = []
+        curr = ""
+        for word in clean_title.split():
+            probe = f"{curr} {word}".strip()
+            if draw.textlength(probe, font=font_title) <= max_text_w:
+                curr = probe
+            else:
+                if curr:
+                    lines.append(curr)
+                curr = word
+        if curr:
+            lines.append(curr)
+
+        y_offset = 330
+        for line in lines[:7]:
+            draw.text((margin, y_offset), line, fill=(255, 255, 255), font=font_title)
+            y_offset += 114
+        if len(lines) > 7:
+            draw.text((margin, y_offset), "…", fill=(255, 255, 255), font=font_title)
+
+        # Waveform band occupies y≈1280–1560 (ffmpeg overlays it there) — keep clear
+
+        draw.line((margin, 1620, width - margin, 1620), fill=(51, 65, 85), width=4)
+        draw.text((margin, 1652), "Elena & Research Desk Leads", fill=(241, 245, 249), font=font_host)
+        draw.text(
+            (margin, 1720),
+            "Evidence-Based Guidance • gworky.com",
+            fill=(148, 163, 184),
+            font=font_footer,
+        )
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_png_path)), exist_ok=True)
+        img.save(output_png_path, "PNG")
+        logger.info(f"Generated native 1080x1920 Shorts cover at: {output_png_path}")
+        return output_png_path
+
+    def generate_cover_art(
+        self,
+        title: str,
+        pillar: str,
+        output_png_path: str,
+        featured_image_url: str | None = None,
+        layout: str = "square",
+    ) -> str:
+        """Render high-contrast cover art with Pillow and TrueType typography.
+
+        layout='square': 3000x3000 broadcast cover (RSS itunes:image, R2 artwork).
+        layout='shorts': native 1080x1920 vertical frame for Shorts renders.
+        """
+        if layout == "shorts":
+            return self._generate_shorts_cover(title, pillar, output_png_path, featured_image_url)
         width, height = 3000, 3000
         pillar_color = PILLAR_COLORS.get(pillar.lower(), (16, 185, 129))
 
@@ -317,29 +443,10 @@ Return strict JSON matching schema:
                 (width - r, -r, width + r, r), fill=(pillar_color[0] // 3, pillar_color[1] // 3, pillar_color[2] // 3)
             )
 
-        # Load Crisp System TrueType Fonts
-        def load_system_font(size: int, bold: bool = True):
-            font_candidates = [
-                "/System/Library/Fonts/SFProText-Bold.otf" if bold else "/System/Library/Fonts/SFProText-Regular.otf",
-                "/System/Library/Fonts/SFNS.ttf",
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
-                if bold
-                else "/System/Library/Fonts/Supplemental/Arial.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            ]
-            for candidate in font_candidates:
-                if os.path.exists(candidate):
-                    try:
-                        return ImageFont.truetype(candidate, size)
-                    except Exception:
-                        pass
-            return ImageFont.load_default()
-
-        font_brand = load_system_font(75, bold=True)
-        font_badge = load_system_font(60, bold=True)
-        font_title = load_system_font(130, bold=True)
-        font_footer = load_system_font(55, bold=False)
+        font_brand = self._load_system_font(75, bold=True)
+        font_badge = self._load_system_font(60, bold=True)
+        font_title = self._load_system_font(130, bold=True)
+        font_footer = self._load_system_font(55, bold=False)
 
         # Top Brand Tag
         draw.text((180, 200), "GROUNDWORK DEEP DIVES", fill=(255, 255, 255), font=font_brand)
@@ -653,13 +760,20 @@ Return strict JSON matching schema:
         # 6. Render Video Audiogram (optional)
         video_url = None
         if generate_video:
-            rendered_video = self.render_video_audiogram(
-                mp3_path,
-                cover_path,
-                video_path,
-                format_mode=video_format,
-                max_seconds=shorts_max_seconds if video_format == "shorts" else None,
-            )
+            if video_format == "shorts":
+                shorts_cover = str(base_dir / "covers" / f"{slug}-shorts.png")
+                self.generate_cover_art(
+                    title, pillar, shorts_cover, featured_image_url=featured_img, layout="shorts"
+                )
+                rendered_video = self.render_video_audiogram(
+                    mp3_path,
+                    shorts_cover,
+                    video_path,
+                    format_mode="shorts",
+                    max_seconds=shorts_max_seconds,
+                )
+            else:
+                rendered_video = self.render_video_audiogram(mp3_path, cover_path, video_path, format_mode=video_format)
             if rendered_video:
                 s3_video_key = f"videos/{slug}.mp4"
                 video_url = self.upload_to_r2(video_path, s3_video_key, content_type="video/mp4")
