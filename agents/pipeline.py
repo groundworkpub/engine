@@ -219,14 +219,19 @@ def main() -> None:
                     # Render a Shorts video only when the episode is not on YouTube yet
                     want_shorts = False
                     if yt_enabled and yt_uploaded < yt_max and slug:
-                        chk = (
-                            supabase.table("podcast_episodes")
-                            .select("youtube_video_id")
-                            .eq("slug", slug)
-                            .maybe_single()
-                            .execute()
-                        )
-                        want_shorts = not (chk.data and chk.data.get("youtube_video_id"))
+                        try:
+                            chk = (
+                                supabase.table("podcast_episodes")
+                                .select("youtube_video_id")
+                                .eq("slug", slug)
+                                .maybe_single()
+                                .execute()
+                            )
+                            existing_row = getattr(chk, "data", None) or {}
+                            want_shorts = not existing_row.get("youtube_video_id")
+                        except Exception as chk_err:
+                            logger.warning(f"Episode lookup notice for {slug}: {chk_err}")
+                            want_shorts = True
 
                     ep = asyncio.run(
                         audio_prod.process_article(
