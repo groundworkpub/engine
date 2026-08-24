@@ -69,6 +69,69 @@ class FAQItem(BaseModel):
     answer: str = Field(min_length=20, max_length=400)
 
 
+# ── Internal-link integrity guardrails (linkagent-style, §2.7 compliant) ──
+# Anchor internal link harus teks yang SUDAH ADA di copy. LLM tidak boleh
+# mengarang/menulis-ulang anchor: hasilnya korupsi spasi ("isthe", "cutsfromApple")
+# dan link inkohoren topikal (anchor "Apple" → artikel Samsung).
+
+_LINK_MD_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+|/[^)\s]+)\)")
+
+# Token camelCase legit (nama produk/brand asli, bukan korupsi spasi)
+_LEGIT_CAMEL = {
+    "arxiv", "medrxiv", "mmhg", "iphone", "ipad", "ipados", "imac", "icloud",
+    "ios", "macos", "watchos", "youtube", "linkedin", "chatgpt", "ebos",
+    "namedrop", "mcdonald's", "mcdonalds", "mymcdonald's", "galaxy", "pixelfy",
+}
+
+# Kata-fungsi yang menyatu deterministik — repair aman tanpa teks asli
+_JOINED_STOPWORDS = {
+    "isthe": "is the", "ofthe": "of the", "andthe": "and the",
+    "inthe": "in the", "tothe": "to the", "thatthe": "that the",
+    "withthe": "with the", "forthe": "for the", "fromthe": "from the",
+    "meansthat": "means that", "startby": "start by", "morethan": "more than",
+    "hassurpassed": "has surpassed", "designedtomove": "designed to move",
+}
+
+
+def _sanitize_internal_links(content: str) -> str:
+    """Audit semua markdown link internal pada konten hasil LLM.
+
+    Aturan (berdasarkan metodologi linkagent + AGENTS.md §2.7):
+    1. Word-join stopword  -> repair deterministik, link dipertahankan.
+    2. CamelCase mencurigakan di anchor -> putus link, pertahankan teks.
+    3. Entitas/brand di anchor tidak ada di slug target -> putus link.
+    Link eksternal tidak disentuh.
+    """
+    site = (os.getenv("NEXT_PUBLIC_SITE_URL") or "https://gworky.com").lower()
+
+    def _fix(m):
+        anchor, href = m.group(1), m.group(2)
+        if not (href.lower().startswith(site) or href.startswith("/")):
+            return m.group(0)
+
+        fixed = anchor
+        for bad, good in _JOINED_STOPWORDS.items():
+            fixed = re.sub(rf"\b{re.escape(bad)}\b", good, fixed, flags=re.IGNORECASE)
+
+        camel_suspects = [
+            tok for tok in re.findall(r"\S+", fixed)
+            if re.search(r"[a-z][A-Z]", tok) and tok.lower().strip(".,;:!?'\"") not in _LEGIT_CAMEL
+        ]
+
+        slug = href.rstrip("/").rsplit("/", 1)[-1].lower().replace("-", " ")
+        entities = [
+            w for w in re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", fixed)
+            if w.lower() not in _LEGIT_CAMEL
+        ]
+        incoherent = bool(entities) and not any(e.lower() in slug for e in entities)
+
+        if camel_suspects or incoherent:
+            return fixed  # putus link, teks tetap terbaca
+        return f"[{fixed}]({href})"
+
+    return _LINK_MD_RE.sub(_fix, content)
+
+
 class ScribeOutput(BaseModel):
     slug: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=10, max_length=300)
@@ -144,6 +207,8 @@ class ScribeOutput(BaseModel):
                 {"question": "Where does this information come from?", "answer": "This analysis is based on the cited source and publicly available research."},
             ]
             data["faq"] = list(faq) + defaults[: 3 - len(faq)]
+        if isinstance(data.get("content"), str) and data["content"]:
+            data["content"] = _sanitize_internal_links(data["content"])
         return data
 
     @field_validator("slug")
