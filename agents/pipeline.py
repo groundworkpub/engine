@@ -193,7 +193,7 @@ def main() -> None:
             try:
                 from audio_producer import AudioProducer
                 from podcast_distributor import PodcastDistributor
-                from video_broadcaster import build_youtube_metadata
+                from video_broadcaster import VideoBroadcaster
                 from youtube_uploader import upload_video
 
                 yt_enabled = os.getenv("YOUTUBE_UPLOAD_ENABLED", "1") == "1"
@@ -243,7 +243,7 @@ def main() -> None:
                         if not os.path.exists(video_file):
                             logger.warning(f"YouTube Shorts skipped, no rendered video: {slug}")
                             continue
-                        meta = build_youtube_metadata(ep, is_shorts=True)
+                        meta = VideoBroadcaster().build_youtube_metadata(ep, is_shorts=True)
                         result = upload_video(
                             video_file,
                             title=meta["snippet"]["title"],
