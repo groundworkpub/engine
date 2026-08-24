@@ -714,9 +714,9 @@ def main() -> None:
         elif args.action == "video":
             import urllib.parse
             try:
-                from agents.broadcaster import VideoBroadcaster
+                from agents.video_broadcaster import VideoBroadcaster
             except ImportError:
-                from broadcaster import VideoBroadcaster
+                from video_broadcaster import VideoBroadcaster
             broadcaster = VideoBroadcaster()
             episode = broadcaster.fetch_episode(args.slug)
             if not episode:

@@ -193,6 +193,13 @@ def main() -> None:
             try:
                 from audio_producer import AudioProducer
                 from podcast_distributor import PodcastDistributor
+                from video_broadcaster import build_youtube_metadata
+                from youtube_uploader import upload_video
+
+                yt_enabled = os.getenv("YOUTUBE_UPLOAD_ENABLED", "1") == "1"
+                yt_max = int(os.getenv("YOUTUBE_MAX_UPLOADS_PER_RUN", "2"))
+                yt_privacy = os.getenv("YOUTUBE_PRIVACY_STATUS", "public")
+                yt_uploaded = 0
 
                 audio_prod = AudioProducer()
                 res = (
@@ -205,8 +212,52 @@ def main() -> None:
                 )
                 articles_list = cast(list[dict[str, Any]], res.data or [])
                 for art in articles_list:
-                    if isinstance(art, dict):
-                        asyncio.run(audio_prod.process_article(art))
+                    if not isinstance(art, dict):
+                        continue
+                    slug = art.get("slug")
+
+                    # Render a Shorts video only when the episode is not on YouTube yet
+                    want_shorts = False
+                    if yt_enabled and yt_uploaded < yt_max and slug:
+                        chk = (
+                            supabase.table("podcast_episodes")
+                            .select("youtube_video_id")
+                            .eq("slug", slug)
+                            .maybe_single()
+                            .execute()
+                        )
+                        want_shorts = not (chk.data and chk.data.get("youtube_video_id"))
+
+                    ep = asyncio.run(
+                        audio_prod.process_article(
+                            art, generate_video=want_shorts, video_format="shorts",
+                            shorts_max_seconds=float(os.getenv("YOUTUBE_SHORTS_MAX_SECONDS", "58")),
+                        )
+                    )
+                    if not (want_shorts and ep and slug):
+                        continue
+
+                    # Publish the rendered 9:16 audiogram to YouTube (idempotent per slug)
+                    try:
+                        video_file = f"public/audio/videos/{slug}.mp4"
+                        if not os.path.exists(video_file):
+                            logger.warning(f"YouTube Shorts skipped, no rendered video: {slug}")
+                            continue
+                        meta = build_youtube_metadata(ep, is_shorts=True)
+                        result = upload_video(
+                            video_file,
+                            title=meta["snippet"]["title"],
+                            description=meta["snippet"]["description"],
+                            tags=meta["snippet"]["tags"],
+                            privacy_status=yt_privacy,
+                        )
+                        supabase.table("podcast_episodes").update(
+                            {"youtube_video_id": result["id"]}
+                        ).eq("slug", slug).execute()
+                        yt_uploaded += 1
+                        logger.info(f"YouTube Shorts published: {slug} -> https://youtu.be/{result['id']}")
+                    except Exception as yt_err:
+                        logger.warning(f"YouTube Shorts step notice for {slug}: {yt_err}")
 
                 # Broadcast pings to open directories & hubs
                 distributor = PodcastDistributor()

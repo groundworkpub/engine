@@ -506,12 +506,17 @@ Return strict JSON matching schema:
         cover_png_path: str,
         output_mp4_path: str,
         format_mode: str = "landscape",
+        max_seconds: float | None = None,
     ) -> str | None:
         """Render broadcast video audiogram with dynamic soundwave spectrum.
 
         Supported formats:
           - 'landscape': 16:9 1920x1080 (YouTube Podcasts, Desktop Player)
           - 'shorts': 9:16 1080x1920 (YouTube Shorts, TikTok, Reels, Mobile)
+
+        ``max_seconds`` caps the rendered output duration (e.g. 58s keeps a
+        render inside YouTube Shorts length limits). ``None`` renders the
+        full audio.
         """
         try:
             os.makedirs(os.path.dirname(os.path.abspath(output_mp4_path)), exist_ok=True)
@@ -554,8 +559,10 @@ Return strict JSON matching schema:
                 "-c:a",
                 "copy",
                 "-shortest",
-                output_mp4_path,
             ]
+            if max_seconds:
+                cmd += ["-t", str(max_seconds)]
+            cmd.append(output_mp4_path)
             logger.info(f"Rendering FFmpeg video audiogram ({format_mode}): {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, timeout=120)
             if result.returncode == 0 and os.path.exists(output_mp4_path):
@@ -605,7 +612,11 @@ Return strict JSON matching schema:
     # ── Full Processing Pipeline for an Article ───────────────────────────────
 
     async def process_article(
-        self, article: dict[str, Any], generate_video: bool = False, video_format: str = "landscape"
+        self,
+        article: dict[str, Any],
+        generate_video: bool = False,
+        video_format: str = "landscape",
+        shorts_max_seconds: float | None = None,
     ) -> dict[str, Any] | None:
         slug = article.get("slug")
         title = article.get("title")
@@ -642,7 +653,13 @@ Return strict JSON matching schema:
         # 6. Render Video Audiogram (optional)
         video_url = None
         if generate_video:
-            rendered_video = self.render_video_audiogram(mp3_path, cover_path, video_path, format_mode=video_format)
+            rendered_video = self.render_video_audiogram(
+                mp3_path,
+                cover_path,
+                video_path,
+                format_mode=video_format,
+                max_seconds=shorts_max_seconds if video_format == "shorts" else None,
+            )
             if rendered_video:
                 s3_video_key = f"videos/{slug}.mp4"
                 video_url = self.upload_to_r2(video_path, s3_video_key, content_type="video/mp4")
