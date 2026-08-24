@@ -268,6 +268,20 @@ def main() -> None:
                 distributor = PodcastDistributor()
                 distributor.broadcast_all()
                 logger.info("Autonomous Audio Producer & Directory Syndication completed successfully.")
+
+                # Revalidate podcast feed so new episodes appear immediately
+                if revalidate_url and revalidate_secret:
+                    try:
+                        import httpx
+                        httpx.post(
+                            revalidate_url,
+                            json={"path": "/podcast/feed.xml"},
+                            headers={"x-revalidate-secret": revalidate_secret},
+                            timeout=10.0,
+                        )
+                        logger.info("Podcast feed revalidation pinged.")
+                    except Exception as rev_err:
+                        logger.warning(f"Feed revalidate notice: {rev_err}")
             except Exception as audio_err:
                 logger.warning(f"Audio production completed with notice: {audio_err}")
 
