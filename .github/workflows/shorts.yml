@@ -1,0 +1,80 @@
+name: Shorts — Standalone 9:16 Video (non-RSS)
+
+on:
+  schedule:
+    - cron: "0 9 * * 2,5" # Tue & Fri 09:00 UTC — 2×/week, non-RSS Shorts (separate from podcast RSS import)
+  workflow_dispatch:
+    inputs:
+      pillar:
+        description: "Pillar to pick article from (money/tech/home/body/life or empty for auto)"
+        required: false
+        default: ""
+      slug:
+        description: "Specific article slug (optional, overrides pillar)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run (render without YouTube upload)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+
+concurrency:
+  group: shorts-non-rss
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  render-shorts:
+    name: Render 9:16 Shorts (FFmpeg) + YouTube Upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agents/requirements.txt
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@7cc2b742affd7cf07f6ae6ff3d662a1370282d6fa # v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: agents/requirements.txt
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: uv pip install --system -r agents/requirements.txt
+
+      - name: Verify FFmpeg
+        run: ffmpeg -version | head -1
+
+      - name: Render Shorts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SITE_URL: "https://gworky.com"
+          CLOUDFLARE_EGRESS_WORKER_URL: ${{ secrets.CLOUDFLARE_EGRESS_WORKER_URL }}
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then DRY="--dry-run"; else DRY=""; fi
+          if [ -n "${{ inputs.slug }}" ]; then SLUG="--slug ${{ inputs.slug }}"; elif [ -n "${{ inputs.pillar }}" ]; then SLUG="--pillar ${{ inputs.pillar }}"; else SLUG=""; fi
+          # Default dry-run on schedule is OFF (live upload), dispatch respects input
+          if [ "${{ github.event_name }}" = "schedule" ]; then DRY=""; fi
+          PYTHONPATH=. python agents/video_broadcaster.py --format shorts $SLUG $DRY --out /tmp/shorts.mp4
+          ls -lh /tmp/shorts.mp4 || echo "no mp4 (dry-run or no article)"
