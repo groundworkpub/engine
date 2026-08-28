@@ -227,6 +227,14 @@ class VideoBroadcaster:
                 "description": description,
                 "tags": ["Groundwork", pillar, "Evidence Based", "Research", "Guide", "Calculators"],
                 "categoryId": "27",  # Education
+                "defaultLanguage": "en",
+                "defaultAudioLanguage": "en-US",
+            },
+            "localizations": {
+                "en": {
+                    "title": yt_title,
+                    "description": description,
+                }
             },
             "status": {
                 "privacyStatus": "public",
@@ -235,9 +243,33 @@ class VideoBroadcaster:
         }
 
 
+    def fetch_pillar_summary(self, pillar: str, limit: int = 3) -> dict[str, Any] | None:
+        """Fetch 3 latest articles for pillar-summary Shorts (maximal vs single-article RSS)."""
+        rows = self._supabase_request(
+            "GET", f"articles?pillar=eq.{pillar}&status=eq.published&order=published_at.desc&limit={limit}&select=slug,title,excerpt,pillar"
+        )
+        if not rows or len(rows) == 0:
+            return None
+        titles = [r.get("title", "") for r in rows]
+        slug = f"weekly-{pillar}-" + "-".join([r.get("slug","")[:8] for r in rows[:2]])
+        # Synthesize 55s hook: 3 bullet @ 12 words + 1 tool CTA
+        summary = " • ".join([r.get("excerpt") or r.get("title","") for r in rows][:3])[:280]
+        return {
+            "slug": slug[:60],
+            "title": f"This week in {pillar.title()}: 3 moves that matter — Groundwork 58s",
+            "description": summary + f" Full breakdowns at gworky.com/{pillar}",
+            "pillar": pillar,
+            "audio_url": f"{self.site_url}/api/audio/{rows[0].get('slug')}.mp3",
+            "cover_image_url": f"{self.site_url}/api/og?format=shorts&pillar={pillar}&title={urllib.parse.quote_plus(titles[0][:40])}",
+            "is_pillar_summary": True,
+            "source_slugs": [r.get("slug") for r in rows],
+        }
+
 def main():
     parser = argparse.ArgumentParser(description="YouTube & Shorts Video Broadcaster")
-    parser.add_argument("--slug", type=str, required=True, help="Article / Episode slug")
+    parser.add_argument("--slug", type=str, required=False, default=None, help="Article / Episode slug")
+    parser.add_argument("--pillar", type=str, required=False, default=None, help="Pillar for pillar-summary mode (money/home/body/life/tech)")
+    parser.add_argument("--mode", type=str, choices=["pillar-summary", "hijack", "single"], default="single", help="Mode: pillar-summary (3 artikel+1 tool) or hijack (vs competitor)")
     parser.add_argument(
         "--format",
         choices=["shorts", "landscape"],
@@ -245,10 +277,21 @@ def main():
         help="Video format: 'shorts' (9:16 YouTube Shorts / TikTok) or 'landscape' (16:9 Longform)",
     )
     parser.add_argument("--out", type=str, default=None, help="Output MP4 file path")
+    parser.add_argument("--dry-run", action="store_true", help="Dry run without YouTube upload")
     args = parser.parse_args()
 
     broadcaster = VideoBroadcaster()
-    episode = broadcaster.fetch_episode(args.slug)
+    episode = None
+    if args.slug:
+        episode = broadcaster.fetch_episode(args.slug)
+    elif args.pillar:
+        # pillar-summary: aggregate 3 artikel per pillar (maximal vs RSS per artikel)
+        episode = broadcaster.fetch_pillar_summary(args.pillar)
+        if episode:
+            logger.info(f"Pillar-summary for {args.pillar}: {episode['source_slugs']}")
+    else:
+        # auto-pick latest pillar if no args
+        episode = broadcaster.fetch_pillar_summary("money")
     if not episode:
         logger.error(f"Could not find episode for slug: {args.slug}")
         return
