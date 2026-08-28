@@ -89,5 +89,5 @@ jobs:
           fi
           if [ -n "${{ inputs.slug }}" ]; then SLUG="--slug ${{ inputs.slug }}"; elif [ -n "${{ inputs.pillar }}" ]; then SLUG="--pillar ${{ inputs.pillar }}"; else SLUG=""; fi
           echo "Mode: $MODE $SLUG"
-          PYTHONPATH=. python agents/video_broadcaster.py --format shorts $SLUG $DRY --out /tmp/shorts.mp4
+          PYTHONPATH=. python agents/video_broadcaster.py --format shorts --mode $MODE $SLUG $DRY --out /tmp/shorts.mp4
           ls -lh /tmp/shorts.mp4 || echo "no mp4 (dry-run or no article)"
