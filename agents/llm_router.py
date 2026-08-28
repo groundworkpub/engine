@@ -27,7 +27,14 @@ from typing import Any, Callable, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
 
+# Robust multi-path dotenv loading
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+load_dotenv(os.path.join(REPO_ROOT, ".env.local"))
+load_dotenv(os.path.join(REPO_ROOT, ".env"))
 load_dotenv(".env.local")
+load_dotenv(".env")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,14 +42,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("llm_router")
 
-# ─── Free Tier Model Catalog ────────────────────────────────────────────────
-
 OPENROUTER_FREE_MODELS = [
-    "openrouter/google/gemma-4-31b-it:free",
-    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free",
-    "openrouter/z-ai/glm-5.2:free",
-    "openrouter/thinkingmachines/inkling-small:free",
-    "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "openrouter/minimax/minimax-m3:free",
+    "openrouter/minimax/minimax-m2.7:free",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter/liquid/lfm-2.5-2.6b:free",
+    "openrouter/cohere/north-mini-code:free",
+]
+
+OPENROUTER_PAID_MODELS = [
+    "deepseek/deepseek-chat",
+    "openai/gpt-4o-mini",
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-r1",
 ]
 
 CLOUDFLARE_MODELS = [
@@ -65,6 +78,7 @@ class LLMRouter:
         self.cf_account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
         self.cf_email = os.getenv("CLOUDFLARE_EMAIL")
         self.cf_key = os.getenv("CLOUDFLARE_GLOBAL_API_KEY")
+        self.gateway_id = os.getenv("CLOUDFLARE_GATEWAY_ID")  # AI Gateway E3
         self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
         self.groq_key = os.getenv("GROQ_API_KEY")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
@@ -81,6 +95,50 @@ class LLMRouter:
         """Temporarily isolate a failing provider."""
         logger.warning(f"Tripping circuit breaker for provider [{provider_id}] for {cooloff_seconds}s.")
         self.failed_providers[provider_id] = time.time() + cooloff_seconds
+
+    # ─── Provider 0: Cloudflare AI Gateway (E3 observability + universal route) ─
+
+    def _call_ai_gateway(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "@cf/meta/llama-3.1-8b-instruct",
+        max_tokens: int = 4096,
+    ) -> Optional[str]:
+        """Route via Cloudflare AI Gateway (OpenAI-compatible) for logging, caching, fallback.
+
+        Wrap any configured upstream (Workers AI, OpenRouter, Groq) into a single
+        gateway endpoint so failed/cached calls show in AI Gateway analytics — free tier.
+        """
+        if not self.cf_account_id or not self.cf_key or not self.gateway_id:
+            return None
+        url = (
+            f"https://gateway.ai.cloudflare.com/v1/{self.cf_account_id}/"
+            f"{self.gateway_id}/openai/chat/completions"
+        )
+        payload = json.dumps(
+            {"model": model, "messages": messages, "max_tokens": max_tokens}
+        ).encode()
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "X-Auth-Email": self.cf_email or "",
+                "X-Auth-Key": self.cf_key,
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                data = json.loads(resp.read().decode())
+                choices = data.get("choices")
+                if choices and isinstance(choices, list):
+                    msg = choices[0].get("message", {})
+                    content = msg.get("content")
+                    if content:
+                        return str(content)
+        except Exception as e:
+            logger.debug(f"AI Gateway call failed for {model}: {e}")
+        return None
 
     # ─── Provider 1: Cloudflare Workers AI (Direct Native) ──────────────────
 
@@ -292,6 +350,23 @@ class LLMRouter:
                 return True
             return False
 
+        # 0. Tier 0: Cloudflare AI Gateway (E3) — observability-first tap
+        #    Routes ANY upstream (Workers AI / OpenRouter / Groq) through one
+        #    gateway URL for logging, caching, and fallback handled centrally.
+        if self._is_provider_healthy("ai_gateway") and self.gateway_id:
+            for gw_model in CLOUDFLARE_MODELS:
+                if exhausted():
+                    return None
+                raw_out = self._call_with_deadline(
+                    lambda m=gw_model: self._call_ai_gateway(messages, model=m, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via AI Gateway ({gw_model}) in {latency}s.")
+                    return raw_out
+            self._trip_circuit_breaker("ai_gateway", 120)
+
         # 1. Tier 1: Cloudflare Workers AI Primary
         if self._is_provider_healthy("cloudflare_ai"):
             for cf_model in CLOUDFLARE_MODELS:
@@ -343,7 +418,23 @@ class LLMRouter:
                     return raw_out
             self._trip_circuit_breaker("openrouter_free", 180)
 
-        # 4. Tier 4: Gemini Direct API (Optional)
+        # 4. Tier 4: OpenRouter High-Reliability Fallback (DeepSeek-V3, GPT-4o-mini, Llama 3.3 70B)
+        if self._is_provider_healthy("openrouter_paid") and self.openrouter_key:
+            for paid_model in OPENROUTER_PAID_MODELS:
+                if exhausted():
+                    return None
+                logger.info(f"Attempting high-reliability fallback inference with OpenRouter: {paid_model}")
+                raw_out = self._call_with_deadline(
+                    lambda m=paid_model: self._call_openrouter(messages, model=m, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via OpenRouter Paid Fallback ({paid_model}) in {latency}s.")
+                    return raw_out
+            self._trip_circuit_breaker("openrouter_paid", 180)
+
+        # 5. Tier 5: Gemini Direct API (Optional)
         if self._is_provider_healthy("gemini_api") and self.gemini_key:
             if not exhausted():
                 logger.info("Attempting failover inference with Google Gemini API")

@@ -445,6 +445,12 @@ def clean_json_response(raw: str) -> dict[str, Any]:
                 return parsed
         except Exception:
             pass
+        try:
+            # Strip invalid control characters while preserving valid escaped representations
+            sanitized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
+            return json.loads(sanitized, strict=False)
+        except Exception:
+            pass
         return json.loads(text)
 
 
