@@ -33,7 +33,7 @@ BSKY_SESSION_URL = "https://bsky.social/xrpc/com.atproto.server.createSession"
 BSKY_RECORD_URL = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
 BSKY_UPLOAD_BLOB_URL = "https://bsky.social/xrpc/com.atproto.repo.uploadBlob"
 TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
-BUFFER_GRAPHQL_URL = "https://api.buffer.com"
+BUFFER_GRAPHQL_URL = "https://api.buffer.com/1/graphql"
 
 PILLAR_HASHTAGS: dict[str, list[str]] = {
     "money": ["#personalfinance", "#investing", "#financialfreedom", "#wealthbuilding", "#moneytips"],
@@ -168,6 +168,13 @@ def _excerpt_hook(article: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------
 # 1. Master Bundle: Text & Micro-Blogging (5-Part Chained Thread)
 # --------------------------------------------------------------------------
+def _clamp_thread_post(text: str, max_len: int = 290) -> str:
+    """Clamps a micro-blog post to stay strictly under the platform character limit (Bluesky: 300)."""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
+
 def build_5part_thread(article: dict[str, Any]) -> list[str]:
     """Generates a structured 5-part micro-blogging thread array.
 
@@ -207,7 +214,13 @@ def build_5part_thread(article: dict[str, Any]) -> list[str]:
         f"Explore the full interactive decision tool & evidence guide:\n{link}\n\n{tags}"
     )
 
-    return [post_1, post_2, post_3, post_4, post_5]
+    return [
+        _clamp_thread_post(post_1),
+        _clamp_thread_post(post_2),
+        _clamp_thread_post(post_3),
+        _clamp_thread_post(post_4),
+        _clamp_thread_post(post_5),
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -1152,6 +1165,31 @@ def main() -> int:
         return 1
 
     articles = _fetch_published_articles(supabase, args.limit, args.slug)
+
+    # Warm CDN image transforms BEFORE social amplification drives traffic,
+    # so the first click never hits a cold /cdn-cgi/image/ transform (~1.5s).
+    try:
+        import httpx
+        from agents.image_warmup import UA, warm_variants
+
+        with httpx.Client(headers={"User-Agent": UA}, follow_redirects=True) as client:
+            warmed = sum(
+                warm_variants(a.get("image_url", ""), client)
+                for a in articles
+                if a.get("image_url")
+            )
+        logger.info("image warmup: %s transform variants warmed", warmed)
+    except Exception as exc:  # noqa: BLE001 — warming must never block distribution
+        logger.warning("image warmup skipped: %s", exc)
+
+    # IndexNow: tell search engines fresh URLs exist — skip re-discovery lag
+    try:
+        from agents.indexnow_ping import ping_new
+
+        ping_new(supabase, limit=max(len(articles), 10))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("indexnow skipped: %s", exc)
+
     ledger = _existing_ledger(supabase)
 
     processed = 0
