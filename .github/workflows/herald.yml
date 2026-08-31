@@ -43,6 +43,8 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
           PINTEREST_API_KEY: ${{ secrets.PINTEREST_API_KEY }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          BUFFER_ORG_ID: ${{ secrets.BUFFER_ORG_ID }}
           LITELLM_LOG: WARNING
         run: PYTHONPATH=. python agents/herald.py
 
