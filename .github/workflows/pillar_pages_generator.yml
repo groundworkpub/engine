@@ -1,0 +1,40 @@
+name: Pillar Pages Generator — Daily Static CDN Feeds
+
+on:
+  workflow_dispatch:     # Manual trigger only (All automated crons are centralized in groundworkpub/engine)
+
+permissions:
+  contents: write
+
+jobs:
+  build-static-feeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv
+
+      - name: Generate static pillar JSON feeds
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python scripts/generate_pillar_pages.py
+
+      - name: Commit and push generated feeds
+        run: |
+          git config user.name "Groundwork Feed Generator"
+          git config user.email "groundworkpub@gmail.com"
+          git add public/data/
+          git diff --cached --quiet || git commit -m "chore(feeds): sync daily pillar article JSON [skip ci]"
+          git push

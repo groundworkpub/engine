@@ -1,0 +1,52 @@
+name: Groundwork Open Knowledge & Pages Broadcaster
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max number of articles to build"
+        required: false
+        default: "1000"
+
+jobs:
+  sync-and-broadcast:
+    name: Sync GitHub Pages & Broadcast Omnichannel
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r agents/requirements.txt
+
+      - name: Build & Publish GitHub Pages
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SITE_URL: https://gworky.com
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '1000' }}"
+          python agents/github_pages_syncer.py --limit "$LIMIT"
+
+      - name: Run Omnichannel Broadcaster (GSC, IndexNow, WebSub, PodcastIndex)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SITE_URL: https://gworky.com
+          GSC_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON_B64 }}
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+          PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
+          PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
+        run: |
+          python agents/broadcaster.py --limit 20

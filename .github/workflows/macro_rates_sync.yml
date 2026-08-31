@@ -1,0 +1,85 @@
+name: Macro Rates & FRED Data Sync Cron
+
+# Single Source of Truth: Automated macro data sync for Groundwork
+# This workflow runs in groundworkpub/engine (public repo, unlimited free minutes)
+# and pushes the updated public/data/macro-rates.json to groundworkpub/media.
+
+on:
+  schedule:
+    # Run every Monday at 06:00 UTC (01:00 AM EST)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: macro-rates-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-macro-rates:
+    name: Sync FRED & Treasury Rates to Media Repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout media repository
+        uses: actions/checkout@v4
+        with:
+          repository: groundworkpub/media
+          token: ${{ secrets.GH_PAT_MEDIA || secrets.GITHUB_TOKEN }}
+          ref: main
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx
+
+      - name: Fetch live macroeconomic rates
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: |
+          python scripts/fetch_macro_rates.py
+
+      - name: Check for data changes
+        id: git_diff
+        run: |
+          git status --porcelain public/data/macro-rates.json
+          if [ -n "$(git status --porcelain public/data/macro-rates.json)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push updated macro rates
+        if: steps.git_diff.outputs.changed == 'true'
+        run: |
+          git config user.name "Groundwork Engine Bot"
+          git config user.email "bot@gworky.com"
+          git add public/data/macro-rates.json
+          git commit -m "chore(data): auto-update live macro rates and yield curve [skip ci]"
+          git push origin main
+
+      - name: Purge Cloudflare Edge Cache for macro-rates.json
+        if: steps.git_diff.outputs.changed == 'true' && secrets.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID || '67e2be0fcddb82637428c64471050fd8' }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"files":["https://gworky.com/data/macro-rates.json"]}'
+
+      - name: Send Telegram notification
+        if: always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_FOUNDER_CHAT_ID != ''
+        run: |
+          STATUS="${{ job.status }}"
+          CHANGED="${{ steps.git_diff.outputs.changed }}"
+          MESSAGE="📊 <b>Groundwork Macro Rates Sync</b>%0AStatus: <b>${STATUS}</b>%0AData Changed: <b>${CHANGED}</b>%0ARef: <code>groundworkpub/media:main</code>"
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=HTML"
