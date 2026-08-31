@@ -1,6 +1,8 @@
 name: SEO Observer — Indexation Control Plane
 
 on:
+  schedule:
+    - cron: "0 7 * * *" # Daily 07:00 UTC — SERPCTRL T-0001 + GOVERNOR daily anomalies
   workflow_dispatch:
     inputs:
       inspect_url:

@@ -1,0 +1,52 @@
+name: SCOUT — Keyword Demand Mining
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # Daily 06:00 UTC — SCOUT demand mining (F1)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — no DB writes"
+        required: false
+        default: "false"
+        type: boolean
+
+concurrency:
+  group: scout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scout:
+    name: SCOUT — GSC + Mangools + RapidAPI → Tickets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agents/requirements.txt
+      - name: Install dependencies
+        run: pip install -r agents/requirements.txt
+      - name: Run Keyword Scout (SCOUT)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GSC_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON_B64 }}
+          MANGOOLS_API_KEY: ${{ secrets.MANGOOLS_API_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          SEARCHAPI_API_KEY: ${{ secrets.SEARCHAPI_API_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python agents/keyword_scout.py --dry-run || true
+            python agents/keyword_graph.py --dry-run || true
+          else
+            python agents/keyword_scout.py || true
+            python agents/keyword_graph.py || true
+          fi

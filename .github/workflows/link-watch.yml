@@ -1,6 +1,8 @@
 name: Link Watch
 
 on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC — ACQUIRE weekly (F1 T-0008)
   workflow_dispatch:
 
 concurrency:
