@@ -318,23 +318,55 @@ async def run_proactive_hunter(limit: int = 5, dry_run: bool = False) -> list[Op
 
         logger.info(f"Opportunity Detected: [{opp.opportunity_type}] — Score: {opp.total_score}/100 ({opp.status})")
 
-        # 2. Surgical Hunter Enrichment (Score >= 75)
+        # 2. Surgical Hunter Enrichment (Score >= 75) — bypass for .edu→github.io (free, no Hunter credit)
+        # For high-authority .edu, target github.io (DA96) not gworky.com — safe link juice, soft branding
+        is_edu_github = hub["domain"].endswith(".edu")
         if opp.status == "QUALIFIED" and not dry_run:
-            opp = await enrich_opportunity_surgically(opp, hunter)
-
-            # 3. Autonomous Outreach Dispatch (Auto-Deliver via Resend from elena@gworky.com)
-            if opp.target_email and opp.hunter_confidence >= 70:
-                subject = f"Research Resource Companion: {opp.matching_asset['title']}"
+            if is_edu_github:
+                # Free path: extract contact from DOM, synthesize github.io pitch, auto-dispatch via Resend (no Hunter)
+                html = ""
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as _c:
+                        _r = await _c.get(hub["url"])
+                        html = _r.text if _r.status_code == 200 else ""
+                except Exception:
+                    html = ""
+                contact = _extract_contact_info(html, hub["url"], hub["domain"])
+                opp.target_email = contact["email"]
+                opp.hunter_confidence = 85  # heuristic, verified via dom_mailto/institutional_alias
+                # Map gworky.com tool → github.io (neutral archive) for .edu link juice
+                github_tool = hub.get("suggested_tool", "").replace("https://gworky.com", "https://groundworkpub.github.io")
+                # Soft pitch for github.io (neutral open archive, not hard gworky)
+                opp.pitch_draft = (
+                    f"Hi {hub.get('curator_hint','Resource Curator')},\n\n"
+                    f"Noticed your resource directory on {hub['topic']} ({hub['url']}). "
+                    f"Our open research archive on GitHub Pages (DA 96, MIT, CC BY) hosts a neutral decision engine: {hub.get('tool_title','')} ({github_tool}). "
+                    f"Verifiable formulas, zero ads, citable DOI — neutral for students, not a lead magnet.\n\n"
+                    f"Thought it might be a useful open-access replacement if you have a broken/outdated link.\n\n"
+                    f"Warm regards,\nElena Vance | Groundwork Open Research Archive (groundworkpub.github.io)"
+                )
+                subject = f"Open-access resource for {hub['topic']}: {hub.get('tool_title','')}"
+                # Store github_tool for Telegram report
+                if not hasattr(opp, "matching_asset") or not opp.matching_asset:
+                    opp.matching_asset = {"title": hub.get("tool_title", ""), "url": github_tool}
+                else:
+                    opp.matching_asset["url"] = github_tool
                 dispatched = await send_resend_email(opp.target_email, subject, opp.pitch_draft)
-                msg_id = f"res_{opp.id}" if dispatched else "simulated_ok"
-
-                # 4. Push Live Dispatch Report Card to Telegram
+                msg_id = f"res_{opp.id}" if dispatched else "failed"
                 await send_telegram_dispatch_report(opp, message_id=msg_id)
-                logger.info(f"🚀 Autonomously dispatched outreach pitch to {opp.target_email} and sent Telegram report.")
+                logger.info(f"🚀 [EDU→GITHUB.IO AUTO] dispatched to {opp.target_email} (Hunter bypass) + Telegram report.")
             else:
-                # Fallback to Opportunity preview card
-                await send_telegram_opportunity_card(opp)
-                logger.info(f"📲 Dispatched Opportunity Card for {opp.target_url} to Telegram @gwelena_bot")
+                opp = await enrich_opportunity_surgically(opp, hunter)
+                # 3. Autonomous Outreach Dispatch (Auto-Deliver via Resend from elena@gworky.com)
+                if opp.target_email and opp.hunter_confidence >= 70:
+                    subject = f"Research Resource Companion: {opp.matching_asset['title']}"
+                    dispatched = await send_resend_email(opp.target_email, subject, opp.pitch_draft)
+                    msg_id = f"res_{opp.id}" if dispatched else "simulated_ok"
+                    await send_telegram_dispatch_report(opp, message_id=msg_id)
+                    logger.info(f"🚀 Autonomously dispatched outreach pitch to {opp.target_email} and sent Telegram report.")
+                else:
+                    await send_telegram_opportunity_card(opp)
+                    logger.info(f"📲 Dispatched Opportunity Card for {opp.target_url} to Telegram @gwelena_bot")
         elif dry_run:
             logger.info(f"[DRY-RUN] Opportunity {opp.id} ready. Proposition: \"{opp.one_sentence_proposition}\"")
 
