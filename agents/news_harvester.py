@@ -17,6 +17,8 @@ from typing import Any
 import httpx
 from agents.authority_injector import _load_env_local
 
+from resilience import redact_message
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("news_harvester")
 
@@ -132,7 +134,7 @@ def harvest_feed(url: str, pillar: str, limit: int = 5) -> list[NewsItem]:
 
             return items
     except Exception as exc:
-        logger.warning("Failed to parse feed %s: %s", url, exc)
+        logger.warning("Failed to parse feed %s: %s", url, redact_message(str(exc)))
         return []
 
 
@@ -182,7 +184,7 @@ def trigger_wire_revalidation() -> None:
             else:
                 logger.warning("Revalidate endpoint responded with %d: %s", resp.status_code, resp.text)
     except Exception as exc:
-        logger.warning("Failed to trigger ISR revalidation: %s", exc)
+        logger.warning("Failed to trigger ISR revalidation: %s", redact_message(str(exc)))
 
 
 if __name__ == "__main__":

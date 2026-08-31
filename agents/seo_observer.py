@@ -493,7 +493,7 @@ def _topic_keywords(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z]+", text.lower()) if w not in _STOPWORDS and len(w) > 2]
 
 
-def _weave_link_into_prose(host_content: str, target_url: str, target_title: str) -> Optional[str]:
+def _weave_link_into_prose(host_content: str, target_url: str, target_title: str) -> str | None:
     """Weave a contextual markdown link into an existing prose sentence.
 
     Per §2.7 anti-spam rules this NEVER appends template sentences ("For related
@@ -546,7 +546,7 @@ def _weave_link_into_prose(host_content: str, target_url: str, target_title: str
     #    ("credits") are included in the anchor instead of cut mid-word.
     #    N-grams derive from title content words, so edges are already clean.
     anchor_span = None
-    for size, phrase in ngrams:
+    for _size, phrase in ngrams:
         m = re.search(r"\b" + re.escape(phrase) + r"[a-z]{0,3}\b", low_sent)
         if m:
             anchor_span = (m.start(), m.end())
@@ -608,9 +608,12 @@ def inject_orphan_link(host_article: dict, target_article: dict, dry_run: bool) 
     target_title = target_article.get("title", "")
 
     # Strict Topical Silo check: host and target must belong to the same pillar
-    if host_article.get("pillar") and target_article.get("pillar"):
-        if host_article.get("pillar") != target_article.get("pillar"):
-            return False
+    if (
+        host_article.get("pillar")
+        and target_article.get("pillar")
+        and host_article.get("pillar") != target_article.get("pillar")
+    ):
+        return False
 
     # Don't inject if link already exists or article already has 2+ internal links
     if target_url in host_content or target_article.get("slug", "") in host_content:
@@ -647,7 +650,6 @@ def inject_orphan_link(host_article: dict, target_article: dict, dry_run: bool) 
     except Exception as e:
         log.warning("Failed to inject orphan link: %s", e)
     return False
-
 def trigger_revalidate(slug: str) -> None:
     """Trigger ISR revalidation for an article page."""
     if not REVALIDATE_SECRET:

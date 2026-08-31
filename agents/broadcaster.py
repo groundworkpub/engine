@@ -26,7 +26,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from agents.authority_injector import _load_env_local, get_supabase_client
-from agents.gsc_manager import list_gsc_sites, submit_gsc_sitemap
+from agents.gsc_manager import submit_gsc_sitemap
 from agents.podcast_syndicator import ping_podcast_index_hub
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -76,10 +76,14 @@ def ping_websub_hubs(feed_urls: list[str] | None = None) -> dict[str, int]:
 def ping_indexnow(urls: list[str], host: str = "gworky.com") -> bool:
     """Submits URLs directly to IndexNow for instantaneous crawling by Bing & Yandex."""
     _load_env_local()
-    key = os.environ.get("INDEXNOW_KEY", "b38153c30628469d80d2871f76d47b59")
+    key = os.environ.get("INDEXNOW_KEY", "")
 
     if not urls:
         logger.info("No URLs provided for IndexNow ping.")
+        return False
+
+    if not key:
+        logger.warning("INDEXNOW_KEY not configured — skipping ping")
         return False
 
     payload = {

@@ -221,6 +221,18 @@ class SmartPolicySelector:
         if force:
             return self._get_from_route(force, geo)
 
+        # SERP recon: MUST route through geo-coherent residential egress (a bare
+        # direct/VPN hit triggers the Google bot-gate — verified live). DataImpulse
+        # residential is the only route that returns a real proxied HTTP URL for
+        # SERP position scanning. Fall back to cloud-worker/public-pool only if
+        # DataImpulse is unavailable; never return None (direct) here.
+        if task_type == "serp_recon":
+            for name in ["dataimpulse", "cloudflare_workers", "public_proxy_pool"]:
+                url = self._get_from_route(name, geo)
+                if url:
+                    return url
+            return None
+
         # In cloud mode: DataImpulse Residential is Priority 1 for human simulation,
         # with fallback to Cloudflare Workers, then Public Pool.
         if _is_cloud():

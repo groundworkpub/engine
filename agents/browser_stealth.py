@@ -23,6 +23,13 @@ from typing import Any
 # Domains cover: DSPs, SSPs, DMPs, pixel trackers, analytics beacons.
 AD_BLOCK_DOMAINS: frozenset[str] = frozenset(
     [
+        # Monetag / Propeller Ads ecosystem (zero-fraud firewall)
+        "quge5.com",
+        "3nbf4.com",
+        "5gvci.com",
+        "monetag.com",
+        "propellerads.com",
+        "propellerclick.com",
         # Google Ads ecosystem
         "googlesyndication.com",
         "doubleclick.net",
