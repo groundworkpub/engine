@@ -7,13 +7,13 @@ name: Autonomous pSEO Pipeline Engine Cron
 on:
   schedule:
     # Run every Wednesday and Sunday at 04:00 UTC
-    - cron: '0 4 * * 0,3'
+    - cron: "0 4 * * 0,3"
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Run in dry-run mode (no DB writes)'
+        description: "Run in dry-run mode (no DB writes)"
         required: false
-        default: 'false'
+        default: "false"
         type: boolean
 
 concurrency:
@@ -38,8 +38,8 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4

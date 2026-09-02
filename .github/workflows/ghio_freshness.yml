@@ -33,15 +33,15 @@ jobs:
           TODAY=$(date -u +"%Y-%m-%d")
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           RFC822=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
-          
+
           echo "Updating ghio freshness timestamps to $NOW ($RFC822)..."
-          
+
           # Update dateModified in Schema.org JSON-LD and OpenGraph modified_time across all HTML pages
           # Note: Linux sed requires -i without empty string argument
           find ghio -name "*.html" -exec sed -i -E \
             -e "s|\"dateModified\": \"[^\"]*\"|\"dateModified\": \"${NOW}\"|g" \
             -e "s|<meta property=\"article:modified_time\" content=\"[^\"]*\">|<meta property=\"article:modified_time\" content=\"${NOW}\">|g" {} +
-          
+
           # Update lastBuildDate in RSS and Atom feeds
           for feed in ghio/feed.xml ghio/rss.xml ghio/atom.xml; do
             if [ -f "$feed" ]; then
@@ -56,19 +56,19 @@ jobs:
           git config user.name "groundwork-bot"
           git config user.email "groundwork-bot@users.noreply.github.com"
           git add -A
-          
+
           if git diff --cached --quiet; then
             echo "No changes — repository is already fresh."
             echo "updated=false" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           TODAY=$(date -u +"%Y-%m-%d")
           ARTICLE_COUNT=$(find . -name "*.html" ! -name "index.html" ! -name "404.html" | wc -l | tr -d ' ')
-          
+
           git commit -m "chore(freshness): dateModified+lastBuildDate ${TODAY} [skip ci]"
           git push origin main
-          
+
           echo "updated=true" >> $GITHUB_OUTPUT
           echo "count=${ARTICLE_COUNT}" >> $GITHUB_OUTPUT
           echo "today=${TODAY}" >> $GITHUB_OUTPUT
@@ -81,7 +81,7 @@ jobs:
         run: |
           COUNT="${{ steps.commit_push.outputs.count || '700+' }}"
           DATE="${{ steps.commit_push.outputs.today || 'today' }}"
-          
+
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d text="⚡ <b>Discover Freshness Keeper:</b> Successfully updated <b>${COUNT}</b> NewsArticle <code>dateModified</code> and RSS <code>lastBuildDate</code> for <b>${DATE}</b> on <code>groundworkpub.github.io</code>." \

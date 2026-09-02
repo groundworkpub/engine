@@ -209,39 +209,50 @@ def generate_referral_context(
     preferred_channel: str | None = None,
 ) -> ReferralContext:
     """
-    Synthesizes authentic organic traffic origins:
-    1. Google Search SERP Click (60% default)
-    2. YouTube Gworky Channel/Podcast Description (30% default)
-    3. Topic Silo & Internal Category (10% default)
+    Synthesizes authentic multi-channel organic traffic origins:
+    1. Google Search SERP Click with gworky footprint & dorks (50% default)
+    2. Competitor Alternative / Switch Search (15% default)
+    3. YouTube Gworky Video & Spoken Journalism Description (15% default)
+    4. Pinterest Rich Pin / Visual Referral (10% default)
+    5. Dev.to / GitHub Pages Tier-2 Buffer (5% default)
+    6. Topic Silo & Internal Category (5% default)
     """
     site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
     dest_url = f"{site_url}/article/{article_slug}"
 
     if not preferred_channel:
         dice = random.random()
-        if dice < 0.60:
+        if dice < 0.50:
             channel = "google_search"
-        elif dice < 0.90:
+        elif dice < 0.65:
+            channel = "competitor_switch"
+        elif dice < 0.80:
             channel = "youtube_gworky"
+        elif dice < 0.90:
+            channel = "pinterest_pin"
+        elif dice < 0.95:
+            channel = "tier2_buffer"
         else:
             channel = "topic_silo"
     else:
         channel = preferred_channel
 
+    clean_title = article_title.lower().replace("evidence-based", "").replace("how to", "").strip()
+
     if channel == "google_search":
-        # Generate natural search query variants
+        # Razor-sharp gworky brand footprints and Google Dorks (Avoid generic red-ocean "groundwork")
         query_variants = [
-            article_title.lower(),
-            f"how to {article_title.lower().replace('how to ', '')}",
-            f"{pillar} {article_title.lower()}",
-            f"evidence based guide {article_title.lower()}",
-            f"{article_title.lower()} breakdown",
+            f"gworky {clean_title}",
+            f"site:gworky.com {clean_title}",
+            f'"gworky.com" {clean_title}',
+            f"gworky {pillar} {clean_title}",
+            f"how to {clean_title} gworky",
+            f"gworky.com/article/{article_slug}",
         ]
         chosen_query = random.choice(query_variants)
         encoded_query = urllib.parse.quote_plus(chosen_query)
         encoded_dest = urllib.parse.quote_plus(dest_url)
 
-        # Authentic Google SERP Click redirect URL
         google_ved = f"2ahUKEwi{uuid.uuid4().hex[:12]}_{uuid.uuid4().hex[:6]}"
         referrer = f"https://www.google.com/url?sa=t&rct=j&q={encoded_query}&esrc=s&source=web&cd=1&ved={google_ved}&url={encoded_dest}"
 
@@ -256,13 +267,46 @@ def generate_referral_context(
             },
         )
 
+    elif channel == "competitor_switch":
+        # Competitor switch and alternative queries
+        competitors = {
+            "money": ["bankrate", "nerdwallet", "smartasset", "investopedia"],
+            "body": ["examine", "healthline", "labdoor"],
+            "home": ["energysage", "bob vila", "this old house"],
+            "life": ["nomad list", "numbeo", "kayak"],
+            "tech": ["toms guide", "wirecutter", "rtings"],
+        }.get(pillar.lower(), ["nerdwallet", "bankrate", "wirecutter"])
+
+        comp = random.choice(competitors)
+        switch_queries = [
+            f"{comp} vs gworky {clean_title}",
+            f"{comp} alternative gworky",
+            f"switch from {comp} to gworky",
+            f"gworky {pillar} calculator vs {comp}",
+        ]
+        chosen_query = random.choice(switch_queries)
+        encoded_query = urllib.parse.quote_plus(chosen_query)
+        encoded_dest = urllib.parse.quote_plus(dest_url)
+
+        google_ved = f"2ahUKEwi{uuid.uuid4().hex[:12]}_{uuid.uuid4().hex[:6]}"
+        referrer = f"https://www.google.com/url?sa=t&rct=j&q={encoded_query}&esrc=s&source=web&cd=1&ved={google_ved}&url={encoded_dest}"
+
+        return ReferralContext(
+            channel="competitor_switch",
+            referrer_url=referrer,
+            search_query=chosen_query,
+            extra_headers={
+                "Sec-Fetch-Site": "cross-site",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+        )
+
     elif channel == "youtube_gworky":
-        # YouTube Gworky official channel or video description link
         video_id = youtube_video_id or "dQw4w9WgXcQ"
         encoded_dest = urllib.parse.quote_plus(dest_url)
         redir_token = uuid.uuid4().hex
 
-        # Authentic YouTube redirect or direct watch page referrer
         if random.random() < 0.5:
             referrer = f"https://www.youtube.com/watch?v={video_id}"
         else:
@@ -279,8 +323,38 @@ def generate_referral_context(
             },
         )
 
+    elif channel == "pinterest_pin":
+        pin_id = f"{random.randint(100000000000000, 999999999999999)}"
+        referrer = f"https://www.pinterest.com/pin/{pin_id}/"
+        return ReferralContext(
+            channel="pinterest_pin",
+            referrer_url=referrer,
+            extra_headers={
+                "Sec-Fetch-Site": "cross-site",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+        )
+
+    elif channel == "tier2_buffer":
+        # Emulate traffic arriving from Dev.to, GitHub Pages, or Mastodon
+        t2_sources = [
+            f"https://dev.to/groundworkpub/{article_slug}",
+            "https://groundworkpub.github.io/",
+            "https://mastodon.social/@gworky",
+        ]
+        referrer = random.choice(t2_sources)
+        return ReferralContext(
+            channel="tier2_buffer",
+            referrer_url=referrer,
+            extra_headers={
+                "Sec-Fetch-Site": "cross-site",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+        )
+
     else:
-        # Internal Topic Hub / Pillar navigation
         referrer = f"{site_url}/{pillar}"
         return ReferralContext(
             channel="topic_silo",

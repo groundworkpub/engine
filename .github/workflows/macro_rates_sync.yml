@@ -7,7 +7,7 @@ name: Macro Rates & FRED Data Sync Cron
 on:
   schedule:
     # Run every Monday at 06:00 UTC (01:00 AM EST)
-    - cron: '0 6 * * 1'
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -32,8 +32,8 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: |

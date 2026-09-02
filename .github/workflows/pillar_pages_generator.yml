@@ -1,7 +1,7 @@
 name: Pillar Pages Generator — Daily Static CDN Feeds
 
 on:
-  workflow_dispatch:     # Manual trigger only (All automated crons are centralized in groundworkpub/engine)
+  workflow_dispatch: # Manual trigger only (All automated crons are centralized in groundworkpub/engine)
 
 permissions:
   contents: write
