@@ -2,7 +2,7 @@ name: Content Pipeline
 
 on:
   schedule:
-    - cron: "0 3 * * *" # Daily fallback runner (03:00 UTC)
+    - cron: "0 */4 * * *" # Every 4 hours (00,04,08,12,16,20 UTC) — B1 deadline guard verified 2026-09-02
   workflow_dispatch: # Manual trigger from GitHub UI or dashboard
 
 concurrency:
@@ -100,7 +100,7 @@ jobs:
     name: Keyword Scout (Agent 4)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event.schedule == '0 3 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
@@ -174,7 +174,7 @@ jobs:
     name: Organic Engagement Simulator (Agent 6)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event.schedule == '0 3 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
@@ -207,7 +207,7 @@ jobs:
     name: Autonomous Opportunity Hunter & Outreach (Agent 7)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event.schedule == '0 3 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
