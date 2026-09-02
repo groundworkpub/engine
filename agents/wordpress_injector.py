@@ -196,10 +196,14 @@ def extract_target_article_context(url: str, use_proxy: bool = False) -> dict[st
             text_chunks = [p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 40]
             result["content_excerpt"] = " ".join(text_chunks[:5])[:1200]
 
-            # Extract comment_post_ID
+            # Extract comment_post_ID (input field or body/article class regex fallback)
             post_id_input = soup.find("input", {"name": "comment_post_ID"})
             if post_id_input and post_id_input.get("value"):
                 result["post_id"] = post_id_input.get("value")
+            else:
+                m_pid = re.search(r'(?:postid|post)-(\d+)', resp.text)
+                if m_pid:
+                    result["post_id"] = m_pid.group(1)
 
             # Extract comment form action
             comment_form = soup.find("form", {"id": re.compile(r"commentform", re.I)}) or soup.find("form", {"action": re.compile(r"wp-comments-post\.php", re.I)})
@@ -313,8 +317,17 @@ def submit_wordpress_comment(
             resp = client.post(action_url, data=payload, headers=headers)
             # WordPress returns 302 redirect back to the post URL with #comment-XXX fragment on success
             if resp.status_code in (200, 302):
-                logger.info(f"Comment successfully submitted to {action_url} (HTTP {resp.status_code})")
-                return True, resp.status_code, "submitted"
+                final_url = str(resp.url)
+                is_unapproved = "unapproved=" in final_url or "moderation-hash=" in final_url or "awaiting moderation" in resp.text.lower()
+                comment_id_match = re.search(r"#comment-(\d+)", final_url)
+                comment_id = comment_id_match.group(1) if comment_id_match else None
+
+                if is_unapproved:
+                    logger.info(f"Comment received and queued for moderation (Comment ID: {comment_id or 'pending'})")
+                    return True, resp.status_code, "moderated"
+                else:
+                    logger.info(f"Comment LIVE and approved (Comment ID: {comment_id or 'live'})")
+                    return True, resp.status_code, "live"
             else:
                 logger.warning(f"Comment submission failed with HTTP {resp.status_code}")
                 return False, resp.status_code, f"http_{resp.status_code}"
@@ -371,11 +384,12 @@ def log_injection_to_supabase(
                 tier2_dest["url"],
                 persona["name"],
                 True,
-                "published" if status == "submitted" else "draft",
+                "published" if status == "live" else "draft",
                 json.dumps({
                     "author": persona["name"],
                     "dr": tier2_dest["dr"],
                     "platform": tier2_dest["platform"],
+                    "moderation_state": status,
                     "http_code": http_code,
                     "anchor_name": tier2_dest["anchor_name"],
                 }),
