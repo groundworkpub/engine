@@ -37,7 +37,8 @@ jobs:
           data=r.json()
           fixed=0
           for a in data:
-              if "[Groundwork](https://gworky.com" in a['content']:
+              has_substantive = ("/article/" in a['content'] or "/tools/" in a['content'] or any(f"/{p}" in a['content'] for p in ["/money","/body","/home","/life","/tech"]))
+              if has_substantive:
                   continue
               r2=httpx.get(f"{url}/rest/v1/articles?select=title,slug,pillar&status=eq.published&pillar=eq.{a['pillar']}&limit=5", headers={"apikey":key,"Authorization":f"Bearer {key}"}, timeout=10)
               sibs=r2.json() if r2.status_code==200 else []
