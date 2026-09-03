@@ -64,7 +64,7 @@ _KNOWN_TOP_LEVEL = {
     "wire", "podcast", "standards", "brand", "press", "citations",
     "citations-tracker", "help", "editorial-policy", "how-we-make-money",
     "partnership", "disclaimer", "advertise", "privacy-policy",
-    "terms-of-service", "topic",
+    "terms-of-service", "topic", "compare", "open",
 }
 
 # Hard injection signatures — always CRITICAL regardless of baseline.
@@ -298,6 +298,127 @@ def audit_page_html(report: GuardReport, url: str, html: str) -> None:
         report.findings.append(Finding("warning", "cloaking", url, "UA-gated redirect pattern in scripts"))
 
 
+def audit_differential_cloaking(report: GuardReport, url: str) -> None:
+    """Probes a URL with Googlebot vs Mobile Safari to detect sneaky redirect/content cloaking."""
+    bot_ua = "Googlebot/2.1 (+http://www.google.com/bot.html)"
+    mobile_ua = (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    )
+
+    def _fetch_meta(ua: str) -> tuple[int, str, str]:
+        req = urllib.request.Request(url, headers={"User-Agent": ua})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+                final_url = resp.geturl()
+                code = resp.status
+                body = resp.read(500_000).decode("utf-8", errors="replace")
+                title_m = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
+                title = title_m.group(1).strip() if title_m else ""
+                return code, final_url, title
+        except urllib.error.HTTPError as err:
+            return err.code, "", ""
+        except Exception:
+            return 0, "", ""
+
+    bot_code, bot_final, bot_title = _fetch_meta(bot_ua)
+    mob_code, mob_final, mob_title = _fetch_meta(mobile_ua)
+
+    if not bot_code or not mob_code:
+        return
+
+    # 1. Divergence in final netloc (redirect cloaking)
+    bot_netloc = urlparse(bot_final).netloc
+    mob_netloc = urlparse(mob_final).netloc
+    if bot_netloc and mob_netloc and bot_netloc != mob_netloc:
+        report.findings.append(
+            Finding(
+                "critical",
+                "cloaking-differential",
+                url,
+                f"redirect divergence: bot landed at {bot_final} but mobile landed at {mob_final}",
+            )
+        )
+
+    # 2. Status code divergence
+    if bot_code == 200 and mob_code in (301, 302, 307):
+        report.findings.append(
+            Finding(
+                "critical",
+                "cloaking-differential",
+                url,
+                f"status code divergence: bot got 200 OK while mobile was redirected ({mob_code})",
+            )
+        )
+
+
+def audit_sensitive_endpoints(report: GuardReport) -> None:
+    """Verifies that high-risk recon targets return strict 404/403 without leaking credentials."""
+    targets = [
+        "/.env",
+        "/.env.local",
+        "/.git/HEAD",
+        "/wp-login.php",
+        "/config.php.bak",
+        "/admin_backup_v2/",
+    ]
+    for path in targets:
+        target_url = f"{report.base_url.rstrip('/')}{path}"
+        req = urllib.request.Request(target_url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+                body = resp.read(4096).decode("utf-8", errors="replace")
+                if "DATABASE_URL" in body or "SUPABASE_KEY" in body or "ref: refs/heads" in body:
+                    report.findings.append(
+                        Finding("critical", "secret-leak", target_url, "exposed sensitive file contents detected!")
+                    )
+        except urllib.error.HTTPError as err:
+            # 404 or 403 are expected safe responses
+            if err.code not in (404, 403):
+                report.findings.append(
+                    Finding("warning", "recon-endpoint", target_url, f"unexpected HTTP response {err.code}")
+                )
+        except Exception:
+            pass
+
+
+def audit_supabase_rls(report: GuardReport) -> None:
+    """Verifies that Supabase public anon key cannot execute unauthorized write operations (Anti-BOLA/SQLi)."""
+    supabase_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+    anon_key = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    if not supabase_url or not anon_key:
+        return
+
+    test_url = f"{supabase_url.rstrip('/')}/rest/v1/articles"
+    headers = {
+        "apikey": anon_key,
+        "Authorization": f"Bearer {anon_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    payload = json.dumps({"slug": "security-sentinel-test-probe", "title": "Unauthorized Probe Injection"}).encode()
+    req = urllib.request.Request(test_url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+            if resp.status in (200, 201):
+                report.findings.append(
+                    Finding(
+                        "critical",
+                        "supabase-rls",
+                        test_url,
+                        "CRITICAL: Supabase public anon key successfully inserted data! RLS policy missing or broken!",
+                    )
+                )
+    except urllib.error.HTTPError as err:
+        # Expected response: 401 Unauthorized or 403 Forbidden / 42501 Insufficient Privilege
+        if err.code not in (401, 403):
+            report.findings.append(
+                Finding("warning", "supabase-rls", test_url, f"RLS mutation returned unexpected code: {err.code}")
+            )
+    except Exception:
+        pass
+
+
 def run_guard(base_url: str, sample: int) -> GuardReport:
     report = GuardReport(base_url=base_url)
     sitemap_urls = audit_sitemap(report)
@@ -310,6 +431,14 @@ def run_guard(base_url: str, sample: int) -> GuardReport:
         if html and not _looks_like_xml(html):
             report.sampled_pages += 1
             audit_page_html(report, u, html)
+
+    # Dual-UA Cloaking Probing on top 5 sample pages
+    for u in candidates[: min(5, len(candidates))]:
+        audit_differential_cloaking(report, u)
+
+    # Sensitive endpoints & RLS verification
+    audit_sensitive_endpoints(report)
+    audit_supabase_rls(report)
 
     audit_feed_parity(report, sitemap_urls)
     return report

@@ -235,7 +235,7 @@ Rules:
 6. Return ONLY the comment text without quotation marks or preamble.
 """
 
-    # Try Groq first
+    # Try Groq first (ultra-low latency ~300ms)
     groq_key = os.getenv("GROQ_API_KEY")
     if groq_key:
         try:
@@ -244,7 +244,7 @@ Rules:
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "llama-3.3-70b-versatile",
+                        "model": "qwen/qwen3.8-27b",
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.5,
                         "max_tokens": 250,
@@ -252,16 +252,18 @@ Rules:
                 )
                 if resp.status_code == 200:
                     return resp.json()["choices"][0]["message"]["content"].strip()
+                else:
+                    logger.warning(f"Groq API error {resp.status_code}: {resp.text[:150]}")
         except Exception as e:
             logger.warning(f"Groq comment generation failed: {e}")
 
-    # Fallback to Gemini Flash
+    # Fallback to Gemini 2.5 Flash
     gemini_key = os.getenv("GEMINI_API_KEY")
     if gemini_key:
         try:
             with httpx.Client(timeout=15.0) as client:
                 resp = client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
                     headers={"Content-Type": "application/json"},
                     json={"contents": [{"parts": [{"text": prompt}]}]},
                 )
@@ -270,6 +272,8 @@ Rules:
                     candidates = data.get("candidates", [])
                     if candidates:
                         return candidates[0]["content"]["parts"][0]["text"].strip()
+                else:
+                    logger.warning(f"Gemini API error {resp.status_code}: {resp.text[:150]}")
         except Exception as e:
             logger.warning(f"Gemini comment generation failed: {e}")
 

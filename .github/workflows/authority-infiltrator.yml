@@ -1,0 +1,54 @@
+name: Authority Infiltration & Sentinel Matrix
+
+on:
+  schedule:
+    # Runs twice weekly on Wednesday and Sunday at 04:30 UTC
+    - cron: '30 4 * * 0,3'
+  workflow_dispatch:
+    inputs:
+      pillar:
+        description: 'Pillar to infiltrate (money, home, body, life, tech, or all)'
+        required: true
+        default: 'all'
+      execute:
+        description: 'Execute live deployment (true/false)'
+        type: boolean
+        default: true
+
+jobs:
+  authority-infiltration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Engine
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install httpx huggingface_hub
+
+      - name: Run Authority Infiltrator Matrix
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MEDIA }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_FOUNDER_CHAT_ID: ${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}
+        run: |
+          FLAGS="--all"
+          if [ "${{ github.event.inputs.execute }}" == "true" ] || [ "${{ github.event_name }}" == "schedule" ]; then
+            FLAGS="$FLAGS --execute"
+          else
+            FLAGS="$FLAGS --dry-run"
+          fi
+          python agents/authority_infiltrator.py $FLAGS
