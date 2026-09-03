@@ -98,20 +98,26 @@ See `data.json` for records.
     print(f"[huggingface] {pillar} → {url}")
     return url
 
+PILLARS = ["money", "body", "home", "life", "tech"]
+
 def main():
     ap = argparse.ArgumentParser(description="Dataset syndicator Tier 2")
-    ap.add_argument("--pillar", default="tech", help="Pillar to export")
-    ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--pillar", default="all", help="Pillar to export (money, body, home, life, tech, or all)")
+    ap.add_argument("--all", action="store_true", help="Export all pillars")
+    ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     supa = get_supabase()
-    rows = supa.table("articles").select("slug,title,pillar,published_at").eq("status", "published").eq("pillar", args.pillar).order("published_at", desc=True).limit(args.limit).execute().data or []
-    if not rows:
-        print(f"No articles for pillar {args.pillar}")
-        sys.exit(1)
-    ds = build_dataset_for_articles(rows, args.pillar)
-    upload_huggingface(ds, args.pillar, dry_run=args.dry_run)
+    target_pillars = PILLARS if (args.all or args.pillar.lower() == "all") else [args.pillar.lower()]
+
+    for p in target_pillars:
+        rows = supa.table("articles").select("slug,title,pillar,published_at").eq("status", "published").eq("pillar", p).order("published_at", desc=True).limit(args.limit).execute().data or []
+        if not rows:
+            print(f"[warning] No articles for pillar {p}")
+            continue
+        ds = build_dataset_for_articles(rows, p)
+        upload_huggingface(ds, p, dry_run=args.dry_run)
 
 if __name__ == "__main__":
     main()
