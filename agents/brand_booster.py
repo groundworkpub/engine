@@ -95,11 +95,25 @@ class BrandKeywordBooster:
         backend: str = "searxng",
         dry_run: bool = False,
         geo_region: str = "US",
+        proxy_url: str | None = None,
     ) -> None:
         self.supabase = supabase
         self.backend = backend
         self.dry_run = dry_run
         self.geo_region = geo_region
+        self.proxy_url = proxy_url or self._resolve_proxy(geo_region)
+        if self.proxy_url:
+            logger.info("🛡️  Brand Booster proxy enabled (%s residential)", geo_region)
+
+    def _resolve_proxy(self, geo_region: str) -> str | None:
+        login = os.environ.get("DATAIMPULSE_LOGIN")
+        pwd = os.environ.get("DATAIMPULSE_PASSWORD")
+        host = os.environ.get("DATAIMPULSE_HOST", "gw.dataimpulse.com")
+        port = os.environ.get("DATAIMPULSE_PORT", "823")
+        if login and pwd:
+            c = "us" if geo_region.lower() in ["us", "usa"] else ("gb" if geo_region.lower() in ["uk", "gb", "gbr"] else "au")
+            return f"http://{login}__cr.{c}:{pwd}@{host}:{port}"
+        return None
 
     def generate_query_matrix(self, articles: list[dict[str, Any]]) -> list[BrandQuery]:
         """Builds a 3-tier brand query matrix from published articles."""
@@ -179,7 +193,7 @@ class BrandKeywordBooster:
             "Accept": "*/*",
         }
         try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=10.0, follow_redirects=True) as client:
                 resp = await client.get(
                     "https://suggestqueries.google.com/complete/search",
                     params=params,
@@ -206,7 +220,7 @@ class BrandKeywordBooster:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=12.0, follow_redirects=True) as client:
                 resp = await client.get(
                     "https://html.duckduckgo.com/html/",
                     params=params,
@@ -233,7 +247,7 @@ class BrandKeywordBooster:
             "Accept": "application/json",
         }
         try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=10.0, follow_redirects=True) as client:
                 resp = await client.get(
                     "https://hn.algolia.com/api/v1/search",
                     params=params,
@@ -265,7 +279,7 @@ class BrandKeywordBooster:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=12.0, follow_redirects=True) as client:
                 resp = await client.get(f"{instance}/search", params=params, headers=headers)
                 if resp.status_code == 200 and len(resp.text) > 200:
                     logger.info(
@@ -336,6 +350,8 @@ def main() -> None:
     parser.add_argument("--pillar", type=str, default=None, help="Pillar filter (money, home, body, tech, life)")
     parser.add_argument("--backend", type=str, default="searxng", choices=["searxng", "patchright"], help="Search backend")
     parser.add_argument("--dry-run", action="store_true", help="Print query matrix without sending requests")
+    parser.add_argument("--proxy", type=str, default=None, help="Optional HTTP/SOCKS5 proxy URL")
+    parser.add_argument("--geo", type=str, default="US", help="Target geo region (US, UK, AU)")
     args = parser.parse_args()
 
     supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
@@ -346,7 +362,13 @@ def main() -> None:
         sys.exit(1)
 
     supabase = create_client(supabase_url, supabase_key)
-    booster = BrandKeywordBooster(supabase=supabase, backend=args.backend, dry_run=args.dry_run)
+    booster = BrandKeywordBooster(
+        supabase=supabase,
+        backend=args.backend,
+        dry_run=args.dry_run,
+        geo_region=args.geo,
+        proxy_url=args.proxy,
+    )
     asyncio.run(booster.run(limit=args.limit, pillar=args.pillar))
 
 

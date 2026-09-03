@@ -8,11 +8,23 @@ on:
       limit:
         description: "Number of targets to simulate"
         required: false
-        default: "5"
-      channel:
-        description: "Force specific channel (google_search, youtube_gworky, topic_silo)"
+        default: "2"
+      allow_ga4:
+        description: "Allow GA4 & GTM network requests (AdSense remains 100% blocked)"
+        required: false
+        default: "true"
+      slug:
+        description: "Target specific article slug (optional)"
         required: false
         default: ""
+      channel:
+        description: "Force specific channel (google_search, competitor_switch, tier2_buffer, direct, youtube_gworky)"
+        required: false
+        default: ""
+      run_brand_booster:
+        description: "Execute Stage 1: Brand Keyword Booster (search-only queries)"
+        required: false
+        default: "true"
 
 concurrency:
   group: traffic-simulation
@@ -23,9 +35,9 @@ permissions:
 
 jobs:
   simulate-organic-traffic:
-    name: Run Organic Engagement & Discovery Simulator
+    name: Run Dual-Stage Traffic & Brand Discovery Engine
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Repository
@@ -42,8 +54,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r agents/requirements.txt
+          playwright install --with-deps chromium
 
-      - name: Execute Organic Simulation
+      - name: Stage 1 — Brand Keyword Booster (Search-Only)
+        if: ${{ github.event.inputs.run_brand_booster == 'true' || github.event_name == 'schedule' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATAIMPULSE_LOGIN: ${{ secrets.DATAIMPULSE_LOGIN }}
+          DATAIMPULSE_PASSWORD: ${{ secrets.DATAIMPULSE_PASSWORD }}
+          DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
+          DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
+        run: |
+          echo "🚀 Executing Stage 1: Brand Keyword Booster across Google Autocomplete, DuckDuckGo & SearXNG"
+          PYTHONPATH=agents python agents/brand_booster.py --limit 5
+
+      - name: Stage 2 — Organic Browser Simulator (Retention & Tool Engagement)
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -53,9 +79,21 @@ jobs:
           DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
         run: |
+          echo "🚀 Executing Stage 2: Organic Browser Engagement Simulator"
+          GA4_FLAG="--allow-ga4"
+          if [ "${{ github.event.inputs.allow_ga4 }}" = "false" ]; then
+            GA4_FLAG=""
+          fi
+
+          SLUG_FLAG=""
+          if [ -n "${{ github.event.inputs.slug }}" ]; then
+            SLUG_FLAG="--slug ${{ github.event.inputs.slug }}"
+          fi
+
           CHANNEL_FLAG=""
           if [ -n "${{ github.event.inputs.channel }}" ]; then
             CHANNEL_FLAG="--channel ${{ github.event.inputs.channel }}"
           fi
-          LIMIT="${{ github.event.inputs.limit || '5' }}"
-          PYTHONPATH=agents python agents/organic_simulator.py --limit "$LIMIT" $CHANNEL_FLAG
+
+          LIMIT="${{ github.event.inputs.limit || '2' }}"
+          PYTHONPATH=agents python agents/organic_simulator.py --browser --limit "$LIMIT" $GA4_FLAG $SLUG_FLAG $CHANNEL_FLAG
