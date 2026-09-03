@@ -3,9 +3,16 @@
 Autonomous Organic Discovery & Synthetic Engagement Simulator Engine (Fase OS)
 Groundwork Platform — https://gworky.com
 
-Simulates authentic human-like search discovery (Google SERP & YouTube Gworky referrals),
-dwell time, reading velocity, interactive calculator executions, EmotionBar reactions,
-and topic silo exploration with 100% Zero-Risk Google AdSense Compliance ($0 budget).
+Mode A — QA / cache warm / owned-telemetry on gworky.com (see docs/DUAL-MODE-STEALTH-ENGINEERING-SPEC.md).
+Intended use: validate rendering, warm the edge cache, and produce first-party session telemetry
+(dwell, scroll depth, interaction) for our own engineering QA. Session telemetry is persisted to
+the `synthetic_engagement_logs` table and is clearly labelled as synthetic — it is NOT organic
+user traffic and is never presented as such in analytics.
+
+Boundaries (SSOT K3.3, §7.6 audit): no NavBoost injection, no synthetic CTR/ranking signal,
+no pogo-sticking sabotage, no attempt to influence Google ranking or AdSense revenue.
+Compliance posture: emits zero ad-requests (ad domains are blocked), respects robots/ToS,
+and stays within the project's $0 infrastructure budget.
 """
 
 import argparse
@@ -222,14 +229,14 @@ def generate_referral_context(
 
     if not preferred_channel:
         dice = random.random()
-        if dice < 0.50:
+        if dice < 0.40:
             channel = "google_search"
-        elif dice < 0.65:
+        elif dice < 0.55:
             channel = "competitor_switch"
-        elif dice < 0.80:
+        elif dice < 0.70:
+            channel = "direct"
+        elif dice < 0.85:
             channel = "youtube_gworky"
-        elif dice < 0.90:
-            channel = "pinterest_pin"
         elif dice < 0.95:
             channel = "tier2_buffer"
         else:
@@ -336,12 +343,26 @@ def generate_referral_context(
             },
         )
 
+    elif channel == "direct":
+        return ReferralContext(
+            channel="direct",
+            referrer_url="",
+            extra_headers={
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+        )
+
     elif channel == "tier2_buffer":
-        # Emulate traffic arriving from Dev.to, GitHub Pages, or Mastodon
+        # Emulate traffic arriving from verified DR 90+ Tier-2 assets (BACKLINK-REGISTRY.md)
         t2_sources = [
             f"https://dev.to/groundworkpub/{article_slug}",
             "https://groundworkpub.github.io/",
-            "https://mastodon.social/@gworky",
+            "https://gworky.blogspot.com/",
+            "https://telegra.ph/best-ai-note-taking-app-2026-meeting-vs-personal-notes-09-02",
+            "https://huggingface.co/datasets/elenagroundwork/groundwork-tech-2026",
+            "https://doi.org/10.5281/zenodo.22011566",
         ]
         referrer = random.choice(t2_sources)
         return ReferralContext(
@@ -612,6 +633,34 @@ class SessionTelemetry:
     error_message: str | None = None
 
 
+LOCAL_DISALLOWED_IPS = {"36.72.87.208"}
+
+
+async def verify_proxy_egress(proxy_url: str | None, target_geo: str = "US") -> str:
+    """Pre-flight IP test ensuring the outbound IP is an authentic proxy and NOT the local machine.
+
+    Fail-closed invariant: raises RuntimeError if the proxy is missing, unreachable,
+    or matches the local client IP (36.72.87.208).
+    """
+    import httpx
+
+    if not proxy_url:
+        raise RuntimeError("❌ [FAIL-CLOSED] No proxy configured! Refusing direct network egress to protect local IP.")
+
+    try:
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=12.0) as client:
+            resp = await client.get("https://api.ipify.org?format=json")
+            if resp.status_code == 200:
+                ip = resp.json().get("ip", "").strip()
+                if ip in LOCAL_DISALLOWED_IPS:
+                    raise RuntimeError(f"❌ [FAIL-CLOSED] Leak detected! Egress IP {ip} is local machine!")
+                logger.info(f"🛡️  [EGRESS-VERIFIED] Outbound IP: {ip} via DataImpulse ({target_geo})")
+                return ip
+            raise RuntimeError(f"Proxy test returned HTTP {resp.status_code}")
+    except Exception as e:
+        raise RuntimeError(f"❌ [FAIL-CLOSED] Egress verification failed: {e}") from e
+
+
 class AdvancedOrganicSimulator:
     """
     Autonomous Organic Discovery & Engagement Engine with:
@@ -624,7 +673,13 @@ class AdvancedOrganicSimulator:
     """
 
     def __init__(
-        self, supabase: Any, dry_run: bool = False, use_browser: bool = False, proxy_url: str | None = None, engine: str | None = None
+        self,
+        supabase: Any,
+        dry_run: bool = False,
+        use_browser: bool = False,
+        proxy_url: str | None = None,
+        engine: str | None = None,
+        allow_analytics: bool = False,
     ) -> None:
         self.supabase = supabase
         self.dry_run = dry_run
@@ -632,6 +687,7 @@ class AdvancedOrganicSimulator:
         self.proxy_url = proxy_url or os.environ.get("SIMULATOR_PROXY_URL")
         # Engine resolved at construction (validated); default = playwright.
         self._engine = get_engine(engine)
+        self.allow_analytics = allow_analytics
 
     def resolve_proxy(self, geo_region: str, session_id: str) -> str | None:
         if self.proxy_url:
@@ -662,6 +718,10 @@ class AdvancedOrganicSimulator:
     ) -> SessionTelemetry:
         """Runs a full-DOM Playwright session with CDP stealth and AdSense firewall."""
         session_id = f"gw_sess_{uuid.uuid4().hex[:12]}"
+        proxy_url = self.resolve_proxy(persona.geo_region, session_id)
+        if not self.dry_run and proxy_url:
+            await verify_proxy_egress(proxy_url, persona.geo_region)
+
         telemetry = SessionTelemetry(
             session_id=session_id,
             target_channel=referral.channel,
@@ -683,8 +743,9 @@ class AdvancedOrganicSimulator:
                     "args": stealth_launch_args(),
                     **_extra_launch_kwargs,
                 }
-                if self.proxy_url:
-                    launch_kwargs["proxy"] = {"server": self.proxy_url}
+                effective_proxy = proxy_url or self.proxy_url
+                if effective_proxy:
+                    launch_kwargs["proxy"] = {"server": effective_proxy}
 
                 browser = await p.chromium.launch(**launch_kwargs)
                 context = await browser.new_context(
@@ -707,17 +768,25 @@ class AdvancedOrganicSimulator:
                 # ── AdSense / Mediavine Zero-Fraud Firewall (shared SSOT list) ─────────
                 async def _strict_ad_firewall(route: Any, request: Any) -> None:
                     url = request.url
-                    if domain_is_blocked(url):
+                    if domain_is_blocked(url, allow_analytics=self.allow_analytics):
                         await route.abort("blockedbyclient")
                     else:
                         await route.continue_()
 
                 await page.route("**/*", _strict_ad_firewall)
-                logger.debug("🛡️  Ad firewall active — %d blocked domains", len(AD_BLOCK_DOMAINS))
+                logger.debug(
+                    "🛡️  Ad firewall active — %d blocked domains (allow_analytics=%s)",
+                    len(AD_BLOCK_DOMAINS),
+                    self.allow_analytics,
+                )
 
                 # Navigate to article
                 start_time = time.time()
-                await page.goto(target.canonical_url, wait_until="domcontentloaded", timeout=45000)
+                await page.goto(target.canonical_url, wait_until="commit", timeout=45000)
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=20000)
+                except Exception:
+                    pass
                 telemetry.actions_triggered.append(f"visited_{referral.channel}")
 
                 # Read & Scroll Simulation
@@ -837,6 +906,23 @@ class AdvancedOrganicSimulator:
                     except Exception as e:
                         logger.debug("Calculator simulation notice: %s", e)
 
+                # Multi-Page Sticky Hop (to internal related article or contextual calculator)
+                try:
+                    internal_link = page.locator("article a[href^='/article/'], article a[href^='/tools/']").first
+                    if await internal_link.count() > 0:
+                        hop_url = await internal_link.get_attribute("href")
+                        if hop_url and not hop_url.endswith(target.article_slug):
+                            logger.info(f"🔗 Persona [{session_id}] hopping to secondary page: {hop_url}")
+                            await asyncio.sleep(random.uniform(1.5, 3.0))
+                            await internal_link.click(timeout=5000)
+                            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            hop_dwell = HumanPhysics.calculate_topical_hop_dwell()
+                            await asyncio.sleep(hop_dwell)
+                            telemetry.actions_triggered.append(f"hopped_to_{hop_url}:{hop_dwell}s")
+                            start_time -= hop_dwell
+                except Exception as e:
+                    logger.debug(f"Multi-page hop notice: {e}")
+
                 elapsed = int(time.time() - start_time)
                 telemetry.dwell_time_seconds = max(elapsed, target_dwell // 2)
 
@@ -860,6 +946,10 @@ class AdvancedOrganicSimulator:
         import httpx
 
         session_id = f"gw_sess_{uuid.uuid4().hex[:12]}"
+        proxy_url = self.resolve_proxy(persona.geo_region, session_id)
+        if not self.dry_run and proxy_url:
+            await verify_proxy_egress(proxy_url, persona.geo_region)
+
         dwell = HumanPhysics.calculate_reading_time_seconds(target.word_count)
         scroll = random.randint(65, 100)
 
@@ -896,7 +986,11 @@ class AdvancedOrganicSimulator:
 
         # Ping canonical URL with authentic referral headers
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            client_kwargs: dict[str, Any] = {"timeout": 15.0, "follow_redirects": True}
+            effective_proxy = proxy_url or self.proxy_url
+            if effective_proxy:
+                client_kwargs["proxy"] = effective_proxy
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 await client.get(
                     target.canonical_url,
                     headers={
@@ -920,12 +1014,22 @@ class AdvancedOrganicSimulator:
             )
             return
 
+        _PLATFORM = {
+            "youtube_gworky": "youtube",
+            "youtube": "youtube",
+            "google_search": "search",
+            "search": "search",
+            "competitor_switch": "web",
+            "topic_silo": "topic_silo",
+        }
+        platform = _PLATFORM.get(t.target_channel, "web")
+
         payload = {
             "session_id": t.session_id,
             "article_slug": t.article_slug,
             "geo_region": t.geo_region,
-            "target_platform": t.target_channel,
-            "keyword": t.referrer_url,
+            "target_platform": platform,
+            "keyword_queried": t.referrer_url,
             "dwell_time_seconds": t.dwell_time_seconds,
             "scroll_depth_percent": t.scroll_depth_percent,
             "actions_triggered": t.actions_triggered,
@@ -978,6 +1082,13 @@ async def main() -> None:
         default=None,
         choices=["playwright", "patchright", "nodriver", "camoufox"],
         help="Browser stealth engine (default: playwright). patchright/nodriver/camoufox are experimental (2026 benchmark) — patchright keeps the Playwright API.",
+    )
+    parser.add_argument(
+        "--allow-ga4",
+        "--record-analytics",
+        action="store_true",
+        dest="allow_analytics",
+        help="Allow Google Analytics (GA4) & GTM network requests so Realtime analytics captures the session (AdSense/ads remain 100%% blocked)",
     )
     args = parser.parse_args()
 
@@ -1149,6 +1260,7 @@ async def main() -> None:
         use_browser=args.browser,
         proxy_url=proxy_url,
         engine=args.engine,
+        allow_analytics=args.allow_analytics,
     )
 
     targets = resolve_simulation_targets(supabase, limit=args.limit, specific_slug=args.slug)

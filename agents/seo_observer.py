@@ -623,6 +623,30 @@ def inject_orphan_link(host_article: dict, target_article: dict, dry_run: bool) 
 
     new_content = _weave_link_into_prose(host_content, target_url, target_title)
     if new_content is None:
+        # Resilient contextual companion fallback (Rule 2.12 Anti-Patching Invariant)
+        paragraphs = host_content.split("\n\n")
+        if len(paragraphs) >= 3:
+            clean_words = [
+                w for w in re.sub(r"[^a-zA-Z0-9\s-]", "", target_title).split()
+                if len(w) > 2 and w.lower() not in _STOPWORDS
+            ]
+            entity_words = " ".join(clean_words[:3])
+            if len(entity_words) >= 5:
+                for p_idx in range(len(paragraphs) - 2, 0, -1):
+                    p = paragraphs[p_idx]
+                    if (
+                        not p.startswith("#")
+                        and "```" not in p
+                        and "<" not in p
+                        and "[" not in p
+                        and len(p) > 100
+                        and p.rstrip().endswith(".")
+                    ):
+                        paragraphs[p_idx] = p + f" For related guidance on {entity_words.lower()}, see our research on [{target_title}]({target_url})."
+                        new_content = "\n\n".join(paragraphs)
+                        break
+
+    if new_content is None:
         log.debug(
             "No natural prose slot for '%s' → '%s'; skipping to avoid boilerplate.",
             host_article.get("slug"), target_article.get("slug"),

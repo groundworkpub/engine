@@ -39,35 +39,175 @@
     ]
   },
   "seed_sites": [
-    { "domain": "techcrunch.com", "pillar": "tech", "dr": 93, "wp_type": "vip" },
-    { "domain": "venturebeat.com", "pillar": "tech", "dr": 91, "wp_type": "vip" },
-    { "domain": "boingboing.net", "pillar": "tech", "dr": 88, "wp_type": "standard" },
+    {
+      "domain": "techcrunch.com",
+      "pillar": "tech",
+      "dr": 93,
+      "wp_type": "vip"
+    },
+    {
+      "domain": "venturebeat.com",
+      "pillar": "tech",
+      "dr": 91,
+      "wp_type": "vip"
+    },
+    {
+      "domain": "boingboing.net",
+      "pillar": "tech",
+      "dr": 88,
+      "wp_type": "standard"
+    },
     { "domain": "9to5mac.com", "pillar": "tech", "dr": 89, "wp_type": "vip" },
-    { "domain": "smashingmagazine.com", "pillar": "tech", "dr": 90, "wp_type": "custom" },
-    { "domain": "css-tricks.com", "pillar": "tech", "dr": 89, "wp_type": "standard" },
-    { "domain": "cleantechnica.com", "pillar": "home", "dr": 84, "wp_type": "vip" },
-    { "domain": "treehugger.com", "pillar": "home", "dr": 86, "wp_type": "standard" },
-    { "domain": "inhabitat.com", "pillar": "home", "dr": 85, "wp_type": "standard" },
-    { "domain": "energytransition.org", "pillar": "home", "dr": 68, "wp_type": "standard" },
-    { "domain": "greenbuildingadvisor.com", "pillar": "home", "dr": 74, "wp_type": "standard" },
-    { "domain": "nakedcapitalism.com", "pillar": "money", "dr": 77, "wp_type": "standard" },
-    { "domain": "calculatedriskblog.com", "pillar": "money", "dr": 76, "wp_type": "standard" },
-    { "domain": "ritholtz.com", "pillar": "money", "dr": 78, "wp_type": "standard" },
-    { "domain": "abnormalreturns.com", "pillar": "money", "dr": 71, "wp_type": "standard" },
-    { "domain": "financialsamurai.com", "pillar": "money", "dr": 75, "wp_type": "standard" },
-    { "domain": "monevator.com", "pillar": "money", "dr": 72, "wp_type": "standard" },
-    { "domain": "getrichslowly.org", "pillar": "money", "dr": 76, "wp_type": "standard" },
-    { "domain": "peterattiamd.com", "pillar": "body", "dr": 76, "wp_type": "vip" },
-    { "domain": "foundmyfitness.com", "pillar": "body", "dr": 69, "wp_type": "standard" },
-    { "domain": "sciencebasedmedicine.org", "pillar": "body", "dr": 81, "wp_type": "standard" },
-    { "domain": "nutritionfacts.org", "pillar": "body", "dr": 80, "wp_type": "standard" },
-    { "domain": "zenhabits.net", "pillar": "life", "dr": 83, "wp_type": "standard" },
-    { "domain": "lifeoptimizer.org", "pillar": "life", "dr": 68, "wp_type": "standard" },
-    { "domain": "fourhourworkweek.com", "pillar": "life", "dr": 81, "wp_type": "standard" },
-    { "domain": "blogs.harvard.edu", "pillar": "money", "dr": 93, "wp_type": "network" },
-    { "domain": "blogs.lse.ac.uk", "pillar": "money", "dr": 89, "wp_type": "network" },
-    { "domain": "blogs.worldbank.org", "pillar": "money", "dr": 92, "wp_type": "network" },
-    { "domain": "blogs.imf.org", "pillar": "money", "dr": 91, "wp_type": "network" },
+    {
+      "domain": "smashingmagazine.com",
+      "pillar": "tech",
+      "dr": 90,
+      "wp_type": "custom"
+    },
+    {
+      "domain": "css-tricks.com",
+      "pillar": "tech",
+      "dr": 89,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "cleantechnica.com",
+      "pillar": "home",
+      "dr": 84,
+      "wp_type": "vip"
+    },
+    {
+      "domain": "treehugger.com",
+      "pillar": "home",
+      "dr": 86,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "inhabitat.com",
+      "pillar": "home",
+      "dr": 85,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "energytransition.org",
+      "pillar": "home",
+      "dr": 68,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "greenbuildingadvisor.com",
+      "pillar": "home",
+      "dr": 74,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "nakedcapitalism.com",
+      "pillar": "money",
+      "dr": 77,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "calculatedriskblog.com",
+      "pillar": "money",
+      "dr": 76,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "ritholtz.com",
+      "pillar": "money",
+      "dr": 78,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "abnormalreturns.com",
+      "pillar": "money",
+      "dr": 71,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "financialsamurai.com",
+      "pillar": "money",
+      "dr": 75,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "monevator.com",
+      "pillar": "money",
+      "dr": 72,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "getrichslowly.org",
+      "pillar": "money",
+      "dr": 76,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "peterattiamd.com",
+      "pillar": "body",
+      "dr": 76,
+      "wp_type": "vip"
+    },
+    {
+      "domain": "foundmyfitness.com",
+      "pillar": "body",
+      "dr": 69,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "sciencebasedmedicine.org",
+      "pillar": "body",
+      "dr": 81,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "nutritionfacts.org",
+      "pillar": "body",
+      "dr": 80,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "zenhabits.net",
+      "pillar": "life",
+      "dr": 83,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "lifeoptimizer.org",
+      "pillar": "life",
+      "dr": 68,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "fourhourworkweek.com",
+      "pillar": "life",
+      "dr": 81,
+      "wp_type": "standard"
+    },
+    {
+      "domain": "blogs.harvard.edu",
+      "pillar": "money",
+      "dr": 93,
+      "wp_type": "network"
+    },
+    {
+      "domain": "blogs.lse.ac.uk",
+      "pillar": "money",
+      "dr": 89,
+      "wp_type": "network"
+    },
+    {
+      "domain": "blogs.worldbank.org",
+      "pillar": "money",
+      "dr": 92,
+      "wp_type": "network"
+    },
+    {
+      "domain": "blogs.imf.org",
+      "pillar": "money",
+      "dr": 91,
+      "wp_type": "network"
+    },
     { "domain": "news.mit.edu", "pillar": "tech", "dr": 93, "wp_type": "vip" }
   ]
 }

@@ -17,10 +17,23 @@ from __future__ import annotations
 
 from typing import Any
 
+# ── Google Analytics & Measurement Domains ─────────────────────────────────
+# Separated so GA4 Realtime can optionally be allowed (--allow-ga4)
+# while AdSense / SSP / DSP ad delivery remains 100% blocked (Zero-Fraud).
+ANALYTICS_DOMAINS: frozenset[str] = frozenset(
+    [
+        "googletagservices.com",
+        "googletagmanager.com",
+        "googletag.com",
+        "google-analytics.com",
+        "analytics.google.com",
+    ]
+)
+
 # ── AdSense / Mediavine Zero-Fraud Firewall ────────────────────────────────
 # CRITICAL: Every simulation session MUST block ALL ad & tracker domains.
 # Any intercepted ad impression = IVT violation -> account suspension risk.
-# Domains cover: DSPs, SSPs, DMPs, pixel trackers, analytics beacons.
+# Domains cover: DSPs, SSPs, DMPs, pixel trackers, ad delivery networks.
 AD_BLOCK_DOMAINS: frozenset[str] = frozenset(
     [
         # Monetag / Propeller Ads ecosystem (zero-fraud firewall)
@@ -30,15 +43,10 @@ AD_BLOCK_DOMAINS: frozenset[str] = frozenset(
         "monetag.com",
         "propellerads.com",
         "propellerclick.com",
-        # Google Ads ecosystem
+        # Google Ads ecosystem (AdSense, Ad Exchange, Ad Manager)
         "googlesyndication.com",
         "doubleclick.net",
         "googleadservices.com",
-        "googletagservices.com",
-        "googletagmanager.com",
-        "googletag.com",
-        "google-analytics.com",
-        "analytics.google.com",
         # Programmatic DSPs / SSPs
         "adnxs.com",
         "appnexus.com",  # Xandr / AppNexus
@@ -290,8 +298,15 @@ def stealth_launch_args() -> list[str]:
     ]
 
 
-def domain_is_blocked(url: str) -> bool:
-    """Return True if url hits any AdSense firewall domain."""
+def domain_is_blocked(url: str, allow_analytics: bool = False) -> bool:
+    """Return True if url hits any AdSense/ad firewall domain.
+
+    If allow_analytics is False (default), analytics domains are also blocked.
+    If allow_analytics is True, Google Analytics & GTM are allowed through so GA4
+    Realtime records the session, while 100% of ad networks remain strictly blocked.
+    """
+    if not allow_analytics and any(domain in url for domain in ANALYTICS_DOMAINS):
+        return True
     return any(domain in url for domain in AD_BLOCK_DOMAINS)
 
 

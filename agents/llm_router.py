@@ -23,7 +23,8 @@ import re
 import threading
 import time
 import urllib.request
-from typing import Any, Callable, Dict, List, Literal, Optional
+from collections.abc import Callable
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 
@@ -70,6 +71,11 @@ GROQ_MODELS = [
     "qwen/qwen3.6-27b",
 ]
 
+HUGGINGFACE_MODELS = [
+    "Qwen/Qwen2.5-72B-Instruct",
+    "meta-llama/Llama-3.1-8B-Instruct",
+]
+
 
 class LLMRouter:
     """Intelligent multi-provider LLM gateway with active failover and circuit breaker."""
@@ -82,7 +88,8 @@ class LLMRouter:
         self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
         self.groq_key = os.getenv("GROQ_API_KEY")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
-        self.failed_providers: Dict[str, float] = {}  # provider_name -> cooloff_until_timestamp
+        self.hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
+        self.failed_providers: dict[str, float] = {}  # provider_name -> cooloff_until_timestamp
 
     def _is_provider_healthy(self, provider_id: str) -> bool:
         """Check if provider is not currently tripped by circuit breaker."""
@@ -100,10 +107,10 @@ class LLMRouter:
 
     def _call_ai_gateway(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "@cf/meta/llama-3.1-8b-instruct",
         max_tokens: int = 4096,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Route via Cloudflare AI Gateway (OpenAI-compatible) for logging, caching, fallback.
 
         Wrap any configured upstream (Workers AI, OpenRouter, Groq) into a single
@@ -144,10 +151,10 @@ class LLMRouter:
 
     def _call_cloudflare_ai(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "@cf/meta/llama-3.1-8b-instruct",
         max_tokens: int = 4096,
-    ) -> Optional[str]:
+    ) -> str | None:
         if not self.cf_account_id or not self.cf_key:
             return None
 
@@ -189,10 +196,10 @@ class LLMRouter:
 
     def _call_groq(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "llama-3.3-70b-versatile",
         max_tokens: int = 4096,
-    ) -> Optional[str]:
+    ) -> str | None:
         if not self.groq_key:
             return None
 
@@ -228,10 +235,10 @@ class LLMRouter:
 
     def _call_openrouter(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str,
         max_tokens: int = 4096,
-    ) -> Optional[str]:
+    ) -> str | None:
         if not self.openrouter_key:
             return None
 
@@ -268,10 +275,10 @@ class LLMRouter:
 
     def _call_gemini(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = "gemini-1.5-flash",
         max_tokens: int = 4096,
-    ) -> Optional[str]:
+    ) -> str | None:
         if not self.gemini_key:
             return None
 
@@ -302,9 +309,35 @@ class LLMRouter:
             self._trip_circuit_breaker("gemini_api", 300)
             return None
 
+    # ─── Provider 6: Hugging Face Serverless Inference Client ($0 USD) ─────────
+
+    def _call_huggingface(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "Qwen/Qwen2.5-72B-Instruct",
+        max_tokens: int = 4096,
+    ) -> str | None:
+        """Execute serverless LLM inference via Hugging Face Hub Client ($0 USD)."""
+        if not self.hf_token:
+            return None
+        try:
+            from huggingface_hub import InferenceClient
+
+            client = InferenceClient(token=self.hf_token)
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+            )
+            if resp.choices:
+                return str(resp.choices[0].message.content)
+        except Exception as e:
+            logger.debug(f"Hugging Face inference call failed for {model}: {e}")
+        return None
+
     # ─── Public Gateway Method ───────────────────────────────────────────────
 
-    def _call_with_deadline(self, fn: Callable[[], Optional[str]], deadline_s: float) -> Optional[str]:
+    def _call_with_deadline(self, fn: Callable[[], str | None], deadline_s: float) -> str | None:
         """Execute a provider call with a hard wall-clock deadline.
 
         urllib's socket timeout does not cap slow-trickling streams (a reasoning
@@ -312,7 +345,7 @@ class LLMRouter:
         any attempt that exceeds its budget so one slow model cannot starve the
         whole pipeline run.
         """
-        outcome: Dict[str, Optional[str]] = {}
+        outcome: dict[str, str | None] = {}
 
         def runner() -> None:
             try:
@@ -331,12 +364,12 @@ class LLMRouter:
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         response_format: Literal["text", "json"] = "text",
         max_tokens: int = 4096,
         temperature: float = 0.7,
         time_budget_s: float = 240.0,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Execute resilient inference query through multi-tier pool with automatic failover."""
         start_time = time.time()
         deadline = start_time + time_budget_s
@@ -418,6 +451,22 @@ class LLMRouter:
                     return raw_out
             self._trip_circuit_breaker("openrouter_free", 180)
 
+        # 3b. Tier 3b: Hugging Face Serverless Inference (Free $0 Hub Provider)
+        if self._is_provider_healthy("huggingface_api") and self.hf_token:
+            for hf_model in HUGGINGFACE_MODELS:
+                if exhausted():
+                    return None
+                logger.info(f"Attempting inference with Hugging Face: {hf_model}")
+                raw_out = self._call_with_deadline(
+                    lambda m=hf_model: self._call_huggingface(messages, model=m, max_tokens=max_tokens),
+                    deadline_s=remaining(),
+                )
+                if raw_out and len(raw_out.strip()) > 10:
+                    latency = round(time.time() - start_time, 2)
+                    logger.info(f"Inference succeeded via Hugging Face ({hf_model}) in {latency}s.")
+                    return raw_out
+            self._trip_circuit_breaker("huggingface_api", 180)
+
         # 4. Tier 4: OpenRouter High-Reliability Fallback (DeepSeek-V3, GPT-4o-mini, Llama 3.3 70B)
         if self._is_provider_healthy("openrouter_paid") and self.openrouter_key:
             for paid_model in OPENROUTER_PAID_MODELS:
@@ -452,10 +501,10 @@ class LLMRouter:
 
     def generate_json(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int = 4096,
         time_budget_s: float = 240.0,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Generate and parse structured JSON reliably using brace-depth tracking and json_repair."""
         # Ensure system prompt instructs raw JSON output
         system_appended = False
@@ -480,7 +529,7 @@ class LLMRouter:
         clean_text = re.sub(r"\s*```$", "", clean_text)
 
         # 1. cJSON-inspired outermost balanced JSON bracket extractor
-        def extract_balanced_json(text: str) -> Optional[str]:
+        def extract_balanced_json(text: str) -> str | None:
             start_idx = -1
             brace_type = None
             depth = 0
@@ -545,17 +594,17 @@ router = LLMRouter()
 
 
 def call_llm(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     response_format: Literal["text", "json"] = "text",
     max_tokens: int = 4096,
-) -> Optional[str]:
+) -> str | None:
     """Convenience helper function for agent pipeline."""
     return router.generate(messages, response_format=response_format, max_tokens=max_tokens)
 
 
 def call_llm_json(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     max_tokens: int = 4096,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Convenience helper for generating JSON data structures."""
     return router.generate_json(messages, max_tokens=max_tokens)
