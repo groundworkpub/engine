@@ -114,6 +114,7 @@ def export_backlink_registry_markdown(output_path: str, limit_per_platform: int 
     platforms = [
         "github_org_repo",
         "huggingface_dataset",
+        "github_pages_pseo_tool",
         "wordpress_comment",
         "devto",
         "blogger",
