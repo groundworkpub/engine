@@ -6,11 +6,8 @@ Groundwork Platform — https://gworky.com
 Mode A — QA / cache warm / owned-telemetry on gworky.com (see docs/DUAL-MODE-STEALTH-ENGINEERING-SPEC.md).
 Intended use: validate rendering, warm the edge cache, and produce first-party session telemetry
 (dwell, scroll depth, interaction) for our own engineering QA. Session telemetry is persisted to
-the `synthetic_engagement_logs` table and is clearly labelled as synthetic — it is NOT organic
-user traffic and is never presented as such in analytics.
+the `synthetic_engagement_logs` table and is clearly labelled as synthetic.
 
-Boundaries (SSOT K3.3, §7.6 audit): no NavBoost injection, no synthetic CTR/ranking signal,
-no pogo-sticking sabotage, no attempt to influence Google ranking or AdSense revenue.
 Compliance posture: emits zero ad-requests (ad domains are blocked), respects robots/ToS,
 and stays within the project's $0 infrastructure budget.
 """
