@@ -227,8 +227,8 @@ def emit_near_page_1_signals(supabase: Any, rows: list[RankRow]) -> int:
             signal_strength = round((11.0 - r.position) / 10.0, 3)
             payload = {
                 "signal_type": "near_page_1",
-                "keyword": r.query,
-                "target_url": r.page,
+                "keyword": getattr(r, "keyword", getattr(r, "query", "")),
+                "target_url": getattr(r, "url", getattr(r, "page", "")),
                 "signal_strength": signal_strength,
                 "metadata": {
                     "position": r.position,
