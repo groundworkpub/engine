@@ -189,6 +189,23 @@ def main() -> None:
             except Exception as auth_err:
                 logger.warning(f"Authority syndication completed with notice: {auth_err}")
 
+            # Agent 5 / GraphMind: Entity Knowledge Graph Extraction Hook
+            try:
+                from entity_graph_builder import extract_entity_graph_from_article
+
+                for art in articles_list:
+                    if isinstance(art, dict) and art.get("id"):
+                        extract_entity_graph_from_article(
+                            title=art.get("title", ""),
+                            content=art.get("content", ""),
+                            pillar=art.get("pillar", "money"),
+                            article_id=art.get("id"),
+                            supabase=supabase,
+                        )
+                logger.info("Entity knowledge graph extraction completed for %d articles", len(articles_list))
+            except Exception as ent_err:
+                logger.warning("Entity graph extraction notice: %s", ent_err)
+
             # Phase AA / Audio Producer & Podcast Syndication
             try:
                 from audio_producer import AudioProducer

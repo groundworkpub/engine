@@ -563,22 +563,114 @@ async def evaluate_page_opportunity(
     return opp
 
 
+def harvest_and_score_signals(supabase: Any, dry_run: bool = False) -> int:
+    """Harvest unprocessed growth_signals and convert to growth_opportunities."""
+    try:
+        res = (
+            supabase.table("growth_signals")
+            .select("*")
+            .eq("processed", False)
+            .limit(50)
+            .execute()
+        )
+        signals = res.data or []
+    except Exception as e:
+        logger.warning("Could not query growth_signals: %s", e)
+        return 0
+
+    if not signals:
+        logger.info("No unprocessed growth_signals found.")
+        return 0
+
+    logger.info("Processing %d growth signals into opportunities...", len(signals))
+    created = 0
+
+    for sig in signals:
+        sig_id = sig["id"]
+        sig_type = sig["signal_type"]
+        keyword = sig.get("keyword") or ""
+        pillar = sig.get("pillar") or "money"
+        signal_strength = float(sig.get("signal_strength") or 0.5)
+
+        # Map signal to opportunity type
+        if sig_type == "near_page_1":
+            opp_type = "content_refresh"
+            intent_score = 0.90
+            expected_value = 250.0 * signal_strength
+        elif sig_type == "competitor_gap":
+            opp_type = "new_article"
+            intent_score = 0.85
+            expected_value = 180.0 * signal_strength
+        elif sig_type == "broken_backlink":
+            opp_type = "link_acquisition"
+            intent_score = 0.80
+            expected_value = 120.0
+        else:
+            opp_type = "article_expansion"
+            intent_score = 0.75
+            expected_value = 100.0
+
+        total_score = round(intent_score * 0.4 + signal_strength * 0.4 + 0.2, 3)
+
+        opp_record = {
+            "signal_id": sig_id,
+            "opportunity_type": opp_type,
+            "pillar": pillar,
+            "keyword": keyword,
+            "intent_score": intent_score,
+            "asset_fit_score": 0.85,
+            "authority_score": signal_strength,
+            "total_score": total_score,
+            "expected_value": round(expected_value, 2),
+            "status": "pending",
+        }
+
+        if not dry_run:
+            try:
+                supabase.table("growth_opportunities").insert(opp_record).execute()
+                supabase.table("growth_signals").update({"processed": True}).eq("id", sig_id).execute()
+                created += 1
+            except Exception as e:
+                logger.warning("Failed to upsert growth opportunity for signal %s: %s", sig_id, e)
+        else:
+            logger.info("  [DRY-RUN] Would create opportunity for signal %s (%s, score: %.2f)", sig_id[:8], opp_type, total_score)
+            created += 1
+
+    logger.info("Harvested %d opportunities from %d signals.", created, len(signals))
+    return created
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Groundwork Opportunity Engine 2.0")
     parser.add_argument("--url", type=str, default="https://extension.harvard.edu/resources/", help="Target URL to evaluate")
     parser.add_argument("--domain", type=str, default="harvard.edu", help="Target domain")
     parser.add_argument("--pillar", type=str, default="money", help="Content pillar")
+    parser.add_argument("--harvest-signals", action="store_true", help="Harvest pending signals from growth_signals table")
+    parser.add_argument("--dry-run", action="store_true", help="Perform operation without writing to database")
     args = parser.parse_args()
 
-    print(f"\n🔍 Evaluating Opportunity for: {args.url}...\n")
-    opp = asyncio.run(evaluate_page_opportunity(args.url, args.domain, args.pillar))
-    if opp:
-        print(f"✅ Opportunity ID: {opp.id}")
-        print(f"• Type: [{opp.opportunity_type}]")
-        print(f"• Total Score: {opp.total_score}/100 ({opp.status})")
-        print(f"• Matched Asset: {opp.matching_asset['title']}")
-        print(f"• One-Sentence Proposition:\n  \"{opp.one_sentence_proposition}\"")
-        print(f"• Evidence:\n  \"{opp.evidence_snippet}\"")
-        print(f"\n📝 Synthesized Pitch (Elena Vance):\n{opp.pitch_draft}\n")
+    if args.harvest_signals:
+        import os
+        from dotenv import load_dotenv
+        from supabase import create_client
+        load_dotenv(".env.local")
+        url = os.getenv("NEXT_PUBLIC_SUPABASE_URL") or os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
+        if not url or not key:
+            print("❌ Missing Supabase credentials")
+            sys.exit(1)
+        sb = create_client(url, key)
+        harvest_and_score_signals(sb, dry_run=args.dry_run)
     else:
-        print("❌ Could not evaluate opportunity.")
+        print(f"\n🔍 Evaluating Opportunity for: {args.url}...\n")
+        opp = asyncio.run(evaluate_page_opportunity(args.url, args.domain, args.pillar))
+        if opp:
+            print(f"✅ Opportunity ID: {opp.id}")
+            print(f"• Type: [{opp.opportunity_type}]")
+            print(f"• Total Score: {opp.total_score}/100 ({opp.status})")
+            print(f"• Matched Asset: {opp.matching_asset['title']}")
+            print(f"• One-Sentence Proposition:\n  \"{opp.one_sentence_proposition}\"")
+            print(f"• Evidence:\n  \"{opp.evidence_snippet}\"")
+            print(f"\n📝 Synthesized Pitch (Elena Vance):\n{opp.pitch_draft}\n")
+        else:
+            print("❌ Could not evaluate opportunity.")

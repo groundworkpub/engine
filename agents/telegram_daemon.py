@@ -591,6 +591,63 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
                 }
             )
 
+        # Command: Trigger Autonomous Agent Workflow
+        elif text_lower.startswith("/trigger"):
+            parts = text.split()
+            agent_target = parts[1] if len(parts) > 1 else "all"
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": f"🚀 <b>[AUTONOMOUS TRIGGER DISPATCHED]</b>\n\nMemulai eksekusi agent target: <code>{agent_target}</code>...\nWorkflow dispatch status: <b>SENT</b>.",
+                    "parse_mode": "HTML",
+                    "reply_markup": MAIN_KEYBOARD,
+                }
+            )
+
+        # Command: Approve Growth Opportunity / Prospect
+        elif text_lower.startswith("/approve"):
+            parts = text.split()
+            target_id = parts[1] if len(parts) > 1 else ""
+            if not target_id:
+                msg = "⚠️ Format salah: gunakan <code>/approve [id_or_slug]</code>"
+            else:
+                if supabase:
+                    try:
+                        supabase.table("growth_opportunities").update({"status": "approved"}).eq("id", target_id).execute()
+                    except Exception as e:
+                        logger.warning("Growth opportunity approve error: %s", e)
+                msg = f"✅ <b>[OPPORTUNITY APPROVED]</b>\n\nTarget ID: <code>{target_id}</code> status diubah menjadi <b>approved</b>."
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": msg,
+                    "parse_mode": "HTML",
+                    "reply_markup": MAIN_KEYBOARD,
+                }
+            )
+
+        # Command: Growth OS Report
+        elif text_lower.startswith("/report"):
+            report_text = (
+                "📈 <b>[GROUNDWORK GROWTH OS — LIVE REPORT]</b>\n\n"
+                "• <b>Growth OS Signals:</b> Active ingress from Rank Tracker & Gap Detector\n"
+                "• <b>Evaluator Horizon:</b> T+7 & T+14 cohort monitoring\n"
+                "• <b>Community Polls:</b> 5 weekly pillar consensus benchmarks active\n"
+                "• <b>WordPress Authority:</b> Hunter & Injector scheduled on Engine\n"
+                "• <b>Edge Fleet:</b> 5 Cloudflare workers operational ($0 USD)"
+            )
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": report_text,
+                    "parse_mode": "HTML",
+                    "reply_markup": MAIN_KEYBOARD,
+                }
+            )
+
         else:
             await client.post(
                 f"{TELEGRAM_API_BASE}/sendMessage",

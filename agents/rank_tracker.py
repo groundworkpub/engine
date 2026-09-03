@@ -209,10 +209,41 @@ def run_rank_track(supabase: Any, *, days: int = DEFAULT_WINDOW_DAYS, top_kw: in
         rows = fetch_keyword_positions(token, days=days, top_kw=top_kw)
         written = persist_rankings(supabase, rows)
         logger.info("Rank track: %d rows → %d written (window %s..%s).", len(rows), written, start_date, end_date)
+        emit_near_page_1_signals(supabase, rows)
         return RankRunResult(site_url=SITE_URL, start_date=start_date, end_date=end_date, rows=rows)
     except Exception as exc:  # pragma: no cover - env dependent
         logger.error("Rank track failed: %s", exc)
         return RankRunResult(site_url=SITE_URL, start_date=start_date, end_date=end_date, error=str(exc))
+
+
+def emit_near_page_1_signals(supabase: Any, rows: list[RankRow]) -> int:
+    """Emit near-page-1 rank signals (position 5-10 with impressions) to growth_signals."""
+    near_page_1 = [r for r in rows if 5.0 <= r.position <= 10.0 and r.impressions >= 20]
+    if not near_page_1:
+        return 0
+    emitted = 0
+    for r in near_page_1:
+        try:
+            signal_strength = round((11.0 - r.position) / 10.0, 3)
+            payload = {
+                "signal_type": "near_page_1",
+                "keyword": r.query,
+                "target_url": r.page,
+                "signal_strength": signal_strength,
+                "metadata": {
+                    "position": r.position,
+                    "impressions": r.impressions,
+                    "clicks": r.clicks,
+                    "ctr": r.ctr,
+                },
+                "processed": False,
+            }
+            supabase.table("growth_signals").insert(payload).execute()
+            emitted += 1
+        except Exception as e:
+            logger.debug("Growth signal emit notice: %s", e)
+    logger.info("Emitted %d near_page_1 growth signals to growth_signals table.", emitted)
+    return emitted
 
 
 if __name__ == "__main__":
