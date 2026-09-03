@@ -282,14 +282,35 @@ class PublicProxyPool:
         log.info("Batch validation done: %d / %d valid and healthy.", healthy_count, len(candidates))
         return healthy_count
 
-    def get_best_proxy(self) -> str | None:
+    def get_best_proxy(self, on_demand_fallback: bool = True) -> str | None:
         """Get best low-latency healthy proxy with round-robin fallback."""
         healthy = self.db.get_healthy_proxies(limit=10)
-        if not healthy:
-            return None
-        proxy = healthy[self._round_robin_idx % len(healthy)]["url"]
-        self._round_robin_idx += 1
-        return proxy
+        if healthy:
+            proxy = healthy[self._round_robin_idx % len(healthy)]["url"]
+            self._round_robin_idx += 1
+            return proxy
+
+        if on_demand_fallback:
+            # Fast on-demand fallback from elite public feed
+            log.info("No verified proxies in DB. Executing fast on-demand proxy discovery...")
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    lines = resp.read().decode("utf-8").strip().splitlines()
+                    for line in lines[:10]:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            proxy_url = f"http://{line}" if "://" not in line else line
+                            log.info("Fast on-demand proxy selected: %s", proxy_url)
+                            return proxy_url
+            except Exception as e:
+                log.warning("Fast on-demand proxy fallback failed: %s", e)
+
+        return None
 
 
 class EgressPublicPoolProvider:
@@ -311,6 +332,11 @@ class EgressPublicPoolProvider:
 
     @classmethod
     def get_proxy_url(cls) -> str | None:
+        return cls.get_pool().get_best_proxy()
+
+    @classmethod
+    def get_best_proxy(cls, geo: str = "US") -> str | None:
+        """Convenience accessor for smart routers and simulators."""
         return cls.get_pool().get_best_proxy()
 
     @classmethod

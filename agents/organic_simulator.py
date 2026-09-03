@@ -633,29 +633,68 @@ class SessionTelemetry:
 LOCAL_DISALLOWED_IPS = {"36.72.87.208"}
 
 
-async def verify_proxy_egress(proxy_url: str | None, target_geo: str = "US") -> str:
+async def verify_proxy_egress(
+    proxy_url: str | None,
+    target_geo: str = "US",
+    allow_fallback: bool = True,
+) -> tuple[str, str | None]:
     """Pre-flight IP test ensuring the outbound IP is an authentic proxy and NOT the local machine.
 
-    Fail-closed invariant: raises RuntimeError if the proxy is missing, unreachable,
-    or matches the local client IP (36.72.87.208).
+    Smart Circuit Breaker:
+    - If primary proxy (e.g. DataImpulse) has exhausted quota (407/402/timeout), automatically
+      engages Public Proxy Pool failover.
+    - Preserves fail-closed invariant: raises RuntimeError if leaking local home IP (36.72.87.208).
+    - In cloud CI runners, safely uses cloud datacenter egress instead of crashing.
+    Returns: (verified_ip, effective_proxy_url)
     """
     import httpx
 
+    def _is_cloud_env() -> bool:
+        return os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
+
     if not proxy_url:
+        if _is_cloud_env():
+            logger.info("ℹ️  [CLOUD-RUNNER] No proxy specified. Using cloud runner datacenter egress.")
+            return "cloud-runner-ip", None
         raise RuntimeError("❌ [FAIL-CLOSED] No proxy configured! Refusing direct network egress to protect local IP.")
 
+    # 1. Test primary candidate proxy
     try:
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=12.0) as client:
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=8.0) as client:
             resp = await client.get("https://api.ipify.org?format=json")
             if resp.status_code == 200:
                 ip = resp.json().get("ip", "").strip()
                 if ip in LOCAL_DISALLOWED_IPS:
                     raise RuntimeError(f"❌ [FAIL-CLOSED] Leak detected! Egress IP {ip} is local machine!")
-                logger.info(f"🛡️  [EGRESS-VERIFIED] Outbound IP: {ip} via DataImpulse ({target_geo})")
-                return ip
-            raise RuntimeError(f"Proxy test returned HTTP {resp.status_code}")
+                logger.info(f"🛡️  [EGRESS-VERIFIED] Outbound IP: {ip} via Primary Proxy ({target_geo})")
+                return ip, proxy_url
+            logger.warning(f"⚠️  Primary proxy returned HTTP {resp.status_code} (possible quota depletion).")
     except Exception as e:
-        raise RuntimeError(f"❌ [FAIL-CLOSED] Egress verification failed: {e}") from e
+        logger.warning(f"⚠️  [EGRESS-CIRCUIT-BREAKER] Primary proxy probe failed ({e}). Checking fallback...")
+
+    # 2. Engage Public Proxy Pool fallback if allowed
+    if allow_fallback:
+        try:
+            from egress_public_pool import EgressPublicPoolProvider
+            fallback_proxy = EgressPublicPoolProvider.get_best_proxy(geo=target_geo)
+            if fallback_proxy and fallback_proxy != proxy_url:
+                logger.info(f"🔄 [FAILOVER-ENGAGED] Testing fallback public proxy: {fallback_proxy}")
+                async with httpx.AsyncClient(proxy=fallback_proxy, timeout=8.0) as client:
+                    resp = await client.get("https://api.ipify.org?format=json")
+                    if resp.status_code == 200:
+                        ip = resp.json().get("ip", "").strip()
+                        if ip not in LOCAL_DISALLOWED_IPS:
+                            logger.info(f"🛡️  [FAILOVER-VERIFIED] Outbound IP: {ip} via Public Proxy Pool ({target_geo})")
+                            return ip, fallback_proxy
+        except Exception as fb_err:
+            logger.warning(f"Fallback proxy pool probe notice: {fb_err}")
+
+    # 3. Cloud environment fallback
+    if _is_cloud_env():
+        logger.info("ℹ️  [CLOUD-FAILSAFE] Operating on cloud runner datacenter egress without proxy crash.")
+        return "cloud-runner-ip", None
+
+    raise RuntimeError("❌ [FAIL-CLOSED] All proxy layers exhausted and running on local machine.")
 
 
 class AdvancedOrganicSimulator:
@@ -715,9 +754,10 @@ class AdvancedOrganicSimulator:
     ) -> SessionTelemetry:
         """Runs a full-DOM Playwright session with CDP stealth and AdSense firewall."""
         session_id = f"gw_sess_{uuid.uuid4().hex[:12]}"
-        proxy_url = self.resolve_proxy(persona.geo_region, session_id)
-        if not self.dry_run and proxy_url:
-            await verify_proxy_egress(proxy_url, persona.geo_region)
+        candidate_proxy = self.resolve_proxy(persona.geo_region, session_id)
+        effective_proxy = candidate_proxy
+        if not self.dry_run:
+            _, effective_proxy = await verify_proxy_egress(candidate_proxy, persona.geo_region)
 
         telemetry = SessionTelemetry(
             session_id=session_id,
@@ -740,7 +780,6 @@ class AdvancedOrganicSimulator:
                     "args": stealth_launch_args(),
                     **_extra_launch_kwargs,
                 }
-                effective_proxy = proxy_url or self.proxy_url
                 if effective_proxy:
                     launch_kwargs["proxy"] = {"server": effective_proxy}
 
@@ -943,9 +982,10 @@ class AdvancedOrganicSimulator:
         import httpx
 
         session_id = f"gw_sess_{uuid.uuid4().hex[:12]}"
-        proxy_url = self.resolve_proxy(persona.geo_region, session_id)
-        if not self.dry_run and proxy_url:
-            await verify_proxy_egress(proxy_url, persona.geo_region)
+        candidate_proxy = self.resolve_proxy(persona.geo_region, session_id)
+        effective_proxy = candidate_proxy
+        if not self.dry_run:
+            _, effective_proxy = await verify_proxy_egress(candidate_proxy, persona.geo_region)
 
         dwell = HumanPhysics.calculate_reading_time_seconds(target.word_count)
         scroll = random.randint(65, 100)

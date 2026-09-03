@@ -96,14 +96,18 @@ class BrandKeywordBooster:
         dry_run: bool = False,
         geo_region: str = "US",
         proxy_url: str | None = None,
+        force_residential: bool = False,
     ) -> None:
         self.supabase = supabase
         self.backend = backend
         self.dry_run = dry_run
         self.geo_region = geo_region
-        self.proxy_url = proxy_url or self._resolve_proxy(geo_region)
-        if self.proxy_url:
-            logger.info("🛡️  Brand Booster proxy enabled (%s residential)", geo_region)
+        self.cf_worker_url = os.environ.get("CLOUDFLARE_EGRESS_WORKER_URL")
+        self.residential_proxy_url = proxy_url or (self._resolve_proxy(geo_region) if force_residential else None)
+        if self.residential_proxy_url:
+            logger.info("🛡️  Brand Booster residential proxy enabled (%s)", geo_region)
+        else:
+            logger.info("🌱 Brand Booster Zero-Cost Egress: Direct Stealth -> Cloudflare Shuffler -> Public Pool")
 
     def _resolve_proxy(self, geo_region: str) -> str | None:
         login = os.environ.get("DATAIMPULSE_LOGIN")
@@ -162,14 +166,20 @@ class BrandKeywordBooster:
                 )
             )
 
-            # Tier 3: Competitor Switch / Alternative
-            comps = COMPETITOR_MAP.get(pillar, ["nerdwallet", "bankrate", "wirecutter"])
-            comp = random.choice(comps)
+            # Tier 3: Competitor Switch Anchor
+            comp_map = {
+                "money": ["nerdwallet", "bankrate", "investopedia"],
+                "home": ["angi", "bob vila", "energysage"],
+                "body": ["healthline", "myfitnesspal", "labdoor"],
+                "tech": ["wirecutter", "rtings", "tomsguide"],
+                "life": ["thepointsguy", "nerdwallet travel", "kayak"],
+            }
+            comps = comp_map.get(pillar, ["nerdwallet", "investopedia"])
+            target_comp = random.choice(comps)
             t3_variants = [
-                f"{comp} vs gworky {clean_title}",
-                f"{comp} alternative gworky",
-                f"switch from {comp} to gworky",
-                f"gworky {pillar} vs {comp}",
+                f"switch from {target_comp} to gworky",
+                f"{target_comp} vs gworky",
+                f"{target_comp} alternative gworky",
             ]
             queries.append(
                 BrandQuery(
@@ -183,115 +193,140 @@ class BrandKeywordBooster:
         random.shuffle(queries)
         return queries
 
+    async def _fetch_with_fallback(
+        self,
+        url: str,
+        params: dict[str, str],
+        headers: dict[str, str],
+        min_bytes: int = 10,
+    ) -> tuple[int, str]:
+        """Executes HTTP GET using a resilient 4-tier egress fallback cascade."""
+        import httpx
+        import urllib.parse
+
+        # Tier 1: Direct Stealth ($0 USD, 0 MB DataImpulse)
+        try:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                resp = await client.get(url, params=params, headers=headers)
+                if resp.status_code == 200 and len(resp.content) >= min_bytes:
+                    return resp.status_code, resp.text
+        except Exception as e:
+            logger.debug("Tier 1 (Direct Stealth) notice: %s", e)
+
+        # Tier 2: Cloudflare Egress Shuffler ($0 USD, 100k req/day edge proxy)
+        if self.cf_worker_url:
+            try:
+                full_target = f"{url}?{urllib.parse.urlencode(params)}"
+                proxy_endpoint = f"{self.cf_worker_url}/proxy?url={urllib.parse.quote(full_target, safe='')}"
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(
+                        proxy_endpoint,
+                        headers={"User-Agent": headers.get("User-Agent", "Groundwork/1.0")},
+                    )
+                    if resp.status_code == 200 and len(resp.content) >= min_bytes:
+                        return resp.status_code, resp.text
+            except Exception as e:
+                logger.debug("Tier 2 (Cloudflare Shuffler) notice: %s", e)
+
+        # Tier 3: Public Proxy Pool ($0 USD)
+        try:
+            from egress_public_pool import EgressPublicPoolProvider
+            pub_proxy = EgressPublicPoolProvider.get_best_proxy(geo=self.geo_region)
+            if pub_proxy:
+                async with httpx.AsyncClient(proxy=pub_proxy, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url, params=params, headers=headers)
+                    if resp.status_code == 200 and len(resp.content) >= min_bytes:
+                        return resp.status_code, resp.text
+        except Exception as e:
+            logger.debug("Tier 3 (Public Proxy Pool) notice: %s", e)
+
+        # Tier 4: Residential Proxy (DataImpulse fallback as emergency last resort)
+        if self.residential_proxy_url:
+            try:
+                async with httpx.AsyncClient(proxy=self.residential_proxy_url, timeout=12.0, follow_redirects=True) as client:
+                    resp = await client.get(url, params=params, headers=headers)
+                    if resp.status_code == 200 and len(resp.content) >= min_bytes:
+                        return resp.status_code, resp.text
+            except Exception as e:
+                logger.debug("Tier 4 (Residential Proxy) notice: %s", e)
+
+        return 0, ""
+
     async def execute_google_autocomplete(self, bq: BrandQuery) -> bool:
         """Seeds Google Autocomplete cache with brand + entity query terms."""
-        import httpx
-
         params = {"client": "chrome", "q": bq.query}
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/128.0.0.0",
             "Accept": "*/*",
         }
-        try:
-            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=10.0, follow_redirects=True) as client:
-                resp = await client.get(
-                    "https://suggestqueries.google.com/complete/search",
-                    params=params,
-                    headers=headers,
-                )
-                if resp.status_code == 200:
-                    logger.info(
-                        f"✅ [Google-Suggest] [{bq.tier.upper()}] '{bq.query}' -> 200 OK"
-                    )
-                    return True
-                logger.warning(f"Google Suggest returned HTTP {resp.status_code}")
-                return False
-        except Exception as e:
-            logger.debug(f"Google Suggest query notice: {e}")
-            return False
+        status_code, text = await self._fetch_with_fallback(
+            "https://suggestqueries.google.com/complete/search",
+            params=params,
+            headers=headers,
+            min_bytes=5,
+        )
+        if status_code == 200:
+            logger.info("✅ [Google-Suggest] [%s] '%s' -> 200 OK", bq.tier.upper(), bq.query)
+            return True
+        logger.warning("Google Suggest query failed across tiers for: %s", bq.query)
+        return False
 
     async def execute_duckduckgo_query(self, bq: BrandQuery) -> bool:
         """Seeds DuckDuckGo & Bing search index with brand queries."""
-        import httpx
-
         params = {"q": bq.query}
         headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/128.0.0.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
-        try:
-            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=12.0, follow_redirects=True) as client:
-                resp = await client.get(
-                    "https://html.duckduckgo.com/html/",
-                    params=params,
-                    headers=headers,
-                )
-                if resp.status_code == 200 and len(resp.text) > 500:
-                    logger.info(
-                        f"✅ [DuckDuckGo] [{bq.tier.upper()}] '{bq.query}' -> 200 OK ({len(resp.text)} bytes)"
-                    )
-                    return True
-                logger.warning(f"DuckDuckGo returned HTTP {resp.status_code}")
-                return False
-        except Exception as e:
-            logger.debug(f"DuckDuckGo query notice: {e}")
-            return False
+        status_code, text = await self._fetch_with_fallback(
+            "https://html.duckduckgo.com/html/",
+            params=params,
+            headers=headers,
+            min_bytes=300,
+        )
+        if status_code == 200:
+            logger.info("✅ [DuckDuckGo] [%s] '%s' -> 200 OK (%d bytes)", bq.tier.upper(), bq.query, len(text))
+            return True
+        logger.warning("DuckDuckGo query failed across tiers for: %s", bq.query)
+        return False
 
     async def execute_hn_algolia_query(self, bq: BrandQuery) -> bool:
         """Seeds Hacker News Algolia search logs for tech queries."""
-        import httpx
-
         params = {"query": bq.query}
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json",
         }
-        try:
-            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=10.0, follow_redirects=True) as client:
-                resp = await client.get(
-                    "https://hn.algolia.com/api/v1/search",
-                    params=params,
-                    headers=headers,
-                )
-                if resp.status_code == 200:
-                    hits = len(resp.json().get("hits", []))
-                    logger.info(
-                        f"✅ [HN-Algolia] [{bq.tier.upper()}] '{bq.query}' -> 200 OK ({hits} hits)"
-                    )
-                    return True
-                logger.warning(f"HN Algolia returned HTTP {resp.status_code}")
-                return False
-        except Exception as e:
-            logger.debug(f"HN Algolia query notice: {e}")
-            return False
+        status_code, text = await self._fetch_with_fallback(
+            "https://hn.algolia.com/api/v1/search",
+            params=params,
+            headers=headers,
+            min_bytes=10,
+        )
+        if status_code == 200:
+            logger.info("✅ [HN-Algolia] [%s] '%s' -> 200 OK", bq.tier.upper(), bq.query)
+            return True
+        logger.warning("HN Algolia query failed across tiers for: %s", bq.query)
+        return False
 
     async def execute_searxng_query(self, bq: BrandQuery, instance: str) -> bool:
         """Executes a search query against a public SearXNG instance."""
-        import httpx
-
-        params = {
-            "q": bq.query,
-            "language": "en",
-        }
+        params = {"q": bq.query, "language": "en"}
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/128.0.0.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
-
-        try:
-            async with httpx.AsyncClient(proxy=self.proxy_url, timeout=12.0, follow_redirects=True) as client:
-                resp = await client.get(f"{instance}/search", params=params, headers=headers)
-                if resp.status_code == 200 and len(resp.text) > 200:
-                    logger.info(
-                        f"✅ [SearXNG] [{bq.tier.upper()}] '{bq.query}' -> 200 OK ({len(resp.text)} bytes) (Instance: {instance})"
-                    )
-                    return True
-                else:
-                    logger.warning(f"SearXNG instance {instance} returned HTTP {resp.status_code}")
-                    return False
-        except Exception as e:
-            logger.debug(f"SearXNG query notice: {e}")
-            return False
+        status_code, text = await self._fetch_with_fallback(
+            f"{instance}/search",
+            params=params,
+            headers=headers,
+            min_bytes=200,
+        )
+        if status_code == 200:
+            logger.info("✅ [SearXNG] [%s] '%s' -> 200 OK (%d bytes) (%s)", bq.tier.upper(), bq.query, len(text), instance)
+            return True
+        logger.warning("SearXNG instance %s failed for query: %s", instance, bq.query)
+        return False
 
     async def run(self, limit: int = 15, pillar: str | None = None) -> None:
         """Main execution loop for brand query volume seeding across multi-engine mix."""
