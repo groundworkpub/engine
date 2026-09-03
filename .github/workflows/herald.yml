@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   run-herald:
-    name: Amplify published articles to X / Bluesky / Pinterest
+    name: Amplify published articles to X / Bluesky / Buffer / LinkedIn / Mastodon
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -45,11 +45,25 @@ jobs:
           PINTEREST_API_KEY: ${{ secrets.PINTEREST_API_KEY }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
           BUFFER_ORG_ID: ${{ secrets.BUFFER_ORG_ID }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_ORGANIZATION_ID: ${{ secrets.LINKEDIN_ORGANIZATION_ID }}
+          MASTODON_ACCESS_TOKEN: ${{ secrets.MASTODON_ACCESS_TOKEN }}
+          MASTODON_INSTANCE_URL: ${{ secrets.MASTODON_INSTANCE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_FOUNDER_CHAT_ID: ${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}
           LITELLM_LOG: WARNING
         run: PYTHONPATH=. python agents/herald.py
 
       - name: Notify on failure
         if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_FOUNDER_CHAT_ID: ${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}
         run: |
           echo "Herald failed! Check the logs above."
-          echo "Run at: $(date -u)"
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_FOUNDER_CHAT_ID" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_FOUNDER_CHAT_ID}" \
+              -d "text=🚨 <b>Herald Social Amplification FAILED</b>%0ACheck GitHub Actions logs: https://github.com/groundworkpub/engine/actions" \
+              -d "parse_mode=HTML"
+          fi

@@ -33,7 +33,7 @@ BSKY_SESSION_URL = "https://bsky.social/xrpc/com.atproto.server.createSession"
 BSKY_RECORD_URL = "https://bsky.social/xrpc/com.atproto.repo.createRecord"
 BSKY_UPLOAD_BLOB_URL = "https://bsky.social/xrpc/com.atproto.repo.uploadBlob"
 TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
-BUFFER_GRAPHQL_URL = "https://api.buffer.com/1/graphql"
+BUFFER_GRAPHQL_URL = "https://api.buffer.com/graphql"
 
 PILLAR_HASHTAGS: dict[str, list[str]] = {
     "money": ["#personalfinance", "#investing", "#financialfreedom", "#wealthbuilding", "#moneytips"],
@@ -43,15 +43,13 @@ PILLAR_HASHTAGS: dict[str, list[str]] = {
     "tech": ["#tech", "#artificialintelligence", "#smartgadgets", "#software", "#aitools"],
 }
 
-PLATFORMS = ("buffer", "bluesky", "mastodon", "wordpress", "twitter")
+PLATFORMS = ("buffer", "bluesky", "mastodon", "linkedin")
 
 
 def _env(
     env: dict[str, str] | os._Environ | None = None,
 ) -> dict[str, str]:
     """Normalize the optional env override into a plain dict and auto-load .env.local if present."""
-    if env is not None:
-        return dict(env)
     res = dict(os.environ)
     env_file = Path(__file__).resolve().parent.parent / ".env.local"
     if env_file.exists():
@@ -63,6 +61,8 @@ def _env(
                     res.setdefault(k.strip(), v.strip().strip('"').strip("'"))
         except Exception:
             pass
+    if env is not None:
+        res.update(dict(env))
     if not res.get("WP_SITE_URL") and res.get("WORDPRESS_URL"):
         res["WP_SITE_URL"] = res["WORDPRESS_URL"]
     if not res.get("WP_USERNAME") and res.get("WORDPRESS_USERNAME"):
@@ -84,7 +84,8 @@ def _http_json(
     timeout: int = 30,
 ) -> tuple[int, dict[str, Any], urllib.error.HTTPError | None]:
     req_headers = {
-        "User-Agent": "GroundworkHerald/1.0 (+https://gworky.com)",
+        "User-Agent": "GroundworkHerald/1.0 (+https://gworky.com; en-US)",
+        "Accept-Language": "en-US,en;q=0.9",
         **(headers or {}),
     }
     request = urllib.request.Request(url, method=method, headers=req_headers)
@@ -300,9 +301,9 @@ def build_shortform_video_script(article: dict[str, Any]) -> dict[str, Any]:
             },
         ],
         "captions": {
-            "tiktok": f"🎬 {hook}\n\n💡 Key Finding: {takeaway}\n\n👉 Calculate yours on Groundwork (Link in bio)\n\n{_hashtags(article, 3)} #fyp #learnontiktok",
-            "reels": f"📊 The real data behind {title}.\n\n{takeaway}\n\n🔗 Run the interactive decision calculator at Groundwork (Link in bio)\n\n{_hashtags(article, 4)}",
-            "shorts": f"⚡ {title}: 60-Second Data Breakdown.\n\nRead full research & use interactive calculator: {_canonical_url(article)}\n\n{_hashtags(article, 3)} #Shorts",
+            "tiktok": f"🎬 {hook}\n\n💡 Key Finding: {takeaway}\n\n🔗 Full research guide: {_canonical_url(article)}\n\n{_hashtags(article, 3)} #fyp #groundwork",
+            "reels": f"📊 The real data behind {title}.\n\n{hook}\n\n💡 Key Finding: {takeaway}\n\n🔗 Read full guide: {_canonical_url(article)}\n\n{_hashtags(article, 3)}",
+            "shorts": f"⚡ {title}: 60-Second Data Breakdown.\n\n{hook}\n\n💡 Key Finding: {takeaway}\n\n🔗 Read full research: {_canonical_url(article)}\n\n{_hashtags(article, 3)} #Shorts",
         },
     }
 
@@ -770,9 +771,11 @@ def publish_to_twitter(text: str, env: dict[str, str] | None = None) -> dict[str
 def publish_to_buffer(
     title: str,
     text: str,
+    image_url: str | None = None,
+    video_url: str | None = None,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Create Queue Posts or Ideas in Buffer via GraphQL API for multi-channel syndication."""
+    """Create Queue Posts or Ideas in Buffer via GraphQL API for multi-channel syndication (X, Facebook, TikTok)."""
     creds = _env(env)
     token = creds.get("BUFFER_ACCESS_TOKEN")
     org_id = creds.get("BUFFER_ORG_ID") or "6a856b7084d800cf2ad90298"
@@ -832,7 +835,7 @@ def publish_to_buffer(
 
     created_posts = []
 
-    # If channels are found, schedule to queue for each compatible channel (Twitter/X, Facebook)
+    # If channels are found, schedule to queue for each compatible channel (Twitter/X, Facebook, TikTok)
     if channels:
         post_mutation = """
         mutation CreatePost($input: CreatePostInput!) {
@@ -869,27 +872,50 @@ def publish_to_buffer(
                 logger.warning("Channel %s (%s) has %d queued posts; skipping to respect Buffer Free tier cap (max 10).", ch.get("name"), service, current_queued)
                 continue
 
-            # Prepare metadata according to service requirements
+            # Prepare metadata and assets per service
             metadata = {}
+            assets = []
+
+            # Default fallback HD visual
+            media_img = image_url or "https://i.ytimg.com/vi/CT3g8oO7-QI/hqdefault.jpg"
+
+            # UNIFIED VIDEO/AUDIOVISUAL ASSET FOR ALL CHANNELS (X, Facebook, TikTok)
+            if video_url:
+                assets = [{"video": {"url": video_url}}]
+            elif media_img:
+                assets = [{"image": {"url": media_img}}]
+
             if service == "facebook":
-                metadata["facebook"] = {"type": "post"}
+                metadata["facebook"] = {"type": "reel" if "short" in (video_url or "").lower() else "post"}
+            elif service == "tiktok":
+                metadata["tiktok"] = {"title": title[:90]}
+            elif service == "instagram":
+                metadata["instagram"] = {
+                    "type": "reel" if video_url else "post",
+                    "shouldShareToFeed": True,
+                }
 
             share_mode = creds.get("BUFFER_SHARE_MODE", "addToQueue")
+
+            # Format text per channel requirements
+            channel_text = text
+            if service == "twitter" and len(channel_text) > 280:
+                urls = re.findall(r"https?://\S+", channel_text)
+                url_part = f"\n\n{urls[0]}" if urls else ""
+                available_len = 280 - len(url_part) - 4
+                channel_text = f"{title[:available_len]}...{url_part}"
+
             # Build post input
             post_input = {
                 "channelId": ch_id,
-                "text": text,
+                "text": channel_text,
                 "mode": share_mode,
                 "schedulingType": "automatic",
                 "needsApproval": False,
-                "assets": [],
+                "assets": assets,
             }
             if metadata:
                 post_input["metadata"] = metadata
-
-            # Skip TikTok text-only queue posts as TikTok requires video assets
-            if service == "tiktok":
-                continue
 
             # Throttle requests to respect Buffer 60 req/min rate limit
             time.sleep(1.0)
@@ -1010,6 +1036,191 @@ def generate_text_master_bundle(article: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_standard_social_caption(article: dict[str, Any]) -> str:
+    """Standardized Audiovisual & Reel/Short Master Caption across YouTube, Buffer (IG/TikTok/X), and LinkedIn."""
+    title = article.get("title", "Groundwork Research")
+    hook = _excerpt_hook(article)
+    takeaway = (article.get("takeaway") or "").strip()
+    link = _canonical_url(article)
+    tags = _hashtags(article, 3)
+
+    caption_lines = [
+        f"⚡ {title}",
+        "",
+        hook,
+    ]
+    if takeaway:
+        caption_lines.extend(["", f"💡 Key Finding: {takeaway}"])
+
+    youtube_id = article.get("youtube_video_id")
+    if youtube_id:
+        caption_lines.extend(["", f"🎬 Watch Short Breakdown: https://youtu.be/{youtube_id}"])
+    else:
+        caption_lines.extend(["", "🎙️ Listen to Podcast: https://gworky.com/podcast"])
+
+    caption_lines.extend(["", f"🔗 Read the full research breakdown: {link}", "", tags])
+    return "\n".join(caption_lines).strip()
+
+
+def _upload_linkedin_video(
+    token: str,
+    author_urn: str,
+    video_bytes: bytes,
+) -> str | None:
+    """Registers and uploads binary MP4 video to LinkedIn DigitalMedia Asset API."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Restli-Protocol-Version": "2.0.0",
+        "LinkedIn-Version": "202401",
+        "Content-Type": "application/json",
+    }
+    req_body = {
+        "registerUploadRequest": {
+            "recipes": ["urn:li:digitalmediaRecipe:feedshare-video"],
+            "owner": author_urn,
+            "supportedUploadMechanism": ["SYNCHRONOUS_UPLOAD"],
+        }
+    }
+    status, payload, err = _http_json("https://api.linkedin.com/v2/assets?action=registerUpload", method="POST", headers=headers, body=req_body, timeout=20)
+    if status != 200:
+        logger.warning("LinkedIn registerUpload failed: %s", err or payload)
+        return None
+
+    val = payload.get("value", {})
+    upload_url = val.get("uploadMechanism", {}).get("com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest", {}).get("uploadUrl")
+    asset_urn = val.get("asset")
+
+    if not upload_url or not asset_urn:
+        return None
+
+    try:
+        req = urllib.request.Request(upload_url, data=video_bytes, method="PUT")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/octet-stream")
+        with urllib.request.urlopen(req, timeout=90) as res:
+            if res.status in (200, 201):
+                return asset_urn
+    except Exception as exc:
+        logger.warning("LinkedIn binary video upload error: %s", exc)
+
+    return None
+
+
+def publish_to_linkedin(
+    article: dict[str, Any],
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Posts native Short video or rich article link, title, and summary to LinkedIn UGC Posts API (Dual Broadcast)."""
+    creds = _env(env)
+    token = creds.get("LINKEDIN_ACCESS_TOKEN")
+    org_id = creds.get("LINKEDIN_ORGANIZATION_ID")
+
+    if not token:
+        return {"ok": False, "skipped": True, "error": "missing LINKEDIN_ACCESS_TOKEN"}
+
+    if creds.get("HERALD_DRY_RUN"):
+        return {"ok": True, "post_id": "linkedin-dry-run", "post_url": "https://www.linkedin.com/feed/", "error": None}
+
+    title = article.get("title", "")
+    excerpt = article.get("excerpt", "")
+    canonical_url = _canonical_url(article)
+    commentary = build_standard_social_caption(article)
+    slug = article.get("slug", "")
+
+    # Resolve Targets: Dual Broadcast (Organization + Personal Member)
+    targets: list[str] = []
+    if org_id:
+        targets.append(f"urn:li:organization:{org_id}")
+
+    u_status, u_res, _ = _http_json(
+        "https://api.linkedin.com/v2/userinfo",
+        method="GET",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    if u_status == 200 and u_res.get("sub"):
+        person_urn = f"urn:li:person:{u_res['sub']}"
+        if person_urn not in targets:
+            targets.append(person_urn)
+    elif not targets:
+        targets.append("urn:li:person:me")
+
+    # Check for binary MP4 short video
+    video_bytes = None
+    local_video_path = Path(__file__).resolve().parent.parent / f"public/audio/videos/{slug}_shorts.mp4"
+    if local_video_path.exists():
+        try:
+            video_bytes = local_video_path.read_bytes()
+        except Exception:
+            video_bytes = None
+    elif article.get("video_url"):
+        try:
+            with urllib.request.urlopen(article["video_url"], timeout=30) as r_vid:
+                video_bytes = r_vid.read()
+        except Exception:
+            video_bytes = None
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Restli-Protocol-Version": "2.0.0",
+        "LinkedIn-Version": "202401",
+        "Content-Type": "application/json",
+    }
+
+    results: list[dict[str, Any]] = []
+    for author_urn in targets:
+        asset_urn = None
+        if video_bytes:
+            asset_urn = _upload_linkedin_video(token, author_urn, video_bytes)
+
+        if asset_urn:
+            media_category = "VIDEO"
+            media_list: list[dict[str, Any]] = [{"status": "READY", "media": asset_urn, "title": {"text": title[:200]}}]
+        else:
+            media_category = "ARTICLE"
+            media_list = [
+                {
+                    "status": "READY",
+                    "description": {"text": excerpt[:200]},
+                    "originalUrl": canonical_url,
+                    "title": {"text": title[:200]},
+                }
+            ]
+
+        payload = {
+            "author": author_urn,
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": commentary},
+                    "shareMediaCategory": media_category,
+                    "media": media_list,
+                }
+            },
+            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+        }
+
+        status, res, err = _http_json("https://api.linkedin.com/v2/ugcPosts", method="POST", headers=headers, body=payload, timeout=20)
+        if status in (200, 201):
+            urn_id = res.get("id", "linkedin-post")
+            results.append({"author": author_urn, "post_id": urn_id, "post_url": f"https://www.linkedin.com/feed/update/{urn_id}"})
+            logger.info("LinkedIn Dual Broadcast published to %s -> %s", author_urn, urn_id)
+        else:
+            logger.info("LinkedIn target %s returned status %s: %s", author_urn, status, err or res)
+
+    if results:
+        primary = results[0]
+        return {
+            "ok": True,
+            "post_id": primary["post_id"],
+            "post_url": primary["post_url"],
+            "all_posts": results,
+            "error": None,
+        }
+
+    return {"ok": False, "skipped": False, "error": f"LinkedIn API dual broadcast failed across targets: {targets}"}
+
+
 # --------------------------------------------------------------------------
 # Dispatch Router
 # --------------------------------------------------------------------------
@@ -1033,11 +1244,17 @@ def dispatch(article: dict[str, Any], platform: str, env: dict[str, str] | None 
         copy = build_twitter_copy(article)
         return publish_to_twitter(copy, env)
 
+    if platform == "linkedin":
+        return publish_to_linkedin(article, env)
+
     if platform == "buffer":
         title = article.get("title", "Groundwork Research")
-        media_bundle = generate_media_master_bundle(article)
-        caption = media_bundle["captions"]["tiktok"]
-        return publish_to_buffer(title, caption, env)
+        caption = build_standard_social_caption(article)
+        img = article.get("image_url") or f"https://media.gworky.com/covers/{article.get('slug')}.webp"
+        video_url = article.get("video_url")
+        if not video_url and article.get("youtube_video_id"):
+            video_url = f"https://media.gworky.com/videos/{article.get('slug')}-shorts.mp4"
+        return publish_to_buffer(title, caption, image_url=img, video_url=video_url, env=env)
 
     if platform == "pinterest":
         board_id = env.get("PINTEREST_BOARD_ID")
@@ -1072,7 +1289,7 @@ def _supabase() -> Any:
 
 
 def _fetch_published_articles(supabase: Any, limit: int, slug: str | None = None) -> list[dict[str, Any]]:
-    query = supabase.table("articles").select("slug,title,excerpt,pillar,status,takeaway")
+    query = supabase.table("articles").select("slug,title,excerpt,pillar,status,takeaway,image_url,published_at,updated_at")
     query = query.eq("slug", slug) if slug else query.eq("status", "published").order("published_at", desc=True)
     result = query.limit(limit).execute()
     return result.data or []
@@ -1153,7 +1370,13 @@ def main() -> int:
     args = parse_args()
     if args.dry_run:
         os.environ["HERALD_DRY_RUN"] = "1"
-    platforms = tuple(p for p in args.platform or PLATFORMS if p in PLATFORMS)
+    raw_platforms = []
+    for item in (args.platform or PLATFORMS):
+        for p in str(item).split(","):
+            p_clean = p.strip().lower()
+            if p_clean in PLATFORMS and p_clean not in raw_platforms:
+                raw_platforms.append(p_clean)
+    platforms = tuple(raw_platforms) or PLATFORMS
 
     try:
         supabase = _supabase()
@@ -1195,6 +1418,7 @@ def main() -> int:
     processed = 0
     published = 0
     failures = 0
+    all_rows: list[dict[str, Any]] = []
     for article in articles:
         slug = article.get("slug", "")
         pending = tuple(p for p in platforms if (slug, p) not in ledger)
@@ -1203,6 +1427,7 @@ def main() -> int:
             continue
         processed += 1
         for row in amplify_article(supabase, article, pending):
+            all_rows.append(row)
             published += int(row["status"] == "posted")
             failures += int(row["status"] == "failed")
             logger.info(
@@ -1220,7 +1445,45 @@ def main() -> int:
     status = "success" if failures == 0 else "partial"
     _log_run(supabase, status, processed, published, None if failures == 0 else f"{failures} post(s) failed")
     logger.info("herald done: processed=%s published=%s failures=%s", processed, published, failures)
-    return 0 if failures == 0 else 1
+
+    # Send Founder Telegram Digest
+    if all_rows:
+        send_telegram_summary(all_rows, processed, published, failures)
+
+    return 0 if (published > 0 or failures == 0) else 1
+
+
+def send_telegram_summary(rows: list[dict[str, Any]], processed: int, published: int, failures: int) -> bool:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_FOUNDER_CHAT_ID")
+    if not token or not chat_id:
+        return False
+    try:
+        import httpx
+
+        platform_counts: dict[str, int] = {}
+        for r in rows:
+            if r.get("status") == "posted":
+                p = r.get("platform", "unknown")
+                platform_counts[p] = platform_counts.get(p, 0) + 1
+
+        breakdown_lines = [f"  • <b>{p.capitalize()}</b>: {count} post(s)" for p, count in platform_counts.items()]
+        breakdown = "\n".join(breakdown_lines) if breakdown_lines else "  • (No live posts published)"
+
+        message = (
+            f"📣 <b>Groundwork Herald Social Amplification</b>\n\n"
+            f"• <b>Articles Evaluated:</b> {processed}\n"
+            f"• <b>Total Live Posts:</b> {published}\n"
+            f"• <b>Failures:</b> {failures}\n\n"
+            f"<b>Platform Breakdown:</b>\n{breakdown}\n\n"
+            f"<i>Source: groundworkpub/engine</i>"
+        )
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        httpx.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed sending Telegram summary: %s", exc)
+        return False
 
 
 if __name__ == "__main__":

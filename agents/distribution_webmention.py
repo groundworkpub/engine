@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+try:
+    from agents.resilience import redact_message
+except ImportError:
+    from resilience import redact_message
+
 logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -185,7 +190,7 @@ class WebmentionSender:
                 if res.data:
                     already_sent = {r["target_url"] for r in res.data}
         except Exception as dedup_err:
-            logger.warning("Dedup lookup failed (proceeding without dedup): %s", dedup_err)
+            logger.warning("Dedup lookup failed (proceeding without dedup): %s", redact_message(str(dedup_err)))
 
         sent: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
@@ -229,7 +234,7 @@ class WebmentionSender:
                     on_conflict="source_url,target_url",
                 )
         except Exception as rec_err:
-            logger.warning("Failed to record sent webmention: %s", rec_err)
+            logger.warning("Failed to record sent webmention: %s", redact_message(str(rec_err)))
 
 
 # ── CLI ──────────────────────────────────────────────────────────────

@@ -1,9 +1,8 @@
 name: WordPress Authority Growth Engine
 
+# Decommissioned 2026-09-03: WordPress satellite link building retired
+# Manual workflow_dispatch only for archival/testing purposes.
 on:
-  schedule:
-    # Runs daily at 06:00 UTC on public engine runner (unlimited minutes, $0 USD)
-    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       pillar:

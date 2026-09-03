@@ -17,6 +17,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from agents.resilience import redact_message
+except ImportError:
+    from resilience import redact_message
+
 logger = logging.getLogger(__name__)
 
 
@@ -126,7 +131,7 @@ class MobileRotator:
             logger.info("Airplane mode toggled on device %s", device_id)
             return True
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
-            logger.warning("Failed to toggle airplane mode on %s: %s", device_id, exc)
+            logger.warning("Failed to toggle airplane mode on %s: %s", device_id, redact_message(str(exc)))
             return False
 
     @staticmethod

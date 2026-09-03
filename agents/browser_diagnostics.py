@@ -1,5 +1,6 @@
 """Groundwork Browser Fingerprint Diagnostics (Browser Layer).
 
+
 Runs in-browser tests to verify fingerprint consistency and detect
 potential leaks (WebRTC, Canvas, WebGL, Navigator properties).
 

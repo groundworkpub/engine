@@ -66,20 +66,34 @@ jobs:
           git push origin main
 
       - name: Purge Cloudflare Edge Cache for macro-rates.json
-        if: steps.git_diff.outputs.changed == 'true' && secrets.CLOUDFLARE_API_TOKEN != ''
+        if: steps.git_diff.outputs.changed == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID || '67e2be0fcddb82637428c64471050fd8' }}
         run: |
-          curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID || '67e2be0fcddb82637428c64471050fd8' }}/purge_cache" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "Cloudflare token not set, skipping cache purge."
+            exit 0
+          fi
+          curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data '{"files":["https://gworky.com/data/macro-rates.json"]}'
 
       - name: Send Telegram notification
-        if: always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_FOUNDER_CHAT_ID != ''
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_FOUNDER_CHAT_ID: ${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}
         run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_FOUNDER_CHAT_ID" ]; then
+            echo "Telegram credentials not set, skipping notification."
+            exit 0
+          fi
           STATUS="${{ job.status }}"
           CHANGED="${{ steps.git_diff.outputs.changed }}"
           MESSAGE="📊 <b>Groundwork Macro Rates Sync</b>%0AStatus: <b>${STATUS}</b>%0AData Changed: <b>${CHANGED}</b>%0ARef: <code>groundworkpub/media:main</code>"
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}" \
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_FOUNDER_CHAT_ID}" \
             -d "text=${MESSAGE}" \
             -d "parse_mode=HTML"

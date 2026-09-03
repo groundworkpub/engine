@@ -22,6 +22,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from agents.resilience import redact_message
+except ImportError:
+    from resilience import redact_message
+
 logger = logging.getLogger(__name__)
 
 # ── Environment helpers ──────────────────────────────────────────────
@@ -154,7 +159,7 @@ class ZenodoEngine:
                 if r_file.status_code not in (200, 201):
                     logger.warning("Preprint upload returned %s: %s", r_file.status_code, r_file.text[:150])
             except Exception as file_err:
-                logger.warning("Preprint upload failed: %s", file_err)
+                logger.warning("Preprint upload failed: %s", redact_message(str(file_err)))
 
         # 3. Publish deposition and mint final DOI
         pub_result = self.publish(deposit_id)

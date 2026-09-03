@@ -17,7 +17,10 @@ from typing import Any
 import httpx
 from agents.authority_injector import _load_env_local
 
-from resilience import redact_message
+try:
+    from agents.resilience import redact_message
+except ImportError:
+    from resilience import redact_message
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("news_harvester")
