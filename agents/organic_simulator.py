@@ -1127,6 +1127,17 @@ async def main() -> None:
         dest="allow_analytics",
         help="Allow Google Analytics (GA4) & GTM network requests so Realtime analytics captures the session (AdSense/ads remain 100%% blocked)",
     )
+    parser.add_argument(
+        "--ghost-journey",
+        action="store_true",
+        help="Execute real Google Search navigation, typing jitter, competitor pogo-sticking, and terminal Groundwork satisfaction",
+    )
+    parser.add_argument(
+        "--keyword",
+        type=str,
+        default=None,
+        help="Specific search query for the Ghost User journey (defaults to auto-generated organic query)",
+    )
     args = parser.parse_args()
 
     effective_engine = get_engine(args.engine, persona=None)
@@ -1321,12 +1332,29 @@ async def main() -> None:
         logger.info(f"👤 Persona: {persona.name} ({persona.city}, {persona.geo_region})")
         logger.info(f"🔗 Channel: {referral.channel} (Referrer: {referral.referrer_url[:60]}...)")
 
-        if args.browser:
+        if args.ghost_journey:
+            try:
+                from ghost_journey_engine import GhostJourneyEngine
+            except ImportError:
+                from agents.ghost_journey_engine import GhostJourneyEngine
+
+            gj_engine = GhostJourneyEngine(proxy_url=proxy_url, allow_analytics=args.allow_analytics)
+            chosen_kw = args.keyword or referral.search_query or f"gworky {target.article_title}"
+            telemetry_dict = await gj_engine.execute_journey(
+                target_keyword=chosen_kw,
+                target_url=target.canonical_url,
+                pillar=target.pillar,
+                pogo_competitor=True,
+                min_dwell_seconds=45,
+                max_dwell_seconds=90,
+            )
+            logger.info(f"[✔] Ghost journey finished for: {chosen_kw} (status: {telemetry_dict.get('status')})")
+        elif args.browser:
             telemetry = await engine.execute_browser_session(target, persona, referral)
+            await engine.log_session_to_supabase(telemetry)
         else:
             telemetry = await engine.execute_fast_synthetic_session(target, persona, referral)
-
-        await engine.log_session_to_supabase(telemetry)
+            await engine.log_session_to_supabase(telemetry)
 
 
 if __name__ == "__main__":
