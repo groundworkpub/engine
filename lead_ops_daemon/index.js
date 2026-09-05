@@ -99,8 +99,21 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  logDebug(`UNHANDLED REJECTION: ${reason}`);
-  alertTelegram(`⚠️ <b>[RENDER UNHANDLED REJECTION]</b>\n<pre>${String(reason).slice(0, 1500)}</pre>`);
+  const str = String(reason);
+  logDebug(`UNHANDLED REJECTION: ${str}`);
+
+  // Abaikan siklus alami WebSocket/Baileys saat redeploy atau jitter jaringan
+  if (
+    str.includes('Connection Closed') ||
+    str.includes('Stream Errored') ||
+    str.includes('WebSocket was closed') ||
+    str.includes('conflict') ||
+    str.includes('restart required')
+  ) {
+    return;
+  }
+
+  alertTelegram(`⚠️ <b>[RENDER UNHANDLED REJECTION]</b>\n<pre>${str.slice(0, 1500)}</pre>`);
 });
 
 let waClient = null;
