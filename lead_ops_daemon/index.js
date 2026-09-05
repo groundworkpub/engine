@@ -6,6 +6,13 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 
+// Ensure WebSocket is globally available for Supabase Realtime & Baileys
+try {
+  if (!globalThis.WebSocket) {
+    globalThis.WebSocket = require('ws');
+  }
+} catch (e) {}
+
 const app = express();
 app.use(express.json());
 
