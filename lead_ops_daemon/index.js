@@ -5,7 +5,48 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-const { createClient } = require('@supabase/supabase-js');
+
+const app = express();
+app.use(express.json());
+
+const PORT = Number(process.env.PORT) || 10000;
+const debugLogs = [];
+
+function logDebug(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  console.log(line);
+  debugLogs.push(line);
+  if (debugLogs.length > 50) debugLogs.shift();
+}
+
+// 1. IMMMEDIATE PORT BINDING: Never wait for async libraries before binding to Render's port
+const server = app.listen(PORT, '0.0.0.0', () => {
+  logDebug(`Express HTTP Server listening immediately on 0.0.0.0:${PORT}`);
+});
+
+// 2. Health check endpoint for Render load balancer & Cloudflare keepalive
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime_seconds: Math.floor(process.uptime()),
+    service: 'lead-ops-daemon',
+    region: 'singapore'
+  });
+});
+
+app.get('/debug', (req, res) => {
+  res.status(200).json({
+    env_keys_present: Object.keys(process.env).filter(k => !k.includes('KEY') && !k.includes('TOKEN') && !k.includes('SECRET')),
+    has_supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+    has_supabase_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    has_bot_token: !!process.env.LEAD_HUNTER_BOT_TOKEN,
+    has_chat_id: !!process.env.LEAD_HUNTER_CHAT_ID,
+    node_version: process.version,
+    port: PORT,
+    logs: debugLogs
+  });
+});
 
 // Load environment variables (.env.local fallback for local test)
 const envLocalPath = path.resolve(__dirname, '../../../.env.local');
@@ -25,7 +66,6 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.LEAD_HUNTER_BOT_TOKEN;
 const CHAT_ID = process.env.LEAD_HUNTER_CHAT_ID;
-const PORT = Number(process.env.PORT) || 10000;
 const ROOT_DIR = path.resolve(__dirname, '..');
 
 // Helper to push emergency Telegram telemetry
@@ -37,43 +77,27 @@ function alertTelegram(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
     });
-    req.on('error', () => {});
+    req.on('error', (e) => logDebug(`Telegram send error: ${e.message}`));
     req.write(body);
     req.end();
-  } catch (e) {}
+  } catch (e) {
+    logDebug(`alertTelegram exception: ${e.message}`);
+  }
 }
 
-// Global Exception Trap so container NEVER dies silently
+// Global Exception Trap so container NEVER dies
 process.on('uncaughtException', (err) => {
-  console.error('[UNCAUGHT EXCEPTION]:', err);
+  logDebug(`UNCAUGHT EXCEPTION: ${err.message}`);
   alertTelegram(`💥 <b>[RENDER CRASH EXCEPTION]</b>\n<pre>${(err.stack || err.message).slice(0, 1500)}</pre>`);
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[UNHANDLED REJECTION]:', reason);
+  logDebug(`UNHANDLED REJECTION: ${reason}`);
   alertTelegram(`⚠️ <b>[RENDER UNHANDLED REJECTION]</b>\n<pre>${String(reason).slice(0, 1500)}</pre>`);
 });
 
-if (!SUPABASE_URL || !SUPABASE_KEY || !BOT_TOKEN || !CHAT_ID) {
-  console.error('[FATAL] Missing required credentials in environment variables.');
-  alertTelegram('❌ <b>[RENDER FATAL]</b> Missing required credentials in environment variables.');
-  process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const app = express();
-app.use(express.json());
-
-// Express Health & Status endpoints for Cloudflare Keepalive Pinger
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime_seconds: Math.floor(process.uptime()),
-    service: 'lead-ops-daemon',
-    region: 'singapore'
-  });
-});
+let waClient = null;
+let bot = null;
 
 app.get('/status', (req, res) => {
   res.status(200).json({
@@ -84,73 +108,77 @@ app.get('/status', (req, res) => {
   });
 });
 
-// CRITICAL FOR RENDER: Bind HTTP port immediately to 0.0.0.0
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Express] HTTP Server listening immediately on 0.0.0.0:${PORT}`);
-  alertTelegram(`🚀 <b>[RENDER BOOT]</b> Daemon listening on port ${PORT} (Node ${process.version}, Region: Singapore).`);
-});
-
-const setupBotController = require('./bot_controller');
-const WAClient = require('./wa_client');
-
-// Setup WA Client & Bot Controller
-const authDir = path.join(__dirname, 'auth_info');
-if (!fs.existsSync(authDir)) {
-  fs.mkdirSync(authDir, { recursive: true });
-}
-
-const waClient = new WAClient({
-  supabase,
-  bot: null,
-  chatId: CHAT_ID,
-  authDir
-});
-
-const bot = setupBotController({
-  botToken: BOT_TOKEN,
-  chatId: CHAT_ID,
-  supabase,
-  waClient,
-  rootDir: ROOT_DIR
-});
-
-waClient.bot = bot;
-
-// Non-blocking async bootstrap
 async function bootstrap() {
-  console.log('=== BOOTSTRAPPING LEAD OPS DAEMON (RENDER SINGAPORE) ===');
+  logDebug('Starting daemon background bootstrap...');
+  
+  if (!SUPABASE_URL || !SUPABASE_KEY || !BOT_TOKEN || !CHAT_ID) {
+    const err = 'Missing required environment variables. Continuing in degraded mode.';
+    logDebug(err);
+    alertTelegram(`⚠️ <b>[RENDER WARNING]</b> ${err}`);
+    return;
+  }
 
-  // 1. Launch Telegram Bot with dropPendingUpdates
+  const { createClient } = require('@supabase/supabase-js');
+  const setupBotController = require('./bot_controller');
+  const WAClient = require('./wa_client');
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const authDir = path.join(__dirname, 'auth_info');
+  if (!fs.existsSync(authDir)) {
+    fs.mkdirSync(authDir, { recursive: true });
+  }
+
+  waClient = new WAClient({
+    supabase,
+    bot: null,
+    chatId: CHAT_ID,
+    authDir
+  });
+
+  bot = setupBotController({
+    botToken: BOT_TOKEN,
+    chatId: CHAT_ID,
+    supabase,
+    waClient,
+    rootDir: ROOT_DIR
+  });
+
+  waClient.bot = bot;
+
+  // 1. Launch Telegram Bot
   try {
-    console.log('[Telegram] Launching bot polling with dropPendingUpdates...');
+    logDebug('Launching bot polling...');
     await bot.launch({ dropPendingUpdates: true });
-    console.log('[Telegram] Bot polling active for @hunterdev99_bot.');
+    logDebug('Bot polling active for @hunterdev99_bot.');
+    alertTelegram(`🚀 <b>[RENDER LIVE]</b> Lead Ops Daemon aktif 24/7 di Render Singapore!\nNode: ${process.version} | Port: ${PORT}`);
   } catch (err) {
-    console.error('[Telegram] Bot launch warning:', err.message);
+    logDebug(`Bot launch warning: ${err.message}`);
     alertTelegram(`⚠️ <b>[BOT LAUNCH WARNING]</b> ${err.message}`);
   }
 
   // 2. Initialize WhatsApp Socket
   try {
-    console.log('[WAClient] Starting WhatsApp socket...');
+    logDebug('Initializing WhatsApp socket...');
     await waClient.init();
+    logDebug('WhatsApp socket initialized.');
   } catch (err) {
-    console.error('[WAClient] Socket init error:', err.message);
+    logDebug(`WA socket init error: ${err.message}`);
     alertTelegram(`⚠️ <b>[WA SOCKET INIT ERROR]</b> ${err.message}`);
   }
 }
 
+// Run bootstrap in background without blocking port listening
 bootstrap().catch((err) => {
-  console.error('[BOOTSTRAP ERROR]:', err);
-  alertTelegram(`❌ <b>[BOOTSTRAP ERROR]</b> ${err.message}`);
+  logDebug(`Bootstrap fatal error: ${err.message}`);
 });
 
 // Graceful shutdown
 process.once('SIGINT', () => {
-  try { bot.stop('SIGINT'); } catch (e) {}
+  try { if (bot) bot.stop('SIGINT'); } catch (e) {}
   server.close(() => process.exit(0));
 });
 process.once('SIGTERM', () => {
-  try { bot.stop('SIGTERM'); } catch (e) {}
+  try { if (bot) bot.stop('SIGTERM'); } catch (e) {}
   server.close(() => process.exit(0));
 });
