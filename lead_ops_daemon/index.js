@@ -4,9 +4,8 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const { createClient } = require('@supabase/supabase-js');
-const setupBotController = require('./bot_controller');
-const WAClient = require('./wa_client');
 
 // Load environment variables (.env.local fallback for local test)
 const envLocalPath = path.resolve(__dirname, '../../../.env.local');
@@ -26,11 +25,38 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.LEAD_HUNTER_BOT_TOKEN;
 const CHAT_ID = process.env.LEAD_HUNTER_CHAT_ID;
-const PORT = process.env.PORT || 10000;
+const PORT = Number(process.env.PORT) || 10000;
 const ROOT_DIR = path.resolve(__dirname, '..');
+
+// Helper to push emergency Telegram telemetry
+function alertTelegram(text) {
+  try {
+    if (!BOT_TOKEN || !CHAT_ID) return;
+    const body = JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: 'HTML' });
+    const req = https.request(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    });
+    req.on('error', () => {});
+    req.write(body);
+    req.end();
+  } catch (e) {}
+}
+
+// Global Exception Trap so container NEVER dies silently
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]:', err);
+  alertTelegram(`💥 <b>[RENDER CRASH EXCEPTION]</b>\n<pre>${(err.stack || err.message).slice(0, 1500)}</pre>`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]:', reason);
+  alertTelegram(`⚠️ <b>[RENDER UNHANDLED REJECTION]</b>\n<pre>${String(reason).slice(0, 1500)}</pre>`);
+});
 
 if (!SUPABASE_URL || !SUPABASE_KEY || !BOT_TOKEN || !CHAT_ID) {
   console.error('[FATAL] Missing required credentials in environment variables.');
+  alertTelegram('❌ <b>[RENDER FATAL]</b> Missing required credentials in environment variables.');
   process.exit(1);
 }
 
@@ -58,10 +84,14 @@ app.get('/status', (req, res) => {
   });
 });
 
-// CRITICAL FOR RENDER: Bind HTTP port immediately before async initialization
+// CRITICAL FOR RENDER: Bind HTTP port immediately to 0.0.0.0
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Express] HTTP Server listening immediately on port ${PORT}.`);
+  console.log(`[Express] HTTP Server listening immediately on 0.0.0.0:${PORT}`);
+  alertTelegram(`🚀 <b>[RENDER BOOT]</b> Daemon listening on port ${PORT} (Node ${process.version}, Region: Singapore).`);
 });
+
+const setupBotController = require('./bot_controller');
+const WAClient = require('./wa_client');
 
 // Setup WA Client & Bot Controller
 const authDir = path.join(__dirname, 'auth_info');
@@ -96,7 +126,8 @@ async function bootstrap() {
     await bot.launch({ dropPendingUpdates: true });
     console.log('[Telegram] Bot polling active for @hunterdev99_bot.');
   } catch (err) {
-    console.error('[Telegram] Bot launch warning (continuing):', err.message);
+    console.error('[Telegram] Bot launch warning:', err.message);
+    alertTelegram(`⚠️ <b>[BOT LAUNCH WARNING]</b> ${err.message}`);
   }
 
   // 2. Initialize WhatsApp Socket
@@ -104,12 +135,14 @@ async function bootstrap() {
     console.log('[WAClient] Starting WhatsApp socket...');
     await waClient.init();
   } catch (err) {
-    console.error('[WAClient] Socket init error (continuing):', err.message);
+    console.error('[WAClient] Socket init error:', err.message);
+    alertTelegram(`⚠️ <b>[WA SOCKET INIT ERROR]</b> ${err.message}`);
   }
 }
 
 bootstrap().catch((err) => {
   console.error('[BOOTSTRAP ERROR]:', err);
+  alertTelegram(`❌ <b>[BOOTSTRAP ERROR]</b> ${err.message}`);
 });
 
 // Graceful shutdown
