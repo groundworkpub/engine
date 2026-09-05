@@ -153,16 +153,15 @@ async function bootstrap() {
 
   waClient.bot = bot;
 
-  // 1. Launch Telegram Bot
-  try {
-    logDebug('Launching bot polling...');
-    await bot.launch({ dropPendingUpdates: true });
+  // 1. Launch Telegram Bot (non-blocking)
+  logDebug('Launching bot polling...');
+  bot.launch({ dropPendingUpdates: true }).then(() => {
     logDebug('Bot polling active for @hunterdev99_bot.');
-    alertTelegram(`🚀 <b>[RENDER LIVE]</b> Lead Ops Daemon aktif 24/7 di Render Singapore!\nNode: ${process.version} | Port: ${PORT}`);
-  } catch (err) {
+  }).catch((err) => {
     logDebug(`Bot launch warning: ${err.message}`);
     alertTelegram(`⚠️ <b>[BOT LAUNCH WARNING]</b> ${err.message}`);
-  }
+  });
+  alertTelegram(`🚀 <b>[RENDER LIVE]</b> Lead Ops Daemon aktif 24/7 di Render Singapore!\nNode: ${process.version} | Port: ${PORT}`);
 
   // 2. Initialize WhatsApp Socket
   try {
