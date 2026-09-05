@@ -1,11 +1,22 @@
 // tools/lead_ops/server/wa_client.js
 // Baileys WhatsApp Client with 24/7 Keepalive, Typing Simulation, and Inbound Auto-Pause
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const path = require('path');
 const QRCode = require('qrcode');
 const { restoreSessionFromSupabase, backupSessionToSupabase } = require('./session_sync');
+
+let makeWASocket, useMultiFileAuthState, DisconnectReason, delay;
+
+async function loadBaileys() {
+  if (!makeWASocket) {
+    const b = await import('@whiskeysockets/baileys');
+    makeWASocket = b.default || b.makeWASocket;
+    useMultiFileAuthState = b.useMultiFileAuthState;
+    DisconnectReason = b.DisconnectReason;
+    delay = b.delay;
+  }
+}
 
 class WAClient {
   constructor({ supabase, bot, chatId, authDir = './auth_info' }) {
@@ -22,6 +33,7 @@ class WAClient {
   }
 
   async init() {
+    await loadBaileys();
     console.log('[WAClient] Initializing Baileys Socket...');
     await restoreSessionFromSupabase(this.supabase, 'default', this.authDir);
 
