@@ -202,16 +202,22 @@ class WAClient {
 
       const lead = leads && leads.length > 0 ? leads[0] : null;
 
-      if (lead) {
-        await this.supabase
-          .from('pipeline_leads')
-          .update({
-            status: 'replied',
-            contact_wa_status: 'active_replied',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', lead.id);
+      // STRICT FILTER: Hanya teruskan jika nomor pengirim TERDAFTAR di database pipeline properti!
+      // Semua chat pribadi (keluarga, teman, rekan kantor, grup) diabaikan 100% demi menjaga privasi.
+      if (!lead) {
+        // Abaikan pesan non-lead / pesan pribadi
+        return;
       }
+
+      // 2. Tandai lead sebagai REPLIED dan bekukan bot otomatis pada kontak ini
+      await this.supabase
+        .from('pipeline_leads')
+        .update({
+          status: 'replied',
+          contact_wa_status: 'active_replied',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lead.id);
 
       await this.supabase.from('pipeline_messages').insert({
         lead_id: lead ? lead.id : null,
