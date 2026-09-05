@@ -43,6 +43,9 @@ function setupBotController({ botToken, chatId, supabase, waClient, rootDir }) {
       [
         Markup.button.callback(`📊 Status Lead (${statusIcon})`, 'btn_status'),
         Markup.button.callback('📱 Cek Sesi WA', 'btn_wa_session')
+      ],
+      [
+        Markup.button.callback('🔄 Reset Sesi WA (Clean Slate)', 'btn_reset_wa')
       ]
     ]);
   }
@@ -139,6 +142,30 @@ function setupBotController({ botToken, chatId, supabase, waClient, rootDir }) {
         `🔴 <b>WhatsApp Belum Terhubung</b>\n\nKetik <code>/pair &lt;nomor_hp&gt;</code> (contoh: <code>/pair 08123456789</code>) untuk mendapatkan kode pairing 8-digit.`
       );
     }
+  });
+
+  // Action: Reset Sesi WA
+  bot.action('btn_reset_wa', async (ctx) => {
+    await ctx.answerCbQuery('Mereset sesi...');
+    await ctx.reply('🔄 <b>Mereset sesi WhatsApp & membersihkan cache auth...</b>', { parse_mode: 'HTML' });
+    await waClient.resetSession();
+    const keyboard = await getMainKeyboard();
+    return ctx.replyWithHTML(
+      '✅ <b>Sesi berhasil direset bersih!</b>\nSilakan kirim perintah <code>/pair 08xxxxxxx</code> untuk menghubungkan nomor Anda kembali.',
+      keyboard
+    );
+  });
+
+  // Command: /reset & /reset_wa
+  bot.command(['reset', 'reset_wa'], async (ctx) => {
+    if (String(ctx.chat.id) !== String(chatId)) return;
+    await ctx.reply('🔄 <b>Mereset sesi WhatsApp & membersihkan cache auth...</b>', { parse_mode: 'HTML' });
+    await waClient.resetSession();
+    const keyboard = await getMainKeyboard();
+    return ctx.replyWithHTML(
+      '✅ <b>Sesi berhasil direset bersih!</b>\nSilakan kirim perintah <code>/pair 08xxxxxxx</code> untuk menghubungkan nomor Anda kembali.',
+      keyboard
+    );
   });
 
   // Command: /pair <nomor_hp>
