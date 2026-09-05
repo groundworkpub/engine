@@ -27,7 +27,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.LEAD_HUNTER_BOT_TOKEN;
 const CHAT_ID = process.env.LEAD_HUNTER_CHAT_ID;
 const PORT = process.env.PORT || 10000;
-const ROOT_DIR = path.resolve(__dirname, '../../..');
+const ROOT_DIR = path.resolve(__dirname, '..');
 
 if (!SUPABASE_URL || !SUPABASE_KEY || !BOT_TOKEN || !CHAT_ID) {
   console.error('[FATAL] Missing required credentials in environment variables.');
@@ -51,18 +51,27 @@ app.get('/health', (req, res) => {
 
 app.get('/status', (req, res) => {
   res.status(200).json({
-    wa_connected: waClient.isConnected,
-    wa_user: waClient.userJid,
-    queue_size: waClient.queue.length,
+    wa_connected: waClient ? waClient.isConnected : false,
+    wa_user: waClient ? waClient.userJid : null,
+    queue_size: waClient ? waClient.queue.length : 0,
     timestamp: new Date().toISOString()
   });
 });
 
+// CRITICAL FOR RENDER: Bind HTTP port immediately before async initialization
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Express] HTTP Server listening immediately on port ${PORT}.`);
+});
+
 // Setup WA Client & Bot Controller
 const authDir = path.join(__dirname, 'auth_info');
+if (!fs.existsSync(authDir)) {
+  fs.mkdirSync(authDir, { recursive: true });
+}
+
 const waClient = new WAClient({
   supabase,
-  bot: null, // Will assign below
+  bot: null,
   chatId: CHAT_ID,
   authDir
 });
@@ -75,41 +84,40 @@ const bot = setupBotController({
   rootDir: ROOT_DIR
 });
 
-// Attach bot to waClient
 waClient.bot = bot;
 
-// Start Services
-async function start() {
-  console.log('=== MEMULAI LEAD OPS DAEMON 24/7 (RENDER SINGAPORE) ===');
-  
-  // 1. Launch Bot Polling
-  console.log('[Telegram] Launching bot polling...');
-  bot.launch().then(() => {
+// Non-blocking async bootstrap
+async function bootstrap() {
+  console.log('=== BOOTSTRAPPING LEAD OPS DAEMON (RENDER SINGAPORE) ===');
+
+  // 1. Launch Telegram Bot with dropPendingUpdates
+  try {
+    console.log('[Telegram] Launching bot polling with dropPendingUpdates...');
+    await bot.launch({ dropPendingUpdates: true });
     console.log('[Telegram] Bot polling active for @hunterdev99_bot.');
-  }).catch((err) => {
-    console.error('[Telegram] Bot launch error:', err.message);
-  });
+  } catch (err) {
+    console.error('[Telegram] Bot launch warning (continuing):', err.message);
+  }
 
-  // 2. Launch Express HTTP Server
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Express] HTTP Server listening on port ${PORT}.`);
-  });
-
-  // 3. Initialize WhatsApp Socket
-  await waClient.init();
+  // 2. Initialize WhatsApp Socket
+  try {
+    console.log('[WAClient] Starting WhatsApp socket...');
+    await waClient.init();
+  } catch (err) {
+    console.error('[WAClient] Socket init error (continuing):', err.message);
+  }
 }
+
+bootstrap().catch((err) => {
+  console.error('[BOOTSTRAP ERROR]:', err);
+});
 
 // Graceful shutdown
 process.once('SIGINT', () => {
-  bot.stop('SIGINT');
-  process.exit(0);
+  try { bot.stop('SIGINT'); } catch (e) {}
+  server.close(() => process.exit(0));
 });
 process.once('SIGTERM', () => {
-  bot.stop('SIGTERM');
-  process.exit(0);
-});
-
-start().catch((err) => {
-  console.error('[FATAL] Unhandled error during startup:', err);
-  process.exit(1);
+  try { bot.stop('SIGTERM'); } catch (e) {}
+  server.close(() => process.exit(0));
 });
