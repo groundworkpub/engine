@@ -153,15 +153,25 @@ async function bootstrap() {
 
   waClient.bot = bot;
 
-  // 1. Launch Telegram Bot (non-blocking)
-  logDebug('Launching bot polling...');
-  bot.launch({ dropPendingUpdates: true }).then(() => {
-    logDebug('Bot polling active for @hunterdev99_bot.');
-  }).catch((err) => {
-    logDebug(`Bot launch warning: ${err.message}`);
-    alertTelegram(`⚠️ <b>[BOT LAUNCH WARNING]</b> ${err.message}`);
+  // 1. Launch Telegram Bot with resilient retry loop
+  async function launchBotWithRetry(retries = 10) {
+    for (let i = 1; i <= retries; i++) {
+      try {
+        logDebug(`[Telegram] Launching bot polling (attempt ${i}/${retries})...`);
+        await bot.launch({ dropPendingUpdates: true });
+        logDebug('[Telegram] Bot polling active for @hunterdev99_bot.');
+        alertTelegram(`🚀 <b>[RENDER LIVE]</b> Lead Ops Daemon aktif 24/7 di Render Singapore!\nNode: ${process.version} | Port: ${PORT}`);
+        return;
+      } catch (err) {
+        logDebug(`[Telegram] Bot launch attempt ${i} failed: ${err.message}. Retrying in 5s...`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+  }
+
+  launchBotWithRetry().catch((err) => {
+    logDebug(`[Telegram] Bot launch permanently failed: ${err.message}`);
   });
-  alertTelegram(`🚀 <b>[RENDER LIVE]</b> Lead Ops Daemon aktif 24/7 di Render Singapore!\nNode: ${process.version} | Port: ${PORT}`);
 
   // 2. Initialize WhatsApp Socket
   try {
