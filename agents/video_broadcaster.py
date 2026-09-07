@@ -73,7 +73,18 @@ class VideoBroadcaster:
         """Fetch episode by slug from podcast_episodes or articles."""
         episodes = self._supabase_request("GET", f"podcast_episodes?slug=eq.{slug}&select=*")
         if episodes and len(episodes) > 0:
-            return episodes[0]
+            ep = episodes[0]
+            audio_url = ep.get("audio_url")
+            if not audio_url or "/api/audio/" in audio_url:
+                audio_url = f"https://media.gworky.com/episodes/{slug}.mp3"
+            return {
+                "slug": ep.get("slug"),
+                "title": ep.get("title"),
+                "description": ep.get("description") or ep.get("excerpt"),
+                "pillar": ep.get("pillar", "money"),
+                "audio_url": audio_url,
+                "cover_image_url": ep.get("cover_image_url") or f"{self.site_url}/api/og/podcast/{slug}",
+            }
 
         articles = self._supabase_request("GET", f"articles?slug=eq.{slug}&select=*")
         if articles and len(articles) > 0:
@@ -83,8 +94,8 @@ class VideoBroadcaster:
                 "title": art.get("title"),
                 "description": art.get("excerpt"),
                 "pillar": art.get("pillar", "money"),
-                "audio_url": f"{self.site_url}/api/audio/{slug}.mp3",
-                "cover_image_url": f"{self.site_url}/api/og/podcast/{slug}",
+                "audio_url": f"https://media.gworky.com/episodes/{slug}.mp3",
+                "cover_image_url": art.get("image_url") or f"{self.site_url}/api/og/podcast/{slug}",
             }
         return None
 
@@ -94,6 +105,7 @@ class VideoBroadcaster:
         cover_path_or_url: str,
         output_mp4: str,
         format_mode: str = "shorts",
+        narration_text: str | None = None,
     ) -> bool:
         """
         Renders an FFmpeg video with animated waveform.
@@ -115,15 +127,33 @@ class VideoBroadcaster:
 
         if audio_path_or_url.startswith("http"):
             local_audio = os.path.join(temp_dir, "input_audio.mp3")
+            audio_downloaded = False
             try:
                 _download_file(audio_path_or_url, local_audio)
+                if os.path.exists(local_audio) and os.path.getsize(local_audio) > 50000:
+                    audio_downloaded = True
+                else:
+                    logger.warning(f"Downloaded audio from {audio_path_or_url} is too small (<50KB). Attempting synthesis.")
             except Exception as e:
-                logger.warning(f"Remote audio download failed: {e}. Generating placeholder tone for test.")
-                # Create a 3-second silent audio if audio file isn't uploaded yet
-                subprocess.run(
-                    ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "5", "-c:a", "mp3", local_audio],
-                    capture_output=True,
-                )
+                logger.warning(f"Remote audio download failed: {e}. Attempting synthesis.")
+
+            if not audio_downloaded:
+                # Fallback: Synthesize clean narration using edge-tts
+                logger.info(f"Synthesizing narration via edge-tts for {local_audio}...")
+                text_to_speak = narration_text or "Welcome to Groundwork research. In this breakdown, we examine the practical implications and financial models for modern living decisions. Read the full evidence-backed guide at gworky dot com."
+                try:
+                    subprocess.run(
+                        ["edge-tts", "--voice", "en-US-JennyNeural", "--text", text_to_speak, "--write-media", local_audio],
+                        check=True,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                except Exception as tts_err:
+                    logger.warning(f"Edge-TTS synthesis notice: {tts_err}. Generating acoustic tone.")
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=15", "-c:a", "mp3", local_audio],
+                        capture_output=True,
+                    )
 
         if cover_path_or_url.startswith("http"):
             local_cover = os.path.join(temp_dir, "input_cover.png")

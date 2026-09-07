@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=./agent-config.schema.json
 llm:
   fallback_chain:
-    - openrouter/google/gemma-4-26b-a4b-it:free
-    - openrouter/z-ai/glm-5.2:free
-    - openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    - gemini/gemini-3.6-flash
     - cloudflare/@cf/meta/llama-3.1-8b-instruct
+    - cloudflare/@cf/meta/llama-3.2-3b-instruct
+    - openrouter/nvidia/nemotron-3.5-lightning:free
   temperature: 0.7
-  max_tokens: 6000
+  max_tokens: 8192
   # Canonical site URL used for author sameAs links and JSON-LD publisher
   site_url: https://gworky.com
   # EEAT author personas by pillar (must exist in the authors table)
@@ -45,9 +45,18 @@ media:
   webp_quality: 82
 
 keyword_scout:
-  # Agent 4 — keyword mining via public SearXNG instances (JSON API).
-  # Intent classification uses llm.fallback_chain when enrich_with_llm is true.
+  # Agent 4 — keyword mining. Self-hosted OpenSERP preferred when available;
+  # falls back to public SearXNG then DuckDuckGo (ddgs). Intent classification
+  # uses llm.fallback_chain when enrich_with_llm is true.
   searxng_instance: https://searx.be
+  # Self-hosted OpenSERP REST endpoint (docker-compose.seo.yml → localhost:7001).
+  # Set to empty to keep CI on SearXNG. Backends auto-grade: openserp → searxng → ddgs.
+  openserp_url: http://127.0.0.1:7001
+  # OpenSERP engine for keyword mining: duckduckgo is captcha-free & fast;
+  # google (via DataImpulse proxy) has higher-quality SERPs but occasional 502.
+  openserp_engine: duckduckgo
+  prefer: openserp
+  enabled_backends: [openserp, searxng, ddgs]
   max_queries_per_run: 15
   results_per_query: 10
   min_signal: 2
@@ -99,6 +108,25 @@ keyword_graph:
   max_nodes: 500
   min_cluster_size: 3
   brand_terms: [gworky, groundwork]
+competitor_gap:
+  # Agent T6.1 — Competitor keyword gap / SERP hijack detection (white-hat).
+  # Live SearXNG SERP scrape per pillar seed; flags queries where a competitor
+  # ranks in top-N but gworky.com is absent (keyword gap) and detects sites
+  # that mention competitors without ever mentioning Groundwork (mention gap).
+  enabled: true
+  searxng_instance: https://searx.be
+  results_per_query: 15
+  top_n: 10
+  max_seeds_per_run: 8
+  timeout_seconds: 10
+  retries: 1
+  ignore_brands: [gworky, groundwork]
+  competitors:
+    money: [nerdwallet, bankrate, investopedia, smartasset, wallethub]
+    body: [healthline, verywellhealth, webmd, medicalnewstoday]
+    home: [energysage, angi, bobvila]
+    life: [policygenius, thesimpledollar, lifehacker]
+    tech: [pcmag, tomsguide, cnet, theverge]
 envoy:
   # Agent 6 (Tier 4) — Automated Digital PR. Ingest journalist queries from
   # free-tier platforms (HARO/Featured.com, Source of Sources, Qwoted,
@@ -189,95 +217,85 @@ sources:
     pillar: body
     max_items: 8
 
-  - name: MedlinePlus What's New
-    feed_url: https://medlineplus.gov/feeds/whatsnew.xml
-    pillar: body
-    max_items: 8
-
-  - name: WHO News
-    feed_url: https://www.who.int/rss-feeds/news-english.xml
+  - name: CDC Newsroom & Public Health
+    feed_url: https://tools.cdc.gov/podcasts/feed.asp?feedid=183
     pillar: body
     max_items: 6
 
-  # ── HOME (Energy, Solar, HVAC & Renovation ROI) ─────────────────────
-  - name: CleanTechnica Energy & Solar
-    feed_url: https://cleantechnica.com/feed/
+  # ── HOME (Energy, Solar, HVAC & Building Science Engineering) ───────
+  - name: ScienceDaily Solar & Renewable Energy
+    feed_url: https://www.sciencedaily.com/rss/matter_energy/solar_energy.xml
     pillar: home
     max_items: 6
 
-  - name: Solar Power World
-    feed_url: https://www.solarpowerworldonline.com/feed/
-    pillar: home
-    max_items: 6
-
-  - name: Family Handyman
-    feed_url: https://www.familyhandyman.com/feed/
-    pillar: home
-    max_items: 6
-
-  - name: Bob Vila
-    feed_url: https://www.bobvila.com/feed
-    pillar: home
-    max_items: 6
-
-  - name: Energy.gov
+  - name: Energy.gov Efficiency & Renewable Energy
     feed_url: https://www.energy.gov/rss/articles.xml
     pillar: home
     max_items: 6
 
-  - name: Renewable Energy World
-    feed_url: https://www.renewableenergyworld.com/feed/
+  - name: CleanTechnica Energy & Solar Tech
+    feed_url: https://cleantechnica.com/feed/
     pillar: home
     max_items: 6
 
-  - name: Green Building Advisor
+  - name: Family Handyman Home Improvement & Tools
+    feed_url: https://www.familyhandyman.com/feed/
+    pillar: home
+    max_items: 6
+
+  - name: Green Building Advisor & Building Science
     feed_url: https://www.greenbuildingadvisor.com/feed/
+    pillar: home
+    max_items: 6
+
+  - name: Solar Power World Engineering
+    feed_url: https://www.solarpowerworldonline.com/feed/
     pillar: home
     max_items: 4
 
-  # ── LIFE (Employment, Legal, Estate & Insurance) ────────────────────
-  - name: ABA Journal Legal News
-    feed_url: https://www.abajournal.com/rss
+  # ── LIFE (Career Capital, Travel Logistics, Legal Decisions) ────────
+  - name: Fast Company Work Life & Careers
+    feed_url: https://www.fastcompany.com/work-life/rss
     pillar: life
     max_items: 6
 
-  - name: The Points Guy
+  - name: The Points Guy Travel Logistics & Rewards
     feed_url: https://thepointsguy.com/feed/
     pillar: life
     max_items: 6
 
-  - name: Money Under 30
-    feed_url: https://www.moneyunder30.com/feed
+  - name: ABA Journal Legal News & Decisions
+    feed_url: https://www.abajournal.com/rss
     pillar: life
     max_items: 6
 
-  - name: CNBC Make It
-    feed_url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+  - name: National Bureau of Economic Research (NBER)
+    feed_url: https://www.nber.org/rss/new.xml
     pillar: life
     max_items: 6
 
-  # ── TECH (AI Tools, Privacy, Cyber & Practical Tech) ────────────────
+  # ── TECH (AI Architectures, Cybersecurity, Standards & Systems) ─────
   - name: arXiv AI & Computer Science
-    feed_url: https://export.arxiv.org/rss/cs.AI
+    feed_url: https://rss.arxiv.org/rss/cs.AI
     pillar: tech
-    max_items: 4
+    max_items: 6
 
-  - name: Ars Technica
+  - name: CISA Cybersecurity Advisories & Infrastructure
+    feed_url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+    pillar: tech
+    max_items: 6
+
+  - name: IEEE Spectrum Engineering & Computing
+    feed_url: https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss
+    pillar: tech
+    max_items: 5
+
+  - name: Ars Technica Technology & Policy
     feed_url: https://feeds.arstechnica.com/arstechnica/index
     pillar: tech
     max_items: 5
 
-  - name: TechCrunch Enterprise & AI
-    feed_url: https://techcrunch.com/category/artificial-intelligence/feed/
-    pillar: tech
-    max_items: 4
-
-  - name: Wired Science & Security
+  - name: Wired Science & Security Infrastructure
     feed_url: https://www.wired.com/feed/category/security/latest/rss
     pillar: tech
     max_items: 4
-
-  - name: How-To Geek
-    feed_url: https://www.howtogeek.com/feed/
-    pillar: tech
-    max_items: 3

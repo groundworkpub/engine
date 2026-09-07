@@ -633,15 +633,8 @@ def publish_bluesky_thread(article: dict[str, Any], env: dict[str, str] | None =
 
 
 def publish_to_mastodon(text: str, env: dict[str, str] | None = None) -> dict[str, Any]:
-    """Publish to Mastodon ActivityPub instance."""
-    creds = _env(env)
-    base_url = creds.get("MASTODON_API_BASE") or "https://mastodon.social"
-    token = creds.get("MASTODON_ACCESS_TOKEN")
-    if not token:
-        return {"ok": False, "skipped": True, "error": "missing MASTODON_ACCESS_TOKEN"}
-
-    if creds.get("HERALD_DRY_RUN"):
-        return {"ok": True, "post_id": "dry-run", "post_url": f"{base_url}/@dryrun/1", "error": None}
+    """Publish to Mastodon ActivityPub instance (temporarily quarantined due to instance suspension)."""
+    return {"ok": False, "skipped": True, "error": "mastodon syndication quarantined (account suspended on mastodon.social)"}
 
     endpoint = f"{base_url.rstrip('/')}/api/v1/statuses"
     status, payload, err = _http_json(
@@ -793,34 +786,28 @@ def publish_to_buffer(
     }
 
     # Fetch connected channels and their current queue depth for the organization
-    channel_query = """
-    query GetChannelsWithQueue($input: ChannelsInput!, $postsInput: PostsInput!) {
-      channels(input: $input) {
+    channel_query = f"""
+    query {{
+      channels(input: {{ organizationId: "{org_id}" }}) {{
         id
         name
         service
-      }
-      posts(input: $postsInput) {
-        edges {
-          node {
+      }}
+      posts(input: {{ organizationId: "{org_id}", filter: {{ status: scheduled }} }}) {{
+        edges {{
+          node {{
             channelId
             status
-          }
-        }
-      }
-    }
+          }}
+        }}
+      }}
+    }}
     """
     c_status, c_payload, c_err = _http_json(
         BUFFER_GRAPHQL_URL,
         method="POST",
         headers=headers,
-        body={
-            "query": channel_query,
-            "variables": {
-                "input": {"organizationId": org_id},
-                "postsInput": {"organizationId": org_id, "filter": {"status": "scheduled"}},
-            },
-        },
+        body={"query": channel_query},
     )
 
     channels = []

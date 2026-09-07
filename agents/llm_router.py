@@ -32,10 +32,10 @@ from dotenv import load_dotenv
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-load_dotenv(os.path.join(REPO_ROOT, ".env.local"))
-load_dotenv(os.path.join(REPO_ROOT, ".env"))
-load_dotenv(".env.local")
-load_dotenv(".env")
+load_dotenv(os.path.join(REPO_ROOT, ".env.local"), override=True)
+load_dotenv(os.path.join(REPO_ROOT, ".env"), override=True)
+load_dotenv(".env.local", override=True)
+load_dotenv(".env", override=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,14 +66,20 @@ CLOUDFLARE_MODELS = [
 ]
 
 GROQ_MODELS = [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
     "qwen/qwen3.6-27b",
+    "openai/gpt-oss-120b",
 ]
 
 HUGGINGFACE_MODELS = [
     "Qwen/Qwen2.5-72B-Instruct",
     "meta-llama/Llama-3.1-8B-Instruct",
+]
+
+GEMINI_MODELS = [
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
 ]
 
 
@@ -217,7 +223,7 @@ class LLMRouter:
             headers={
                 "Authorization": f"Bearer {self.groq_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "Groundwork-Router/1.0",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             },
         )
         try:
@@ -276,7 +282,7 @@ class LLMRouter:
     def _call_gemini(
         self,
         messages: list[dict[str, str]],
-        model: str = "gemini-1.5-flash",
+        model: str = "gemini-flash-latest",
         max_tokens: int = 4096,
     ) -> str | None:
         if not self.gemini_key:
@@ -284,7 +290,7 @@ class LLMRouter:
 
         # Build combined prompt from messages
         combined_prompt = "\n\n".join(f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         payload = json.dumps({
             "contents": [{"parts": [{"text": combined_prompt}]}],
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
@@ -293,10 +299,13 @@ class LLMRouter:
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.gemini_key,
+            },
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=25) as resp:
                 data = json.loads(resp.read().decode())
                 candidates = data.get("candidates", [])
                 if candidates:
@@ -305,8 +314,7 @@ class LLMRouter:
                         return parts[0].get("text", "")
                 return None
         except Exception as e:
-            logger.warning(f"Gemini API ({model}) failed / rate-limited: {e}")
-            self._trip_circuit_breaker("gemini_api", 300)
+            logger.warning(f"Gemini API ({model}) notice: {e}")
             return None
 
     # ─── Provider 6: Hugging Face Serverless Inference Client ($0 USD) ─────────
@@ -483,18 +491,21 @@ class LLMRouter:
                     return raw_out
             self._trip_circuit_breaker("openrouter_paid", 180)
 
-        # 5. Tier 5: Gemini Direct API (Optional)
+        # 5. Tier 5: Google Gemini Direct API (Official AQ-Key Integration)
         if self._is_provider_healthy("gemini_api") and self.gemini_key:
-            if not exhausted():
-                logger.info("Attempting failover inference with Google Gemini API")
+            for g_model in GEMINI_MODELS:
+                if exhausted():
+                    return None
+                logger.info(f"Attempting inference with Google Gemini: {g_model}")
                 raw_out = self._call_with_deadline(
-                    lambda: self._call_gemini(messages, max_tokens=max_tokens),
+                    lambda m=g_model: self._call_gemini(messages, model=m, max_tokens=max_tokens),
                     deadline_s=remaining(),
                 )
                 if raw_out and len(raw_out.strip()) > 10:
                     latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via Gemini API in {latency}s.")
+                    logger.info(f"Inference succeeded via Gemini API ({g_model}) in {latency}s.")
                     return raw_out
+            self._trip_circuit_breaker("gemini_api", 180)
 
         logger.error("All LLM providers in the multi-tier pool failed or were rate-limited.")
         return None
