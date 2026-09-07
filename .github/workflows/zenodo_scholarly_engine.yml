@@ -1,0 +1,52 @@
+name: Zenodo Scholarly DOI & Academic PDF Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximum flagship articles to process"
+        required: false
+        default: "5"
+      dry_run:
+        description: "Dry run (preview without deposit)"
+        type: boolean
+        default: false
+  schedule:
+    # Run once a week every Sunday at 03:00 UTC (SSOT Rule 2.13 in engine only)
+    - cron: "0 3 * * 0"
+
+jobs:
+  deposit-scholarly-articles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Engine Repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Dependencies
+        run: |
+          uv pip install httpx supabase python-dotenv fpdf2
+
+      - name: Run Zenodo DOI & Searchable PDF Deposit
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+          ZENODO_API_URL: "https://zenodo.org/api"
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          LIMIT="${{ github.event.inputs.limit || '5' }}"
+          uv run python agents/distribution_zenodo.py --batch-all --limit "$LIMIT" $DRY_RUN_FLAG

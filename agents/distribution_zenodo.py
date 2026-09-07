@@ -65,6 +65,158 @@ ZENODO_PRODUCTION = "https://zenodo.org/api"
 SITE_URL = "https://gworky.com"
 
 
+def _sanitize_pdf(text: str) -> str:
+    replacements = {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2014": " - ",
+        "\u2013": "-",
+        "\u2022": "-",
+        "•": "-",
+        "·": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+        "–": "-",
+        "—": " - ",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def compile_academic_pdf(article: dict[str, Any], pub_date: str) -> bytes:
+    """Compile an article into a searchable academic IMRAD PDF for Google Scholar."""
+    try:
+        from fpdf import FPDF
+        import io
+
+        pdf = FPDF(format="A4")
+        pdf.set_auto_page_break(auto=True, margin=18)
+        pdf.add_page()
+        ew = pdf.epw
+
+        title = _sanitize_pdf(str(article.get("title") or "Groundwork Research Report"))
+        author = _sanitize_pdf(str(article.get("author_name") or "Groundwork Editorial"))
+        slug = str(article.get("slug") or "")
+        pillar = _sanitize_pdf(str(article.get("pillar") or "research").upper())
+
+        pdf.set_title(title)
+        pdf.set_author(author)
+        pdf.set_subject(f"Groundwork Evidence-Based Research ({pillar})")
+        pdf.set_keywords("evidence-based, research, decision-support, methodology, scholarly")
+
+        # Header banner
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(100, 116, 139)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(w=ew, h=5, text=f"GROUNDWORK SCHOLARLY RESEARCH SERIES · {pillar}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(w=ew, h=4, text=f"Published: {pub_date} · Canonical: https://gworky.com/article/{slug}", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + ew, pdf.get_y())
+        pdf.ln(6)
+
+        # Title
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w=ew, h=8, text=title)
+        pdf.ln(4)
+
+        # Author & Institutional Attribution
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(4, 120, 87)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(w=ew, h=5, text=f"Author: {author}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(71, 85, 105)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(w=ew, h=5, text="Affiliation: Groundwork Research Collective (Open Science Standard)", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(6)
+
+        # Abstract
+        takeaway = str(article.get("takeaway") or article.get("excerpt") or "")
+        if takeaway:
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(15, 23, 42)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(w=ew, h=6, text="ABSTRACT", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 9.5)
+            pdf.set_text_color(51, 65, 85)
+            clean_takeaway = _sanitize_pdf(takeaway.replace("**", "").replace("*", "").replace("`", ""))
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(w=ew, h=5.5, text=clean_takeaway)
+            pdf.ln(6)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + ew, pdf.get_y())
+            pdf.ln(6)
+
+        # Body Content
+        content = str(article.get("content") or "")
+        if content:
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(15, 23, 42)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(w=ew, h=6, text="RESEARCH ANALYSIS & METHODOLOGY", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(51, 65, 85)
+
+            for line in content.splitlines()[:150]:
+                line_str = line.strip()
+                if not line_str:
+                    pdf.ln(3)
+                    continue
+                pdf.set_x(pdf.l_margin)
+                if line_str.startswith("# "):
+                    pdf.ln(4)
+                    pdf.set_font("Helvetica", "B", 14)
+                    pdf.set_text_color(15, 23, 42)
+                    pdf.multi_cell(w=ew, h=7, text=_sanitize_pdf(line_str[2:]))
+                    pdf.set_font("Helvetica", "", 9)
+                    pdf.set_text_color(51, 65, 85)
+                elif line_str.startswith("## "):
+                    pdf.ln(3)
+                    pdf.set_font("Helvetica", "B", 12)
+                    pdf.set_text_color(15, 23, 42)
+                    pdf.multi_cell(w=ew, h=6, text=_sanitize_pdf(line_str[3:]))
+                    pdf.set_font("Helvetica", "", 9)
+                    pdf.set_text_color(51, 65, 85)
+                elif line_str.startswith("### "):
+                    pdf.ln(2)
+                    pdf.set_font("Helvetica", "B", 10.5)
+                    pdf.set_text_color(15, 23, 42)
+                    pdf.multi_cell(w=ew, h=5.5, text=_sanitize_pdf(line_str[4:]))
+                    pdf.set_font("Helvetica", "", 9)
+                    pdf.set_text_color(51, 65, 85)
+                elif line_str.startswith("- ") or line_str.startswith("* "):
+                    clean_item = _sanitize_pdf(line_str[2:].replace("**", "").replace("*", "").replace("`", ""))
+                    pdf.multi_cell(w=ew, h=5, text=f"  -  {clean_item}")
+                else:
+                    clean_para = _sanitize_pdf(line_str.replace("**", "").replace("*", "").replace("`", ""))
+                    pdf.multi_cell(w=ew, h=5, text=clean_para)
+
+        # References / Provenance Footer
+        pdf.ln(6)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + ew, pdf.get_y())
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(w=ew, h=5, text="OPEN DATA & CITATION PROVENANCE", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w=ew, h=4.5, text=f"Groundwork Research Platform · https://gworky.com/article/{slug}\nLicense: Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0)\nIndexing: Google Scholar, CERN Zenodo, DataCite, OpenAIRE.")
+
+        buf = io.BytesIO()
+        pdf.output(buf)
+        return buf.getvalue()
+    except Exception as exc:
+        logger.warning("Academic PDF compilation failed: %s", exc)
+        return b""
+
+
 class ZenodoEngine:
     """Deposits articles to Zenodo and mints permanent DOIs."""
 
@@ -131,9 +283,29 @@ class ZenodoEngine:
         deposit_id = deposit["id"]
         bucket_url = deposit.get("links", {}).get("bucket")
 
-        # 2. Upload preprint markdown artifact to bucket
+        # 2. Upload academic PDF and preprint markdown artifact to bucket
         if bucket_url:
             slug = article.get("slug", f"record-{deposit_id}")
+            
+            # Compile searchable academic PDF (IMRAD format for Google Scholar)
+            pdf_bytes = compile_academic_pdf(article, pub_date)
+            if pdf_bytes:
+                pdf_file_name = f"groundwork-{slug}.pdf"
+                try:
+                    r_pdf = httpx.put(
+                        f"{bucket_url}/{pdf_file_name}",
+                        headers={**self.headers, "Content-Type": "application/pdf"},
+                        content=pdf_bytes,
+                        timeout=45,
+                    )
+                    if r_pdf.status_code in (200, 201):
+                        logger.info("Uploaded academic PDF to Zenodo bucket: %s (%d bytes)", pdf_file_name, len(pdf_bytes))
+                    else:
+                        logger.warning("Academic PDF upload returned %s: %s", r_pdf.status_code, r_pdf.text[:150])
+                except Exception as pdf_err:
+                    logger.warning("Academic PDF upload failed: %s", redact_message(str(pdf_err)))
+
+            # Supplementary Markdown artifact
             file_name = f"groundwork-{slug}.md"
             preprint_md = f"""# {article.get('title', 'Groundwork Report')}
 
