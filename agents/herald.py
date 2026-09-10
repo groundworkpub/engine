@@ -633,8 +633,11 @@ def publish_bluesky_thread(article: dict[str, Any], env: dict[str, str] | None =
 
 
 def publish_to_mastodon(text: str, env: dict[str, str] | None = None) -> dict[str, Any]:
-    """Publish to Mastodon ActivityPub instance (temporarily quarantined due to instance suspension)."""
-    return {"ok": False, "skipped": True, "error": "mastodon syndication quarantined (account suspended on mastodon.social)"}
+    """Publish to Mastodon ActivityPub instance (permanently decommissioned / suspended)."""
+    creds = _env(env)
+    if creds.get("HERALD_DRY_RUN"):
+        return {"ok": True, "post_id": "dry-run", "post_url": "https://mastodon.social/@dry-run", "error": None}
+    return {"ok": False, "skipped": True, "error": "mastodon syndication permanently decommissioned (account suspended on mastodon.social)"}
 
     endpoint = f"{base_url.rstrip('/')}/api/v1/statuses"
     status, payload, err = _http_json(
@@ -792,6 +795,7 @@ def publish_to_buffer(
         id
         name
         service
+        isDisconnected
       }}
       posts(input: {{ organizationId: "{org_id}", filter: {{ status: scheduled }} }}) {{
         edges {{
@@ -852,6 +856,11 @@ def publish_to_buffer(
         for ch in channels:
             ch_id = ch.get("id")
             service = ch.get("service")
+
+            # Skip disconnected channels
+            if ch.get("isDisconnected"):
+                logger.info("Channel %s (%s) is disconnected; skipping.", ch.get("name"), service)
+                continue
 
             # Buffer Free Plan constraint: Max 10 posts in queue per channel
             current_queued = scheduled_counts.get(ch_id, 0)
