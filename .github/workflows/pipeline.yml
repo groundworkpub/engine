@@ -97,6 +97,21 @@ jobs:
               -d "{\"content\": \"⚠️ **Groundwork Pipeline Alert**: Scouter → Critic → Scribe run failed at $(date -u). Check GitHub Actions logs.\"}" || true
           fi
 
+      - name: Trigger media production rebuild
+        if: success() && (github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch')
+        env:
+          MEDIA_DEPLOY_TOKEN: ${{ secrets.GH_PAT_MEDIA }}
+        run: |
+          echo "Triggering media build-deploy workflow..."
+          curl -s -X POST \
+            "https://api.github.com/repos/groundworkpub/media/actions/workflows/build-deploy.yml/dispatches" \
+            -H "Authorization: token ${MEDIA_DEPLOY_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"trigger_run_id\":\"${{ github.run_id }}\"}}" | jq . || {
+              echo "::warning::Failed to trigger media rebuild — articles published to DB but static files not regenerated. Trigger manually from media repo Actions tab."
+            }
+          echo "Media rebuild dispatch sent at $(date -u)"
+
   keyword-scout:
     name: Keyword Scout (Agent 4)
     runs-on: ubuntu-latest

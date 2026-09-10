@@ -280,7 +280,12 @@ class GhostJourneyEngine:
             )
 
             # Inject CDP Stealth Script
-            await context.add_init_script(build_stealth_script(persona))
+            await context.add_init_script(build_stealth_script(
+                platform=persona.platform,
+                is_mobile=persona.is_mobile,
+                is_firefox="Firefox" in persona.user_agent,
+                session_seed=f"{persona.name}-{persona.city}",
+            ))
             page = await context.new_page()
 
             # Strict AdSense & IVT Zero-Fraud Firewall

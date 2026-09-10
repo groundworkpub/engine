@@ -23,3 +23,4 @@ fastembed>=0.4.0
 curl_cffi>=0.7.0
 pyalex>=0.15.0
 resend>=2.0.0
+psycopg2-binary>=2.9.9
