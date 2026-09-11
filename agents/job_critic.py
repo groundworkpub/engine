@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 MIN_DESCRIPTION_LENGTH = 120
 STALE_AFTER_DAYS = 7
+# Hard ceiling on active listings. The static build generates one page per
+# active job, so the active pool must stay within the build cap — otherwise
+# active-but-unbuilt job URLs 404/301 and burn crawl budget.
+MAX_ACTIVE_JOBS = 1000
 
 slugify_re = re.compile(r"[^a-z0-9]+")
 
@@ -147,3 +151,33 @@ def upsert_jobs(supabase: Any, rows: list[dict[str, Any]]) -> tuple[int, str | N
     if getattr(result, "error", None):
         return 0, str(result.error)
     return len(rows), None
+
+
+def enforce_active_cap(supabase: Any, max_active: int = MAX_ACTIVE_JOBS) -> int:
+    """Deactivate the oldest active listings beyond the build ceiling (paginated)."""
+    ids: list[str] = []
+    start = 0
+    batch_size = 1000
+    while True:
+        batch = (
+            supabase.table("jobs")
+            .select("id")
+            .eq("is_active", True)
+            .order("published_at", desc=True)
+            .range(start, start + batch_size - 1)
+            .execute()
+        )
+        page = batch.data or []
+        ids.extend(r["id"] for r in page)
+        if len(page) < batch_size:
+            break
+        start += batch_size
+    excess = ids[max_active:]
+    if not excess:
+        return 0
+    # Batch the UPDATE (an .in_ filter with thousands of ids exceeds URL limits).
+    for i in range(0, len(excess), 500):
+        chunk = excess[i : i + 500]
+        supabase.table("jobs").update({"is_active": False}).in_("id", chunk).execute()
+    logger.info("enforce_active_cap: deactivated %d beyond %d", len(excess), max_active)
+    return len(excess)

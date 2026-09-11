@@ -20,6 +20,7 @@ from supabase import create_client
 from job_critic import (
     build_rows,
     deactivate_stale,
+    enforce_active_cap,
     get_existing_hashes,
     upsert_jobs,
 )
@@ -111,6 +112,7 @@ def main() -> int:
 
         seen = {row["source_hash"] for row in rows} | existing_hashes
         deactivated = deactivate_stale(supabase, seen)
+        capped = enforce_active_cap(supabase)
 
         if published:
             site_url = os.environ.get("SITE_URL", "")
@@ -120,7 +122,7 @@ def main() -> int:
                 ping_bing(site_url, urls)
                 trigger_gsc_indexing(urls)
 
-        logger.info("Published=%d  deactivated=%d", published, deactivated)
+        logger.info("Published=%d  deactivated=%d  capped=%d", published, deactivated, capped)
         log_run(supabase, "success", len(raw_items), published, None)
         return 0
     except Exception as exc:  # noqa: BLE001
