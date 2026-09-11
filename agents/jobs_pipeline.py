@@ -26,6 +26,8 @@ from job_critic import (
 from job_scouter import run_job_scouter
 from scribe import ping_bing, ping_indexnow, trigger_gsc_indexing
 
+MAX_HARVEST_PER_RUN = 300
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,6 +83,10 @@ def main() -> int:
     try:
         supabase = create_client(supabase_url, supabase_key)
         raw_items = run_job_scouter(args.source)
+        # Cap per-run harvest so the active job pool stays bounded (only ~500
+        # listings are statically built; excess URLs would 404/301 and burn crawl
+        # budget). Full freshness is preserved across runs via dedup + stale purge.
+        raw_items = raw_items[:MAX_HARVEST_PER_RUN]
         if not raw_items:
             logger.error("No jobs harvested from any source")
             log_run(supabase, "error", 0, 0, "No jobs harvested from any source")

@@ -9,7 +9,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MIN_DESCRIPTION_LENGTH = 120
-STALE_AFTER_DAYS = 14
+STALE_AFTER_DAYS = 7
 
 slugify_re = re.compile(r"[^a-z0-9]+")
 
