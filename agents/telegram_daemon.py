@@ -247,10 +247,21 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
     if "callback_query" in update:
         cq = update["callback_query"]
         chat_id = cq.get("message", {}).get("chat", {}).get("id")
-        data = cq.get("data", "")
-        cq_id = cq.get("id")
+        # Immediate UI toast feedback to dismiss loading spinner
+        toast_msg = None
+        if data.startswith("backlog_snipe:"):
+            toast_msg = "📥 Tersimpan ke Demand Backlog!"
+        elif data.startswith("dismiss_snipe:"):
+            toast_msg = "🗑️ Peluang diabaikan."
+        elif data.startswith("approve_"):
+            toast_msg = "✅ Disetujui!"
+        elif data.startswith("reject_"):
+            toast_msg = "🗑️ Ditolak."
 
-        await client.post(f"{TELEGRAM_API_BASE}/answerCallbackQuery", json={"callback_query_id": cq_id})
+        ans_payload: dict[str, Any] = {"callback_query_id": cq_id}
+        if toast_msg:
+            ans_payload["text"] = toast_msg
+        await client.post(f"{TELEGRAM_API_BASE}/answerCallbackQuery", json=ans_payload)
 
         # Action: Approve Opportunity 2.0 or Pitch
         if data.startswith("approve_opp:") or data.startswith("approve_pitch:"):
@@ -278,6 +289,48 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
                 json={
                     "chat_id": chat_id,
                     "text": f"🗑️ <b>Opportunity #{opp_id} Ditolak / Diabaikan.</b>\nStatus di database ditandai sebagai <i>rejected</i>.",
+                    "parse_mode": "HTML",
+                    "reply_markup": MAIN_KEYBOARD,
+                }
+            )
+        # Action: Save Community Snipe to Demand Backlog
+        elif data.startswith("backlog_snipe:"):
+            snipe_id = data.split(":")[1]
+            backlog_path = Path(__file__).resolve().parent.parent / "docs" / "community" / "demand-backlog.json"
+            if backlog_path.exists():
+                try:
+                    bdata = json.loads(backlog_path.read_text(encoding="utf-8"))
+                    for item in bdata.get("items", []):
+                        if item.get("id") == snipe_id:
+                            item["status"] = "backlogged_for_feature"
+                            item["updated_at"] = datetime.now(UTC).isoformat()
+                    backlog_path.write_text(json.dumps(bdata, indent=2), encoding="utf-8")
+                except Exception as e:
+                    logger.warning(f"Error updating backlog file: {e}")
+
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": (
+                        f"📥 <b>[DEMAND BACKLOG TERSIMPAN]</b>\n\n"
+                        f"Peluang <code>#{snipe_id}</code> berhasil dicatat ke <code>docs/community/demand-backlog.json</code>.\n\n"
+                        f"• <b>Status:</b> <code>backlogged_for_feature</code>\n"
+                        f"• <b>Siklus:</b> Ketika terkumpul ≥ 2 sinyal keluhan serupa, Elena memprioritaskan kalkulator/panduan baru di gworky.com.\n"
+                        f"• <b>Auto-Followup:</b> Saat kalkulator live, bot akan mengirimkan notifikasi untuk menjawab thread asal."
+                    ),
+                    "parse_mode": "HTML",
+                    "reply_markup": MAIN_KEYBOARD,
+                }
+            )
+        # Action: Dismiss Community Snipe
+        elif data.startswith("dismiss_snipe:"):
+            snipe_id = data.split(":")[1]
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": f"🗑️ <b>Snipe #{snipe_id} Diabaikan.</b>\nPeluang dilewati dan tidak akan dimunculkan lagi.",
                     "parse_mode": "HTML",
                     "reply_markup": MAIN_KEYBOARD,
                 }
