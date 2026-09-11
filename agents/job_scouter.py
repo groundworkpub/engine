@@ -22,10 +22,11 @@ logger = logging.getLogger(__name__)
 SOURCES = {
     "arbeitnow": "https://www.arbeitnow.com/api/job-board-api",
     "jobicy": "https://jobicy.com/api/v2/remote-jobs?count=50",
-    "remotive": "https://remotive.com/api/remote-jobs?limit=100",
     "remoteok": "https://remoteok.com/api",
     "himalayas": "https://himalayas.app/jobs/api?limit=50",
 }
+# Remotive excluded (external Jobs Desk spec §5 Tier C: redistribution to other
+# boards may be disallowed — use only as link-out, never primary fill).
 
 # Adzuna is a configurable source — its URL embeds credentials from env, so it
 # is built at call time (see _adzuna_url). It is only attempted when the
@@ -408,4 +409,41 @@ def run_job_scouter(enabled_sources: list[str] | None = None) -> list[dict[str, 
             logger.info("Job source %s: %d items", source, len(items))
         except Exception as exc:  # noqa: BLE001 - a broken source must not kill the run
             logger.warning("Job source %s failed: %s", source, exc)
+
+    # EN-only platform (§2.1 brand rule). Drop German-language jobs at ingestion.
+    # Detection heuristic: common DE gender-notation and business-entity markers
+    # that appear in slugs/titles of German job listings from Arbeitnow.
+    _DE_PATTERN = re.compile(
+        r"\b(m/w/d|f/m/d|m/w|gmbh|werkstudent|bilanzbuchhalter|steuerberater"
+        r"|mitarbeiter|buchhalter|sachbearbeiter|quereinsteiger|vollzeit|teilzeit)\b",
+        re.IGNORECASE,
+    )
+
+    def _is_german(item: dict[str, Any]) -> bool:
+        combined = f"{item.get('title', '')} {item.get('slug', '')}"
+        return bool(_DE_PATTERN.search(combined))
+
+    before = len(items)
+    items = [item for item in items if not _is_german(item)]
+    dropped = before - len(items)
+    if dropped:
+        logger.info("EN-only filter: dropped %d German-language jobs", dropped)
+
     return items
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Groundwork Multi-Source Job Scouter")
+    parser.add_argument("--sources", nargs="+", default=["arbeitnow", "jobicy", "remotive", "remoteok", "himalayas"], help="Sources to scout")
+    parser.add_argument("--limit", type=int, default=10, help="Limit number of items to display")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    scouted_jobs = run_job_scouter(enabled_sources=args.sources)
+    print(f"\n✅ Successfully scouted {len(scouted_jobs)} jobs across sources: {', '.join(args.sources)}")
+    for j in scouted_jobs[:args.limit]:
+        sal = f"${j['salary_min']:,} - ${j['salary_max']:,}" if j['salary_min'] and j['salary_max'] else "Unspecified"
+        print(f" • [{j['source'].upper():<9}] {j['title']} @ {j['company']} ({j['location']}) | Salary: {sal}")
+
+
