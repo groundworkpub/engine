@@ -462,11 +462,10 @@ def fetch_x_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
 
 
 def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
-    """Generates an unvarnished, high-value Reddit/Quora reply adhering strictly to the persona."""
+    """Generates an unvarnished, high-value Reddit reply adhering strictly to the persona with ZERO outbound links."""
     asset = opp["matching_groundwork_asset"]
     title = opp["title"]
     pain = opp["pain_point"]
-    tool_url = asset["url"]
     tool_title = asset["title"]
 
     prompt = (
@@ -479,22 +478,27 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
         "4. SHOW THE UNVARNISHED MATH: Break down wholesale equipment vs labor hours vs contractor markup, or break-even years.\n"
         "5. SPECIFIC CONTRACTOR/LENDER QUESTIONS: Provide 2-3 precise technical questions the user must ask before signing.\n"
         "6. VALUE IS 100% COMPLETE IN THE POST: Do not withhold the answer.\n"
-        f"7. OPTIONAL OPEN SOURCE CITATION: At the very end, mention you checked your numbers in an open methodology tool: {tool_url}\n\n"
+        "7. STRICTLY ZERO OUTBOUND LINKS: NEVER include any URL, link, domain name, or http/https link. "
+        "Subreddit AutoMods ban instantly for Rule 2 (Self-Promotion). If mentioning methodology, refer to it strictly as plain text "
+        "(e.g., 'I audited this against Groundwork's open model' or 'run an open break-even model first').\n\n"
         f"USER'S POST TITLE: {title}\n"
         f"USER'S SITUATION/BODY: {pain}\n"
-        f"GROUNDWORK BENCHMARK ASSET: {tool_title} ({tool_url})\n\n"
-        "Write the complete, natural response now:"
+        f"RELEVANT BENCHMARK: {tool_title}\n\n"
+        "Write the complete, natural Reddit response now (NO LINKS):"
     )
 
     if call_llm:
         try:
             response = call_llm([{"role": "user", "content": prompt}], max_tokens=1000)
             if response and len(response.strip()) > 100:
-                return response.strip()
+                # Extra sanitization: strip any accidental links emitted by LLM
+                clean_res = re.sub(r"https?://\S+", "", response.strip())
+                clean_res = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean_res)
+                return clean_res.strip()
         except Exception as e:
             logger.warning(f"LLM draft generation failed: {e}. Using deterministic gold standard template.")
 
-    # High-quality fallback template tailored by pillar
+    # High-quality fallback template tailored by pillar (100% ZERO LINKS)
     pillar = asset.get("pillar")
     if pillar == "home":
         return (
@@ -507,7 +511,7 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
             f"Two critical things to check before you sign:\n"
             f"1. Did they include an itemized cash price? Contractors often roll an 18–28% dealer financing fee into the base quote to advertise '0% APR'.\n"
             f"2. Ask for the Manual J load calculation sheet to ensure they didn't just guess the tonnage.\n\n"
-            f"I ran our household numbers through an open scenario calculator here if you want to stress-test the break-even: {tool_url}"
+            f"Run your numbers through an open load and break-even model before signing any contract."
         )
     else:
         return (
@@ -520,7 +524,7 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
             f"and life changes or rate cuts occur within 3 years, you lose money.\n\n"
             f"Check if they are pushing discount points — in 70% of cases, deploying that cash into extra principal "
             f"or a high-yield cash cushion outperforms points without locking your capital.\n\n"
-            f"Here is the open calculator I used to model the exact break-even timeline: {tool_url}"
+            f"Stress-test your break-even month on an open amortization table before letting a lender pull your credit."
         )
 
 
@@ -662,6 +666,17 @@ def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
         primary_action_url = f"{opp['source_url']}#gw_draft={encoded_draft}"
         primary_action_text = "🌐 Buka Thread & Tempel Draf"
 
+    if opp["platform"] == "reddit":
+        guidance = (
+            "🛡️ <b>Reddit Anti-Ban Invariant:</b> Draf ini 100% BEBAS LINK luar untuk mencegah banned Rule 2 (Self-Promotion). "
+            "Traffic masuk secara aman lewat Link di Profil Reddit Anda & Branded Search.\n\n"
+            "<i>Ketuk teks draf di atas (otomatis tersalin ke clipboard), lalu klik tombol di bawah untuk membuka thread & paste.</i>"
+        )
+    elif opp["platform"] == "x":
+        guidance = "<i>💡 Klik tombol di bawah untuk langsung membuka jendela reply di X dengan teks dan tautan yang sudah terisi.</i>"
+    else:
+        guidance = "<i>💡 Ketuk teks draf di atas (otomatis tersalin ke clipboard), lalu klik tombol di bawah untuk membuka Quora & paste.</i>"
+
     text = (
         f"🎯 <b>[COMMUNITY SNIPER ALERT: {platform_icon}]</b>\n\n"
         f"• <b>Title:</b> <i>\"{opp['title']}\"</i>\n"
@@ -672,9 +687,7 @@ def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
         f"<code>{opp['pain_point'][:220]}...</code>\n\n"
         f"📋 <b>Suggested Draft (Ketuk untuk 1-Tap Copy):</b>\n"
         f"<pre><code>{escaped_draft}</code></pre>\n\n"
-        f"<i>💡 <b>Cara Kirim:</b>\n"
-        f"1. Ketuk teks draf di atas (otomatis tersalin ke clipboard).\n"
-        f"2. Klik tombol di bawah (di X otomatis membuka dialog reply; di Reddit/Quora tinggal paste & submit).</i>"
+        f"{guidance}"
     )
 
     inline_keyboard = [
