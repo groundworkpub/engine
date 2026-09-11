@@ -21,9 +21,9 @@ import logging
 import os
 import sys
 from typing import Any
-import psycopg2
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
+from supabase import create_client
 
 load_dotenv(".env.local")
 
@@ -179,24 +179,31 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Do not upload to R2, save locally.")
     args = parser.parse_args()
 
-    conn = psycopg2.connect(
-        host=os.getenv("SUPABASE_DB_HOST"),
-        port=os.getenv("SUPABASE_DB_PORT", "6543"),
-        user=os.getenv("SUPABASE_DB_USER"),
-        password=os.getenv("SUPABASE_DB_PASSWORD"),
-        dbname="postgres",
-        sslmode="require"
+    supabase = create_client(
+        os.environ.get("SUPABASE_URL") or os.environ["NEXT_PUBLIC_SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
     )
-    cur = conn.cursor()
-
+    cols = "slug,title,pillar,reading_time"
     if args.slug:
-        cur.execute("SELECT slug, title, pillar, reading_time FROM public.articles WHERE slug = %s;", (args.slug,))
+        res = supabase.table("articles").select(cols).eq("slug", args.slug).execute()
     elif args.all:
-        cur.execute("SELECT slug, title, pillar, reading_time FROM public.articles WHERE status = 'published';")
+        res = (
+            supabase.table("articles").select(cols).eq("status", "published").execute()
+        )
     else:
-        cur.execute("SELECT slug, title, pillar, reading_time FROM public.articles WHERE status = 'published' ORDER BY published_at DESC LIMIT %s;", (args.batch,))
+        res = (
+            supabase.table("articles")
+            .select(cols)
+            .eq("status", "published")
+            .order("published_at", desc=True)
+            .limit(args.batch)
+            .execute()
+        )
 
-    rows = cur.fetchall()
+    rows = [
+        (r["slug"], r["title"], r.get("pillar"), r.get("reading_time"))
+        for r in (res.data or [])
+    ]
     logger.info("Found %d articles to process", len(rows))
 
     success = 0
@@ -217,8 +224,6 @@ def main():
                 logger.warning("❌ Failed to upload og/%s.webp", slug)
 
     logger.info("Done: %d/%d processed successfully.", success, len(rows))
-    cur.close()
-    conn.close()
 
 if __name__ == "__main__":
     main()

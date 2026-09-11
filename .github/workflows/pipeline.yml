@@ -84,6 +84,10 @@ jobs:
           LITELLM_LOG: WARNING
         run: PYTHONPATH=. python agents/pipeline.py
 
+      - name: Generate OG images for recent articles
+        if: success()
+        run: PYTHONPATH=. python agents/og_generator.py --batch 20
+
       - name: Notify on failure
         if: failure()
         env:
