@@ -274,6 +274,22 @@ sources:
     pillar: life
     max_items: 6
 
+  # ── LIFE-AUTO (vehicle TCO / EV vs gas / ownership) — verified live 2026-09-11 (M7.1) ─
+  - name: Electrek EV & Automotive
+    feed_url: https://electrek.co/feed/
+    pillar: life
+    max_items: 6
+
+  - name: Car and Driver News
+    feed_url: https://www.caranddriver.com/rss/news.xml
+    pillar: life
+    max_items: 6
+
+  - name: The Drive Automotive
+    feed_url: https://www.thedrive.com/rss
+    pillar: life
+    max_items: 6
+
   # ── TECH (AI Architectures, Cybersecurity, Standards & Systems) ─────
   - name: arXiv AI & Computer Science
     feed_url: https://rss.arxiv.org/rss/cs.AI
