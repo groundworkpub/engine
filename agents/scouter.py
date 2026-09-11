@@ -116,12 +116,31 @@ def fetch_article_page(url: str, timeout: int = 10) -> tuple[str, str | None]:
 
 
 def get_existing_urls(supabase: Any) -> set[str]:
-    """Fetch all known source_urls to avoid re-processing."""
+    """Fetch all known source_urls to avoid re-processing (paginated)."""
+    urls: set[str] = set()
     try:
-        result = supabase.table("articles").select("source_url").execute()
-        return {row["source_url"] for row in result.data if row.get("source_url")}
+        page_size = 1000
+        offset = 0
+        while True:
+            result = (
+                supabase.table("articles")
+                .select("source_url")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = result.data or []
+            for row in rows:
+                if row.get("source_url"):
+                    urls.add(row["source_url"])
+            if len(rows) < page_size:
+                break
+            offset += page_size
+            # Safety cap — 20k URLs covers ~3 years daily publishing
+            if offset >= 20000:
+                break
     except Exception:
-        return set()
+        pass
+    return urls
 
 
 def fetch_feed(feed_url: str, timeout: int, retries: int) -> Any:
@@ -145,6 +164,28 @@ def fetch_feed(feed_url: str, timeout: int, retries: int) -> Any:
             time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
 
     raise RuntimeError(f"Unable to fetch feed: {feed_url}")
+
+
+def _is_english_text(text: str) -> bool:
+    """Heuristic EN-only filter (§2.10). Non-ASCII ratio + CJK detection.
+
+    Cheap, dependency-free guard against non-English items leaking from
+    international feeds into the pillar silo (which must stay 100% English).
+    """
+    if not text:
+        return True
+    sample = text[:400]
+    non_ascii = sum(1 for ch in sample if ord(ch) > 127)
+    if non_ascii / max(len(sample), 1) > 0.12:
+        return False
+    cjk = sum(
+        1
+        for ch in sample
+        if "\u4e00" <= ch <= "\u9fff"
+        or "\u3040" <= ch <= "\u30ff"
+        or "\uac00" <= ch <= "\ud7af"
+    )
+    return cjk <= 5
 
 
 def run_scouter(config: dict, supabase: Any) -> list[dict[str, Any]]:
@@ -191,6 +232,10 @@ def run_scouter(config: dict, supabase: Any) -> list[dict[str, Any]]:
 
                 if len(raw_text) < 200:
                     logger.debug(f"Skipping short content ({len(raw_text)} chars): {url}")
+                    continue
+
+                if not _is_english_text(f"{getattr(entry, 'title', '')} {raw_text}"):
+                    logger.info("EN-only filter: dropped non-English item (%s)", url)
                     continue
 
                 raw_payload.append(

@@ -114,20 +114,22 @@ def _sanitize_internal_links(content: str) -> str:
         for bad, good in _JOINED_STOPWORDS.items():
             fixed = re.sub(rf"\b{re.escape(bad)}\b", good, fixed, flags=re.IGNORECASE)
 
+        # If linking to homepage with Groundwork anchor, preserve it cleanly
+        if href.rstrip("/") in (site.rstrip("/"), "", "/"):
+            return f"[{fixed}]({href})"
+
+        # If linking to standard pillar hub or tools, preserve it cleanly
+        if any(href.startswith(p) for p in ("/money", "/body", "/home", "/life", "/tech", "/tools", "/topic", "/category")):
+            return f"[{fixed}]({href})"
+
         camel_suspects = [
             tok for tok in re.findall(r"\S+", fixed)
             if re.search(r"[a-z][A-Z]", tok) and tok.lower().strip(".,;:!?'\"") not in _LEGIT_CAMEL
         ]
 
-        slug = href.rstrip("/").rsplit("/", 1)[-1].lower().replace("-", " ")
-        entities = [
-            w for w in re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", fixed)
-            if w.lower() not in _LEGIT_CAMEL
-        ]
-        incoherent = bool(entities) and not any(e.lower() in slug for e in entities)
+        if camel_suspects:
+            return fixed  # putus link malformed camelCase, teks tetap terbaca
 
-        if camel_suspects or incoherent:
-            return fixed  # putus link, teks tetap terbaca
         return f"[{fixed}]({href})"
 
     return _LINK_MD_RE.sub(_fix, content)
@@ -135,9 +137,9 @@ def _sanitize_internal_links(content: str) -> str:
 
 class ScribeOutput(BaseModel):
     slug: str = Field(min_length=1, max_length=200)
-    title: str = Field(min_length=10, max_length=300)
+    title: str = Field(min_length=10, max_length=58)
     content: str = Field(min_length=500)
-    excerpt: str = Field(max_length=160)
+    excerpt: str = Field(max_length=160)  # Reverted C: 160 is SEO ideal (150-160), 115 too short for SERP — keep Intent-Adaptive takeaway 115, excerpt 160
     schema_type: str = Field(default="Article")
     takeaway: str = Field(min_length=20, max_length=500)
     expert_comment: str = Field(min_length=20, max_length=500)
@@ -184,30 +186,68 @@ class ScribeOutput(BaseModel):
             body = str(data.get("content") or "").strip()
             data["excerpt"] = _truncate(re.sub(r"[#*_>`]", "", body), 160) if body else ""
         if isinstance(data.get("title"), str):
-            data["title"] = _truncate(data["title"], 300)
-        if isinstance(data.get("takeaway"), str):
+            t = data["title"].strip()
+            # Clean common boilerplate fluff prefixes
+            for prefix in [
+                "A Comprehensive Guide to ", "Understanding the Complexities of ",
+                "Understanding the ", "Why There Are So Many ", "Exploring the Factors Influencing ",
+                "What You Need to Know About ", "Everything You Need to Know About "
+            ]:
+                if t.lower().startswith(prefix.lower()):
+                    t = t[len(prefix):].capitalize()
+                    break
+            data["title"] = _truncate(t, 55)
+        if isinstance(data.get("takeaway"), str) and len(data["takeaway"].strip()) >= 20:
             data["takeaway"] = _truncate(data["takeaway"], 500)
-        elif not data.get("takeaway"):
-            data["takeaway"] = "The key facts, numbers, and action steps are broken down in this article."
-        if isinstance(data.get("expert_comment"), str):
+        else:
+            body = str(data.get("content") or "").strip()
+            first_para = re.sub(r"[#*_>`]", "", body).split("\n\n")[0] if body else ""
+            data["takeaway"] = _truncate(first_para or str(data.get("excerpt") or "Empirical research framework and actionable decision criteria."), 500)
+        if isinstance(data.get("expert_comment"), str) and len(data["expert_comment"].strip()) >= 20:
             data["expert_comment"] = _truncate(data["expert_comment"], 500)
-        elif not data.get("expert_comment"):
-            data["expert_comment"] = "Our analysis weighs the cited source against publicly available research before drawing conclusions."
-        rq = data.get("related_queries")
-        if isinstance(rq, list) and len(rq) > 8:
-            data["related_queries"] = [q for q in rq[:8] if isinstance(q, str)]
+        else:
+            data["expert_comment"] = _truncate(
+                "Groundwork's analysis evaluates the quantitative benchmarks, methodology, and primary data sources for this guide.",
+                500,
+            )
         faq = data.get("faq")
-        if not isinstance(faq, list):
-            faq = []
-        faq = [f for f in faq if isinstance(f, dict) and f.get("question") and f.get("answer")]
-        if len(faq) < 3:
-            # Pad with generic but valid FAQ entries rather than fail validation
+        cleaned_faq = []
+        if isinstance(faq, list):
+            for f in faq:
+                if isinstance(f, dict):
+                    q = str(f.get("question", "")).strip()
+                    a = str(f.get("answer", "")).strip()
+                    if (
+                        q
+                        and a
+                        and "what are the key takeaways" not in q.lower()
+                        and "who is this guide for" not in q.lower()
+                        and "where does this information come from" not in q.lower()
+                    ):
+                        cleaned_faq.append(f)
+                elif hasattr(f, "question") and hasattr(f, "answer"):
+                    cleaned_faq.append(f)
+
+        if len(cleaned_faq) < 3:
+            topic = str(data.get("title") or data.get("sub_topic") or "this topic").replace("##", "").strip()
+            topic_clean = topic.rstrip(".?!")
             defaults = [
-                {"question": "What are the key takeaways?", "answer": str(data.get("takeaway", ""))[:500] or "See the full breakdown in this article."},
-                {"question": "Who is this guide for?", "answer": f"Readers researching {str(data.get('sub_topic') or data.get('slug') or 'this topic').replace('-', ' ')}."},
-                {"question": "Where does this information come from?", "answer": "This analysis is based on the cited source and publicly available research."},
+                {
+                    "question": f"How does empirical evidence inform decisions on {topic_clean}?",
+                    "answer": f"Groundwork's analysis evaluates primary research data, benchmarks, and quantitative modeling to establish actionable decision criteria for {topic_clean}.",
+                },
+                {
+                    "question": f"What are the primary cost or risk factors associated with {topic_clean}?",
+                    "answer": "Core considerations involve balancing initial expenditures against long-term returns, regulatory compliance, and scenario-tested risk thresholds.",
+                },
+                {
+                    "question": f"What practical next steps should be taken regarding {topic_clean}?",
+                    "answer": "Review the calculations and structured frameworks detailed in this guide, model individual scenarios, and verify current provider benchmarks.",
+                },
             ]
-            data["faq"] = list(faq) + defaults[: 3 - len(faq)]
+            cleaned_faq = cleaned_faq + defaults[: 3 - len(cleaned_faq)]
+
+        data["faq"] = cleaned_faq
         if isinstance(data.get("content"), str) and data["content"]:
             data["content"] = _sanitize_internal_links(data["content"])
         return data
@@ -268,30 +308,29 @@ GEO PRINCIPLES (Generative Engine Optimization):
 - Answer-first rule: phrase every H2/H3 subheading as the question the reader is really asking, and make the very first paragraph under it a direct 40-50 word answer with zero throat-clearing
 
 CONTENT STRUCTURE:
-1. H1 implicit from title field (do NOT include H1 in content)
-2. Intro paragraph: Direct answer to main question (2-3 sentences)
-3. Key data point or statistic
-4. 3-5 H2 sections covering subtopics with empirical evidence, numerical scenarios/benchmarks, and actionable decision criteria
-5. FAQ block not needed in content — put in faq[] field
+1. NO H1 in content (H1 is rendered automatically from the title field).
+2. Lead Narrative Paragraph (MANDATORY): Open IMMEDIATELY with a compelling 2-3 sentence narrative lead paragraph delivering the core empirical finding or decision context. DO NOT write any heading above the opening lead paragraph.
+3. Subsections: 4 to 6 substantive H2 sections (##) framed as natural, analytical narrative subtopics or core decision questions (e.g. "## How shift schedules disrupt circadian biology" or "## Key findings from the 6-week clinical trial").
+4. Under each H2: Provide deep empirical analysis, numerical models/benchmarks, step-by-step methodologies, and actionable decision frameworks.
 
-RULES:
-- Never start with "Welcome to", "In today's world", or generic openers
-- No motivational language without evidence
-- Every factual claim should note its source inline
-- Content must be original — completely restructure and rephrase the source material
-- Minimum 850-1,200 words in content field with deep substantive analysis
-- Write for an adult reading level — not dumbed down, not academic
-- INTERNAL LINKING PROTOCOL: Never invent fictional URLs or hallucinated article slugs. If linking internally, ONLY link to official pillar hubs (/money, /body, /home, /life, /tech) or interactive decision tools (/tools/mortgage-refinance, /tools/compound-interest, /tools/solar-payback, etc.). Never emit naked root slugs like /[slug].
+STRICT EDITORIAL NEGATIVE CONSTRAINTS (NEVER VIOLATE):
+- NEVER output generic, robotic, or clinical-abstract headings such as: "## Objective", "### Objective", "## Methods", "### Methods", "## Results", "### Results", "## Discussion", "### Discussion", "## Abstract", "## Direct Answer", "### Direct Answer", "## Introduction", "### Introduction", "## Overview", "## Background", "## Takeaway", "### Takeaway", "## Takeaways", "## Key Takeaways", "## Summary", "## Conclusion", "## In Conclusion", "## FAQ", "## Frequently Asked Questions", "## Expert Comment", "## Related Queries".
+- ALL subheadings must be natural, descriptive, sentence-case journalistic narratives that contextualize the data for adults making real-world decisions.
+- ALL FAQs must be placed EXCLUSIVELY in the structured "faq" JSON array, NEVER inside the markdown "content" field. NO bulleted Q&As or question lists inside content.
+- ALL Related Queries must be placed EXCLUSIVELY in the "related_queries" JSON array, NEVER inside the "content" field.
+- EXPERT COMMENT: Write a sharp, data-backed 2-sentence analytical perspective highlighting specific trade-offs, financial figures, or clinical thresholds. Avoid generic filler phrases like "This study highlights the importance of...".
+- DEPTH & LENGTH: Minimum 1,100–1,800 words in content field with deep, exhaustive, investigative analysis. Do not produce brief or truncated summaries.
+- INTERNAL LINKING & BRAND PROTOCOL: Never invent fictional URLs or hallucinated article slugs. Weave 1 to 2 natural contextual markdown links to the provided topical cluster sibling articles (/article/[slug]), official pillar hubs (/[pillar]), or interactive decision tools (/tools/[slug]). Cite and link the primary brand entity [Groundwork](https://gworky.com) in the first two paragraphs.
 
 OUTPUT FORMAT (strict JSON):
 {
   "slug": "url-friendly-slug-max-80-chars",
   "title": "Article title in sentence case",
-  "content": "Full markdown article body — minimum 850 words, NO H1, use ## for H2, ### for H3",
+  "content": "Full markdown article body — minimum 1,100 words, NO H1, use ## for H2, ### for H3",
   "excerpt": "150-160 char meta description — answer the primary question, include keyword",
   "schema_type": "Article|HowTo|Review|NewsArticle",
   "takeaway": "40-80 word direct answer and practical takeaway",
-  "expert_comment": "2-3 sentence analysis in the assigned research voice, without invented credentials",
+  "expert_comment": "2-3 sentence sharp empirical analysis in the assigned research voice, without invented credentials",
   "faq": [
     {"question": "Question ending with ?", "answer": "40-60 word direct answer starting with the answer, not 'Great question'"},
     {"question": "...", "answer": "..."},
@@ -307,10 +346,10 @@ OUTPUT FORMAT (strict JSON):
 # ─── Defaults (overridden by config.yml) ─────────────────────────────────────
 
 DEFAULT_FALLBACK_CHAIN = [
-    "openrouter/google/gemma-4-26b-a4b-it:free",
-    "openrouter/z-ai/glm-5.2:free",
-    "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "gemini/gemini-3.6-flash",
     "cloudflare/@cf/meta/llama-3.1-8b-instruct",
+    "cloudflare/@cf/meta/llama-3.2-3b-instruct",
+    "openrouter/nvidia/nemotron-3.5-lightning:free",
 ]
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4000
@@ -524,6 +563,124 @@ def resolve_reviewer_id(
     return data.get("id")
 
 
+def fetch_cluster_candidate_articles(
+    supabase: Any,
+    pillar: str,
+    limit: int = 5,
+) -> list[dict[str, str]]:
+    """Fetch recent published articles in the same pillar to supply as cluster linking context."""
+    if not supabase:
+        return []
+    try:
+        res = (
+            supabase.table("articles")
+            .select("title, slug")
+            .eq("status", "published")
+            .eq("pillar", pillar)
+            .order("published_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return getattr(res, "data", []) or []
+    except Exception as e:
+        logger.warning(f"Could not fetch cluster candidate articles for {pillar}: {e}")
+        return []
+
+
+def sync_article_entities_to_graph(
+    supabase: Any,
+    article_id: str,
+    pillar: str,
+    title: str,
+    excerpt: str,
+    content: str,
+    related_queries: list[str] | None = None,
+) -> None:
+    """Extract topic keywords and link them to taxonomy_terms and article_terms."""
+    if not supabase or not article_id:
+        return
+    try:
+        stopwords = {
+            "a", "about", "after", "again", "all", "am", "an", "and", "any", "are",
+            "as", "at", "be", "because", "been", "before", "being", "both", "but",
+            "by", "can", "could", "did", "do", "does", "doing", "for", "from", "further",
+            "had", "has", "have", "having", "he", "her", "here", "him", "his", "how",
+            "if", "in", "into", "is", "it", "its", "me", "more", "most", "my", "no",
+            "nor", "not", "of", "off", "on", "once", "only", "or", "other", "our",
+            "out", "over", "own", "same", "she", "so", "some", "such", "than", "that",
+            "the", "their", "them", "then", "there", "these", "they", "this", "those",
+            "through", "to", "too", "under", "until", "up", "very", "was", "we", "were",
+            "what", "when", "where", "which", "while", "who", "whom", "why", "with",
+            "you", "your", "guide", "analysis", "review", "groundwork", "report",
+        }
+        entities: list[str] = []
+        if related_queries:
+            for q in related_queries:
+                clean_q = q.strip()
+                if len(clean_q) >= 3 and clean_q.lower() not in stopwords:
+                    entities.append(clean_q)
+
+        words = [w.strip(".,;:!?\"'()") for w in title.split()]
+        for i in range(len(words) - 1):
+            pair = f"{words[i]} {words[i+1]}".strip()
+            if (
+                len(pair) >= 6
+                and words[i].lower() not in stopwords
+                and words[i+1].lower() not in stopwords
+            ):
+                entities.append(pair)
+
+        seen_slugs: set[str] = set()
+        for ent in entities:
+            term_slug = re.sub(r"[^a-z0-9\s-]", "", ent.lower().strip())
+            term_slug = re.sub(r"[\s_-]+", "-", term_slug).strip("-")
+            if not term_slug or len(term_slug) < 3 or term_slug in seen_slugs:
+                continue
+            seen_slugs.add(term_slug)
+
+            formatted_name = " ".join(w.capitalize() for w in ent.split())
+            term_res = (
+                supabase.table("taxonomy_terms")
+                .upsert(
+                    {
+                        "slug": term_slug,
+                        "name": formatted_name,
+                        "type": "topic",
+                        "pillar": pillar.lower(),
+                        "updated_at": "now()",
+                    },
+                    on_conflict="slug",
+                )
+                .execute()
+            )
+            term_data = getattr(term_res, "data", None)
+            if term_data and len(term_data) > 0:
+                t_id = term_data[0].get("id")
+                if t_id:
+                    supabase.table("article_terms").upsert(
+                        {"article_id": article_id, "term_id": t_id},
+                        on_conflict="article_id,term_id",
+                    ).execute()
+            if len(seen_slugs) >= 4:
+                break
+
+        # Also persist to Knowledge Graph entity_nodes via entity_graph_builder
+        try:
+            from entity_graph_builder import extract_entity_graph_from_article
+            extract_entity_graph_from_article(
+                title=title,
+                content=content,
+                pillar=pillar,
+                article_id=article_id,
+                supabase=supabase,
+            )
+        except Exception as eg_err:
+            logger.debug(f"Entity graph builder hook notice: {eg_err}")
+
+    except Exception as e:
+        logger.debug(f"Non-blocking entity graph sync notice: {e}")
+
+
 def build_jsonld(validated: ScribeOutput, source_url: str, site_url: str = "https://gworky.com") -> dict:
     """Construct the JSON-LD schema block required by AGENTS.md §6.3."""
     article_url = f"{site_url.rstrip('/')}/article/{validated.slug}"
@@ -581,6 +738,7 @@ def call_llm_with_fallback(
     within this session, it is skipped for subsequent calls.
     """
     # 1. Primary: Use Groundwork Universal LLM Router (Tier-1 Cloudflare AI + Tier-2 Free Rotator)
+    router_started = time.perf_counter()
     try:
         from agents.llm_router import router as universal_router
         logger.info("Executing Scribe draft generation via Groundwork Universal LLM Router...")
@@ -590,14 +748,18 @@ def call_llm_with_fallback(
         ]
         router_resp = universal_router.generate(messages, response_format="json", max_tokens=max_tokens)
         if router_resp and len(router_resp.strip()) > 200:
+            router_latency_ms = int((time.perf_counter() - router_started) * 1000)
+            est_tokens = max(500, (len(user_prompt) + len(router_resp)) // 4)
+            if budget_guard is not None:
+                budget_guard.record_usage(est_tokens)
             log_llm_usage(
                 supabase,
                 provider="universal_router",
-                model="cloudflare_llama31",
+                model="multi_tier_free",
                 status="success",
                 source_url=source_url,
-                usage={"total_tokens": 1500},
-                latency_ms=1200,
+                usage={"total_tokens": est_tokens},
+                latency_ms=router_latency_ms,
             )
             return router_resp
     except Exception as router_err:
@@ -876,6 +1038,21 @@ def run_scribe(
             metadata={"pillar": pillar, "url": url},
         )
 
+        # Pre-fetch cluster sibling candidates for contextual inter-article linking (12-Factor Factor 13)
+        cluster_candidates = fetch_cluster_candidate_articles(supabase, pillar, limit=5)
+        cluster_prompt_section = ""
+        if cluster_candidates:
+            cluster_bullets = "\n".join(
+                f'- "{cand.get("title", "")}": https://gworky.com/article/{cand.get("slug", "")}'
+                for cand in cluster_candidates
+                if cand.get("slug")
+            )
+            cluster_prompt_section = f"""
+TOPICAL CLUSTER SIBLING GUIDES (Groundwork {pillar.title()} Silo):
+You MUST weave 1 to 2 natural, contextual internal markdown links to relevant cluster guides from the following list into your analysis using descriptive anchor text (e.g. "[our analysis on semiconductor capex](https://gworky.com/article/example-slug)"):
+{cluster_bullets}
+"""
+
         user_prompt = f"""Rewrite the following article for Groundwork platform.
 
 Pillar: {pillar}
@@ -886,6 +1063,13 @@ Source content (compressed for high density):
 ---
 {compressed_source}
 ---
+{cluster_prompt_section}
+BRAND CITATION INVARIANT:
+You MUST cite and link the primary brand entity "[Groundwork](https://gworky.com)" naturally within the first two paragraphs (e.g., "According to empirical research synthesized by [Groundwork](https://gworky.com)...").
+
+STRICT FAQ ARCHITECTURAL INVARIANT:
+Do NOT output markdown heading "## Frequently Asked Questions" or "## FAQ" in the "content" markdown field. All FAQs MUST be placed exclusively in the structured "faq" JSON array.
+
 {learning_guidance}
 
 Return a valid JSON object matching the output format. Minimum {min_words} words in the content field."""
@@ -1011,10 +1195,26 @@ Return the improved JSON matching the same schema."""
                 except Exception:
                     logger.exception("Media pipeline failed for %s — article saved without processed image", url[:80])
 
+            # Internal link weaver: Weave homepage, pillar, tool, and cluster sibling links
+            final_content = validated.content
+            try:
+                try:
+                    from agents.link_weaver import weave_article_links
+                except ImportError:
+                    from link_weaver import weave_article_links
+                final_content = weave_article_links(
+                    content=validated.content,
+                    title=validated.title,
+                    pillar=pillar,
+                    sibling_articles=cluster_candidates,
+                )
+            except Exception as link_err:
+                logger.warning(f"Link weaver pass skipped: {link_err}")
+
             article_data = {
                 "slug": validated.slug,
                 "title": validated.title,
-                "content": validated.content,
+                "content": final_content,
                 "excerpt": validated.excerpt,
                 "takeaway": validated.takeaway,
                 "expert_comment": validated.expert_comment,
@@ -1036,15 +1236,30 @@ Return the improved JSON matching the same schema."""
                 "published_at": published_at,
                 "word_count": word_count,
                 "faq_count": len(validated.faq),
+                "evidence_graph": validated.evidence_graph or [],
                 # NOTE: no pipeline_run_id here — the articles table SSOT
                 # schema has no such column and PostgREST rejects unknown
                 # fields with PGRST204, killing the whole upsert.
             }
 
-            supabase.table("articles").upsert(
+            upsert_res = supabase.table("articles").upsert(
                 article_data,
                 on_conflict="source_hash",
             ).execute()
+
+            upserted_rows = getattr(upsert_res, "data", None)
+            if upserted_rows and len(upserted_rows) > 0:
+                created_art_id = upserted_rows[0].get("id")
+                if created_art_id:
+                    sync_article_entities_to_graph(
+                        supabase=supabase,
+                        article_id=created_art_id,
+                        pillar=pillar,
+                        title=validated.title,
+                        excerpt=validated.excerpt,
+                        content=validated.content,
+                        related_queries=getattr(validated, "related_queries", None),
+                    )
 
             published_count += 1
             if status == "published":

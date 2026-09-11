@@ -44,8 +44,6 @@ logging.basicConfig(
 logger = logging.getLogger("llm_router")
 
 OPENROUTER_FREE_MODELS = [
-    "openrouter/minimax/minimax-m3:free",
-    "openrouter/minimax/minimax-m2.7:free",
     "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
     "openrouter/liquid/lfm-2.5-2.6b:free",
@@ -77,9 +75,11 @@ HUGGINGFACE_MODELS = [
 ]
 
 GEMINI_MODELS = [
-    "gemini-flash-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
     "gemini-flash-lite-latest",
-    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
 ]
 
 
@@ -93,7 +93,7 @@ class LLMRouter:
         self.gateway_id = os.getenv("CLOUDFLARE_GATEWAY_ID")  # AI Gateway E3
         self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
         self.groq_key = os.getenv("GROQ_API_KEY")
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
         self.failed_providers: dict[str, float] = {}  # provider_name -> cooloff_until_timestamp
 
@@ -281,12 +281,15 @@ class LLMRouter:
 
     def _call_gemini(
         self,
-        messages: list[dict[str, str]],
-        model: str = "gemini-flash-latest",
+        messages: list[dict[str, str]] | str,
+        model: str = "gemini-3.5-flash",
         max_tokens: int = 4096,
     ) -> str | None:
         if not self.gemini_key:
             return None
+
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
 
         # Build combined prompt from messages
         combined_prompt = "\n\n".join(f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages)
@@ -372,13 +375,16 @@ class LLMRouter:
 
     def generate(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, str]] | str,
         response_format: Literal["text", "json"] = "text",
         max_tokens: int = 4096,
         temperature: float = 0.7,
         time_budget_s: float = 240.0,
     ) -> str | None:
         """Execute resilient inference query through multi-tier pool with automatic failover."""
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+
         start_time = time.time()
         deadline = start_time + time_budget_s
 
@@ -475,8 +481,12 @@ class LLMRouter:
                     return raw_out
             self._trip_circuit_breaker("huggingface_api", 180)
 
-        # 4. Tier 4: OpenRouter High-Reliability Fallback (DeepSeek-V3, GPT-4o-mini, Llama 3.3 70B)
-        if self._is_provider_healthy("openrouter_paid") and self.openrouter_key:
+        # 4. Tier 4: OpenRouter Paid — OPT-IN ONLY via ALLOW_PAID_LLM=1 ($0 constraint)
+        if (
+            os.getenv("ALLOW_PAID_LLM") == "1"
+            and self._is_provider_healthy("openrouter_paid")
+            and self.openrouter_key
+        ):
             for paid_model in OPENROUTER_PAID_MODELS:
                 if exhausted():
                     return None
@@ -512,11 +522,14 @@ class LLMRouter:
 
     def generate_json(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, str]] | str,
         max_tokens: int = 4096,
         time_budget_s: float = 240.0,
     ) -> dict[str, Any] | None:
         """Generate and parse structured JSON reliably using brace-depth tracking and json_repair."""
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+
         # Ensure system prompt instructs raw JSON output
         system_appended = False
         for msg in messages:
@@ -552,8 +565,7 @@ class LLMRouter:
                     escape = False
                     continue
                 if ch == "\\":
-                    if in_string:
-                        escape = True
+                    escape = True
                     continue
                 if ch == '"':
                     in_string = not in_string
@@ -564,9 +576,8 @@ class LLMRouter:
                 if ch in ("{", "["):
                     if depth == 0:
                         start_idx = i
-                        brace_type = "{" if ch == "{" else "["
-                    if (brace_type == "{" and ch == "{") or (brace_type == "[" and ch == "["):
-                        depth += 1
+                        brace_type = ch
+                    depth += 1
                 elif ch in ("}", "]"):
                     if (brace_type == "{" and ch == "}") or (brace_type == "[" and ch == "]"):
                         depth -= 1
@@ -605,7 +616,7 @@ router = LLMRouter()
 
 
 def call_llm(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, str]] | str,
     response_format: Literal["text", "json"] = "text",
     max_tokens: int = 4096,
 ) -> str | None:
@@ -614,7 +625,7 @@ def call_llm(
 
 
 def call_llm_json(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, str]] | str,
     max_tokens: int = 4096,
 ) -> dict[str, Any] | None:
     """Convenience helper for generating JSON data structures."""
