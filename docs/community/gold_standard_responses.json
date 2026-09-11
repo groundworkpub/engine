@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "archetypes": [
+    {
+      "channel": "reddit",
+      "persona": "squeezed_parent",
+      "scenario": "Contractor Quote Audit ($15k+ HVAC / Solar / Remodel)",
+      "structure": [
+        "1. Peer Empathy Hook ('Got blindsided by the exact same quote last year...')",
+        "2. Wholesale vs Retail Cost Breakdown (Equipment, Labor Hours, Margin)",
+        "3. Hidden Financed Fee Alert ('Check dealer fee if financing at 0-2.9% — usually adds 25-35% to principal')",
+        "4. Three Specific Questions to Ask the Estimator",
+        "5. Methodology Note & Open Calculator Source"
+      ],
+      "gold_example": "Been through this exact ringer last fall when our 14-year-old gas unit gave up right before winter. A $16,500 quote for a standard 3-ton system is carrying roughly a 60% gross margin.\n\nHere is what is actually in that box:\n- Equipment wholesale (3-ton 15.2 SEER2 condenser + air handler): ~$4,400 to $5,200 depending on brand tier.\n- Sheet metal transition, pad, line set, disconnect: ~$600.\n- Labor: 2 techs, 1 full day (16 total man-hours). Even at $150/hr billable rate, that is $2,400.\n- Permitting & disposal: ~$400.\n- Fair total cost with healthy 25% contractor profit: ~$10,500–$11,800.\n\nTwo things to check before you sign:\n1. Are they quoting low-interest financing? Contractors often roll an 18-28% 'dealer fee' directly into the cash price to offer '0% for 60 months'. Ask for the unfinanced cash price.\n2. Ask for the Manual J calculation. If they just matched the old 3-ton size without measuring duct CFM and insulation, you risk short-cycling.\n\nIf you want to run your regional climate zone numbers against the local utility rebate database, I used this open calculation tool: https://gworky.com/tools/heat-pump-roi-calculator"
+    },
+    {
+      "channel": "x",
+      "persona": "elena_x_watchdog",
+      "scenario": "Consumer Watchdog Sniper Reply to Fed / Mortgage / Inflation Discussion",
+      "structure": [
+        "1. Direct numerical contradiction or missing variable",
+        "2. Break-even timeline calculation",
+        "3. Trade-off question to OP"
+      ],
+      "gold_example": "The missing variable in the 50 bps refinance math: closing costs. On a $420k balance, 1.5% in fees ($6,300) takes 46 months to break even on a 50 bps spread. If the average homeowner moves or refinances every 4.2 years, the lender captures 92% of your lifetime savings."
+    },
+    {
+      "channel": "x",
+      "persona": "elena_x_watchdog",
+      "scenario": "Elena 4-Node Data Thread (Broadcast via Buffer)",
+      "structure": [
+        "Node 1: Paradoxic Hook (0 links)",
+        "Node 2: Hard Empirical Data / Spreadsheet Reality (0 links)",
+        "Node 3: The Consumer Gotcha / Industry Incentive (0 links)",
+        "Node 4: Tiebreaker Debate Question (0 links)",
+        "Node 5: Standalone Auto-Reply with Interactive Tool URL"
+      ],
+      "gold_example": {
+        "node_1": "Most home buyers treat mortgage points as an automatic win if they plan to stay 'long term'. In reality, points are one of the highest-margin upsells in retail lending — and 68% of borrowers never reach the break-even point.",
+        "node_2": "Paying 1 point ($4,000 on a $400k loan) typically buys down the rate by 0.25%. That saves $66/month. Break-even: 61 months (over 5 years). But if mortgage rates drop 75 bps within 36 months, you refinance anyway — forfeiting $1,624 of unrecouped cash upfront.",
+        "node_3": "Lenders push discount points aggressively near rate cycle pivots because points are earned upfront on day one as non-refundable revenue, insulating their margin against prepayment velocity.",
+        "node_4": "If you have $4,000 in dry powder at closing, deploying it into additional principal on month 1 saves $11,800 in compound interest without locking your capital into a 5-year break-even horizon. What is your hurdle rate for points?",
+        "node_5": "We built a zero-ad, open scenario calculator comparing discount points vs extra principal vs HYSA yield across 30 years: https://gworky.com/tools/mortgage-points-calculator"
+      }
+    }
+  ]
+}

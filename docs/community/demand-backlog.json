@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-09-11T22:26:00Z",
+  "metadata": {
+    "total_signals_detected": 4,
+    "active_snipe_opportunities": 2,
+    "feature_requests_logged": 2
+  },
+  "items": [
+    {
+      "id": "sig-red-hvac-001",
+      "platform": "reddit",
+      "source_url": "https://www.reddit.com/r/HomeImprovement/comments/sample_hvac_quote",
+      "pillar": "home",
+      "title": "Quoted $18,500 for a 3-ton heat pump in Ohio. Am I getting ripped off?",
+      "pain_point": "Homeowner faced with opaque quote markup and conflicting SEER2 efficiency claims.",
+      "detected_entities": ["Heat Pump", "SEER2", "Equipment Markup", "Ohio Utility Rebate"],
+      "matching_groundwork_asset": {
+        "title": "HVAC Heat Pump Replacement Cost & Payback Calculator",
+        "url": "https://gworky.com/tools/heat-pump-roi-calculator",
+        "tool_slug": "heat-pump-roi-calculator"
+      },
+      "draft_preview": "In Zone 4/5 (Ohio), wholesale equipment cost for a 3-ton 16 SEER2 inverter heat pump + air handler runs $4,800–$6,200. Labor and permitting is typically 12–16 man-hours ($2,400–$3,500). That puts fair installed cost around $8,500–$11,500 before rebates...",
+      "status": "drafted",
+      "created_at": "2026-09-11T22:00:00Z",
+      "updated_at": "2026-09-11T22:15:00Z"
+    },
+    {
+      "id": "sig-x-mortgage-002",
+      "platform": "x",
+      "source_url": "https://x.com/sample_analyst/status/183000000000",
+      "pillar": "money",
+      "title": "Discussion on Fed rate cut impact on 30-year fixed refinance breakeven",
+      "pain_point": "Consumers assuming a 50 bps rate cut immediately justifies paying $5,000 in closing costs.",
+      "detected_entities": ["Mortgage Refinance", "Closing Costs", "Break-Even Horizon", "Fed Rate"],
+      "matching_groundwork_asset": {
+        "title": "Mortgage Refinance Break-Even & True Cost Model",
+        "url": "https://gworky.com/tools/mortgage-refinance-calculator",
+        "tool_slug": "mortgage-refinance-calculator"
+      },
+      "draft_preview": "The math catch most borrowers miss: If you reset a 30-year note at year 4 to save 45 bps, your first 24 months of payment 'savings' are wiped out by re-amortization interest unless you maintain the original payoff amortization schedule...",
+      "status": "drafted",
+      "created_at": "2026-09-11T21:40:00Z",
+      "updated_at": "2026-09-11T22:10:00Z"
+    },
+    {
+      "id": "sig-quo-solar-003",
+      "platform": "quora",
+      "source_url": "https://www.quora.com/Is-solar-worth-it-in-the-UK-with-cloudy-weather",
+      "pillar": "home",
+      "title": "Is solar PV worth it in the UK with cloudy weather and Smart Export Guarantee (SEG)?",
+      "pain_point": "UK homeowners confused about solar irradiance and realistic SEG tariff returns.",
+      "detected_entities": ["Solar PV", "UK SEG Tariff", "Battery Storage Payback", "Irradiance"],
+      "matching_groundwork_asset": {
+        "title": "Solar Panel ROI & Storage Break-Even Calculator",
+        "url": "https://gworky.com/tools/solar-roi-calculator",
+        "tool_slug": "solar-roi-calculator"
+      },
+      "draft_preview": "Even under diffuse cloud cover, modern monocrystalline panels produce 15-25% of rated capacity. The key financial lever in the UK is not export tariffs (SEG pays only 5-15p/kWh) but self-consumption arbitrage against the 24.5p price cap...",
+      "status": "backlogged_for_feature",
+      "created_at": "2026-09-11T20:00:00Z",
+      "updated_at": "2026-09-11T20:00:00Z"
+    }
+  ]
+}
