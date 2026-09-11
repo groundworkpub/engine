@@ -4,6 +4,7 @@ Run with:  pytest agents/tests/
 """
 
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -164,6 +165,9 @@ class FakeTable:
     def eq(self, column, value):
         return self
 
+    def range(self, start, end):
+        return self
+
     def update(self, payload):
         self.updates.append(payload)
         return self
@@ -185,21 +189,22 @@ class FakeSupabase:
 
 
 def test_deactivate_stale_keeps_fresh_and_seen():
+    now = datetime.now(UTC)
     rows = [
         {
             "id": "1",
             "source_hash": "seen-hash",
-            "updated_at": "2026-08-01T00:00:00+00:00",
+            "updated_at": (now - timedelta(days=20)).isoformat(),
         },
         {
             "id": "2",
             "source_hash": "old-hash",
-            "updated_at": "2026-06-01T00:00:00+00:00",
+            "updated_at": (now - timedelta(days=40)).isoformat(),
         },
         {
             "id": "3",
             "source_hash": "fresh-hash",
-            "updated_at": "2026-08-12T00:00:00+00:00",
+            "updated_at": (now - timedelta(days=2)).isoformat(),
         },
     ]
     supabase = FakeSupabase(rows)

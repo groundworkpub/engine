@@ -102,19 +102,37 @@ def build_rows(
 
 
 def deactivate_stale(supabase: Any, seen_hashes: set[str]) -> int:
-    """Soft-delete jobs no longer listed by any source, after a stale window."""
-    stale_cutoff = (datetime.now(UTC) - timedelta(days=STALE_AFTER_DAYS)).isoformat()
+    """Soft-delete jobs no longer listed by any source, after a stale window.
 
-    result = supabase.table("jobs").select("id, source_hash, updated_at").eq("is_active", True).execute()
-    to_deactivate = []
-    for row in result.data:
-        if row["source_hash"] in seen_hashes:
-            continue
-        # Deactivate only genuinely stale listings (older than the full stale
-        # window) — protects fresh jobs during a single source hiccup.
-        updated_at = row.get("updated_at") or row.get("published_at")
-        if updated_at and updated_at < stale_cutoff:
-            to_deactivate.append(row["id"])
+    Paginated past the PostgREST 1000-row cap so ALL active jobs are evaluated —
+    an unpaginated query silently skips thousands of stale listings.
+    """
+    stale_cutoff = (datetime.now(UTC) - timedelta(days=STALE_AFTER_DAYS)).isoformat()
+    to_deactivate: list[str] = []
+    start = 0
+    batch_size = 1000
+    while True:
+        result = (
+            supabase.table("jobs")
+            .select("id, source_hash, updated_at")
+            .eq("is_active", True)
+            .range(start, start + batch_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        if not batch:
+            break
+        for row in batch:
+            if row["source_hash"] in seen_hashes:
+                continue
+            # Deactivate only genuinely stale listings (older than the full stale
+            # window) — protects fresh jobs during a single source hiccup.
+            updated_at = row.get("updated_at") or row.get("published_at")
+            if updated_at and updated_at < stale_cutoff:
+                to_deactivate.append(row["id"])
+        if len(batch) < batch_size:
+            break
+        start += batch_size
     if not to_deactivate:
         return 0
     supabase.table("jobs").update({"is_active": False}).in_("id", to_deactivate).execute()
