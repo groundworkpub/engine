@@ -1,9 +1,9 @@
 {
   "version": "1.0",
-  "updated_at": "2026-09-11T16:15:08.087938+00:00",
+  "updated_at": "2026-09-11T16:17:02.106500+00:00",
   "metadata": {
-    "total_signals_detected": 10,
-    "active_snipe_opportunities": 7,
+    "total_signals_detected": 11,
+    "active_snipe_opportunities": 8,
     "feature_requests_logged": 2
   },
   "items": [
@@ -229,6 +229,28 @@
       "status": "drafted",
       "created_at": "2026-09-11T16:14:59.633989+00:00",
       "draft_preview": "@FreddieMac Higher rates don't just dampen refinance activity, they increase the break-even point, making true costs of refinancing more expensive. [link to calculator] @gworkycom Model break-even: gworky.com/tools/mortgage-refinance"
+    },
+    {
+      "id": "quo-2de05b8a4f",
+      "platform": "quora",
+      "source_url": "https://www.quora.com/Is-it-worth-it-to-refinance-to-save-200-a-month",
+      "title": "Is it worth it to refinance to save $200 a month?",
+      "pain_point": "Calculate ... cost to refinance your loan (closing costs, appraisal, title services). If it is going to cost you very little, it might be worth it ...",
+      "intent_score": 1.0,
+      "detected_entities": [
+        "refinance",
+        "refi",
+        "closing costs"
+      ],
+      "matching_groundwork_asset": {
+        "title": "Mortgage Refinance Break-Even & True Cost Calculator",
+        "url": "https://gworky.com/tools/mortgage-refinance",
+        "tool_slug": "mortgage-refinance",
+        "pillar": "money"
+      },
+      "status": "drafted",
+      "created_at": "2026-09-11T16:16:53.796301+00:00",
+      "draft_preview": "**Direct Answer:** Refinancing to save $200 a month is worth it if the upfront cost to refinance is less than $2,400.\n\n**The 3 Numbers That Matter:**\n- Upfront cost friction: $2,400\n- True monthly delta: $200\n- Break-even timeline: 12 months\n\n**Verification Tool:** Use the Mortgage Refinance Break-Even & True Cost Calculator at https://gworky.com/tools/mortgage-refinance to determine the true cost of refinancing your loan."
     }
   ]
 }

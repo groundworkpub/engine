@@ -524,6 +524,61 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
         )
 
 
+def generate_quora_compact_draft(opp: dict[str, Any]) -> str:
+    """Generates a punchy, high-conversion, structured Quora answer/comment (80-140 words)."""
+    asset = opp["matching_groundwork_asset"]
+    title = opp["title"]
+    pain = opp["pain_point"]
+    tool_url = asset["url"]
+    tool_title = asset["title"]
+
+    prompt = (
+        "You are writing a direct, high-value answer on Quora.\n"
+        "GOAL: Deliver an immediate, data-backed answer without fluff, storytelling, or greetings.\n"
+        "STRUCTURE:\n"
+        "1. Direct Answer (1 sentence): Give the hard mathematical verdict immediately.\n"
+        "2. The 3 Numbers That Matter (3 short bullet points): Upfront cost friction, true monthly delta, break-even timeline.\n"
+        f"3. Verification Tool (1 sentence): Point to the open methodology calculator: {tool_url}\n\n"
+        "RULES:\n"
+        "- Length: 80 to 140 words maximum.\n"
+        "- Zero corporate filler, zero greetings ('Hi there', 'Great question'), zero 'Hope this helps!'.\n"
+        "- High-density practical numbers.\n\n"
+        f"QUESTION: {title}\n"
+        f"CONTEXT: {pain}\n"
+        f"RELEVANT TOOL: {tool_title}\n\n"
+        "Write the exact Quora answer text:"
+    )
+
+    if call_llm:
+        try:
+            response = call_llm([{"role": "user", "content": prompt}], max_tokens=300)
+            if response and 50 <= len(response.split()) <= 180:
+                return response.strip()
+        except Exception as e:
+            logger.warning(f"Quora LLM draft generation failed: {e}")
+
+    # Deterministic high-conversion Quora fallback
+    pillar = asset.get("pillar")
+    if pillar == "home":
+        return (
+            f"The short answer: Check the equipment vs. labor ratio before evaluating the quote total.\n\n"
+            f"Here is the rule of thumb benchmark:\n"
+            f"• Wholesale Equipment: Typically 40–50% of the quote.\n"
+            f"• Labor: 16–24 total man-hours at fair local rates ($125–$165/hr).\n"
+            f"• Dealer Financing Fees: 0% APR offers often hide an 18–25% dealer markup baked into the cash price.\n\n"
+            f"You can stress-test the break-even against regional utility rebates using the open calculator here: {tool_url}"
+        )
+    else:
+        return (
+            f"The short answer: A headline rate drop only makes sense if the break-even horizon is under 36 months.\n\n"
+            f"Here are the three filters to apply:\n"
+            f"• Upfront Friction: Closing costs typically consume 1.5% to 2.5% of the total loan balance.\n"
+            f"• Net Savings: Only count the principal & interest reduction, not temporary escrow changes.\n"
+            f"• Amortization Reset: Refinancing at year 4+ into a new 30-year note increases total lifetime interest unless you maintain the original payoff schedule.\n\n"
+            f"You can model the exact break-even month on your specific balance here: {tool_url}"
+        )
+
+
 def generate_elena_x_sniper_draft(opp: dict[str, Any]) -> str:
     """Generates a sharp, data-backed Elena reply for X including handle and direct tool link under 280 chars."""
     asset = opp["matching_groundwork_asset"]
@@ -709,9 +764,11 @@ def main() -> int:
         opp_id = opp["id"]
         logger.info(f"Processing opportunity: {opp_id} | {opp['title'][:60]}... (Score: {opp['intent_score']})")
 
-        # Generate Draft
+        # Generate Platform-Tailored Draft
         if opp["platform"] == "x":
             draft = generate_elena_x_sniper_draft(opp)
+        elif opp["platform"] == "quora":
+            draft = generate_quora_compact_draft(opp)
         else:
             draft = generate_squeezed_parent_draft(opp)
 
