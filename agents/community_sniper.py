@@ -18,6 +18,7 @@ Features:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import logging
@@ -309,6 +310,151 @@ def fetch_reddit_opportunities(subreddits: list[str], limit_per_sub: int = 15) -
     return opportunities
 
 
+def search_serp_for_platform(query: str, num: int = 10) -> list[dict[str, str]]:
+    """Performs search via Google Serper API with Tavily failover."""
+    serper_key = os.environ.get("SERPER_API_KEY")
+    if serper_key:
+        try:
+            headers = {"X-API-KEY": serper_key, "Content-Type": "application/json"}
+            payload = {"q": query, "num": num}
+            with httpx.Client(timeout=12.0) as client:
+                resp = client.post("https://google.serper.dev/search", headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    results = []
+                    for item in data.get("organic", []):
+                        results.append({
+                            "title": item.get("title", ""),
+                            "link": item.get("link", ""),
+                            "snippet": item.get("snippet", ""),
+                        })
+                    return results
+        except Exception as e:
+            logger.warning(f"Serper search failed for '{query}': {e}")
+
+    # Fallback to Tavily
+    tavily_key = os.environ.get("TAVILY_API_KEY")
+    if tavily_key:
+        try:
+            with httpx.Client(timeout=12.0) as client:
+                resp = client.post(
+                    "https://api.tavily.com/search",
+                    headers={"Content-Type": "application/json"},
+                    json={"api_key": tavily_key, "query": query, "max_results": num},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return [
+                        {"title": r.get("title", ""), "link": r.get("url", ""), "snippet": r.get("content", "")}
+                        for r in data.get("results", [])
+                    ]
+        except Exception as e:
+            logger.warning(f"Tavily search fallback failed: {e}")
+
+    return []
+
+
+def fetch_quora_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
+    """Discovers high-intent questions on Quora matching Groundwork calculators."""
+    opportunities: list[dict[str, Any]] = []
+    seen = load_seen_threads()
+
+    for tool in CALCULATOR_CATALOG[:4]:
+        kw = tool["keywords"][0]
+        query = f'site:quora.com "{kw}" ("calculate" OR "cost" OR "worth it" OR "quote")'
+        serp_items = search_serp_for_platform(query, num=6)
+
+        for item in serp_items:
+            link = item.get("link", "")
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+
+            # Filter for valid quora question URLs
+            if "quora.com/" not in link or "/topic/" in link:
+                continue
+
+            # Generate unique ID from URL slug
+            slug = link.split("quora.com/")[-1].strip("/").split("?")[0]
+            opp_id = f"quo-{hashlib.md5(slug.encode()).hexdigest()[:10]}"
+
+            if not opp_id or opp_id in seen:
+                continue
+
+            score, matched_kws = calculate_intent_match(title, snippet, tool)
+            if score >= 0.65:
+                opportunities.append({
+                    "id": opp_id,
+                    "platform": "quora",
+                    "source_url": link,
+                    "title": title.replace(" - Quora", ""),
+                    "pain_point": snippet,
+                    "intent_score": score,
+                    "detected_entities": matched_kws,
+                    "matching_groundwork_asset": {
+                        "title": tool["title"],
+                        "url": tool["url"],
+                        "tool_slug": tool["slug"],
+                        "pillar": tool["pillar"],
+                    },
+                    "status": "detected",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+
+        time.sleep(random.uniform(0.5, 1.2))
+
+    return opportunities[:limit_total]
+
+
+def fetch_x_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
+    """Discovers high-intent discussions on X/Twitter matching Groundwork calculators."""
+    opportunities: list[dict[str, Any]] = []
+    seen = load_seen_threads()
+
+    for tool in CALCULATOR_CATALOG[:4]:
+        kw = tool["keywords"][0]
+        query = f'(site:x.com OR site:twitter.com) "{kw}" ("quote" OR "rate" OR "cost" OR "break even")'
+        serp_items = search_serp_for_platform(query, num=6)
+
+        for item in serp_items:
+            link = item.get("link", "")
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+
+            # Filter for tweet status URLs
+            if "/status/" not in link:
+                continue
+
+            tweet_id = link.split("/status/")[-1].split("?")[0].split("/")[0]
+            opp_id = f"x-{tweet_id}"
+
+            if not opp_id or opp_id in seen:
+                continue
+
+            score, matched_kws = calculate_intent_match(title, snippet, tool)
+            if score >= 0.60:
+                opportunities.append({
+                    "id": opp_id,
+                    "platform": "x",
+                    "source_url": link,
+                    "title": title.replace(" / X", "").replace(" on X:", ""),
+                    "pain_point": snippet,
+                    "intent_score": score,
+                    "detected_entities": matched_kws,
+                    "matching_groundwork_asset": {
+                        "title": tool["title"],
+                        "url": tool["url"],
+                        "tool_slug": tool["slug"],
+                        "pillar": tool["pillar"],
+                    },
+                    "status": "detected",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+
+        time.sleep(random.uniform(0.5, 1.2))
+
+    return opportunities[:limit_total]
+
+
 def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
     """Generates an unvarnished, high-value Reddit/Quora reply adhering strictly to the persona."""
     asset = opp["matching_groundwork_asset"]
@@ -500,6 +646,16 @@ def main() -> int:
         logger.info(f"Scanning {len(target_subs[:6])} target subreddits via public RSS...")
         reddit_opps = fetch_reddit_opportunities(target_subs[:6], limit_per_sub=15)
         opportunities.extend(reddit_opps)
+
+    if args.platform in ("quora", "all"):
+        logger.info("Scanning Quora for high-ranking discussion questions...")
+        quora_opps = fetch_quora_opportunities(limit_total=4)
+        opportunities.extend(quora_opps)
+
+    if args.platform in ("x", "all"):
+        logger.info("Scanning X (Twitter) for active authority discussions...")
+        x_opps = fetch_x_opportunities(limit_total=4)
+        opportunities.extend(x_opps)
 
     # Sort opportunities by intent score descending to prioritize high-value targets
     opportunities = [o for o in opportunities if o["intent_score"] >= args.min_score]
