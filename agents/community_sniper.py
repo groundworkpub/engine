@@ -744,8 +744,8 @@ def main() -> int:
     seen = load_seen_threads()
     opportunities: list[dict[str, Any]] = []
 
-    # 1. Gather Subreddits to scan
-    target_subs: list[str] = []
+    # 1. Gather Subreddits to scan (priority to our own official community first)
+    target_subs: list[str] = ["GroundworkDecisions"]
     for tool in CALCULATOR_CATALOG:
         for sub in tool.get("subreddits", []):
             if sub not in target_subs:
