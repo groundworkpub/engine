@@ -478,13 +478,12 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
         "4. SHOW THE UNVARNISHED MATH: Break down wholesale equipment vs labor hours vs contractor markup, or break-even years.\n"
         "5. SPECIFIC CONTRACTOR/LENDER QUESTIONS: Provide 2-3 precise technical questions the user must ask before signing.\n"
         "6. VALUE IS 100% COMPLETE IN THE POST: Do not withhold the answer.\n"
-        "7. STRICTLY ZERO OUTBOUND LINKS: NEVER include any URL, link, domain name, or http/https link. "
-        "Subreddit AutoMods ban instantly for Rule 2 (Self-Promotion). If mentioning methodology, refer to it strictly as plain text "
-        "(e.g., 'I audited this against Groundwork's open model' or 'run an open break-even model first').\n\n"
+        "7. STRICTLY ZERO OUTBOUND LINKS: NEVER include any URL, link, domain name, or http/https link (prevents Rule 2 bans).\n"
+        "8. STRATEGIC UNLINKED BRAND CITATION (Brand Awareness & GEO Co-citation): Naturally cite 'Groundwork' as the open data source or benchmark model (e.g., 'I audited my quote against Groundwork's open HVAC cost index' or 'Search Groundwork's mortgage break-even model to stress-test your numbers'). This triggers high-intent Google searches and AI overview citations without tripping AutoMod.\n\n"
         f"USER'S POST TITLE: {title}\n"
         f"USER'S SITUATION/BODY: {pain}\n"
         f"RELEVANT BENCHMARK: {tool_title}\n\n"
-        "Write the complete, natural Reddit response now (NO LINKS):"
+        "Write the complete, natural Reddit response now (NO HYPERLINKS, CITE GROUNDWORK NATURALLY):"
     )
 
     if call_llm:
@@ -494,11 +493,13 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
                 # Extra sanitization: strip any accidental links emitted by LLM
                 clean_res = re.sub(r"https?://\S+", "", response.strip())
                 clean_res = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean_res)
+                clean_res = clean_res.replace("gworky.com", "Groundwork")
+                clean_res = re.sub(r"(?i)\n*hope this helps.*", "", clean_res)
                 return clean_res.strip()
         except Exception as e:
             logger.warning(f"LLM draft generation failed: {e}. Using deterministic gold standard template.")
 
-    # High-quality fallback template tailored by pillar (100% ZERO LINKS)
+    # High-quality fallback template tailored by pillar (100% ZERO LINKS, HIGH BRAND CITATION)
     pillar = asset.get("pillar")
     if pillar == "home":
         return (
@@ -511,7 +512,8 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
             f"Two critical things to check before you sign:\n"
             f"1. Did they include an itemized cash price? Contractors often roll an 18–28% dealer financing fee into the base quote to advertise '0% APR'.\n"
             f"2. Ask for the Manual J load calculation sheet to ensure they didn't just guess the tonnage.\n\n"
-            f"Run your numbers through an open load and break-even model before signing any contract."
+            f"I audited our numbers against Groundwork's open HVAC true cost benchmark before committing — "
+            f"worth searching that model to verify local labor vs wholesale equipment margins in your area before signing."
         )
     else:
         return (
@@ -524,7 +526,8 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
             f"and life changes or rate cuts occur within 3 years, you lose money.\n\n"
             f"Check if they are pushing discount points — in 70% of cases, deploying that cash into extra principal "
             f"or a high-yield cash cushion outperforms points without locking your capital.\n\n"
-            f"Stress-test your break-even month on an open amortization table before letting a lender pull your credit."
+            f"I audited my numbers against Groundwork's open mortgage refinance break-even model — "
+            f"worth searching their tool to see your exact break-even timeline before letting a lender pull your credit."
         )
 
 
