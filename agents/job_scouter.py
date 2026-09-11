@@ -374,8 +374,93 @@ def _himalayas_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def run_job_scouter(enabled_sources: list[str] | None = None) -> list[dict[str, Any]]:
-    """Fetch and normalize job listings from every enabled source."""
+def _fetch_greenhouse_company(company: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tier A ATS: Greenhouse public board (verified tokens in `companies`)."""
+    token = company.get("board_token")
+    if not token:
+        return []
+    url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+    payload = _fetch_json(url)
+    if not payload:
+        return []
+    out: list[dict[str, Any]] = []
+    for job in payload.get("jobs") or []:
+        title = (job.get("title") or "").strip()
+        abs_url = job.get("absolute_url") or ""
+        if not title or not abs_url:
+            continue
+        loc = job.get("location") or {}
+        loc_name = loc.get("name") or ""
+        out.append(
+            {
+                "title": title,
+                "company": company["name"],
+                "company_url": company.get("careers_url"),
+                "company_logo": None,
+                "location": loc_name or "Remote",
+                "location_type": "remote" if "remote" in loc_name.lower() else "onsite",
+                "employment_type": "full_time",
+                "salary_min": None,
+                "salary_max": None,
+                "salary_currency": None,
+                "salary_period": None,
+                "description": (job.get("content") or "")[:30000],
+                "tags": _stringified_list(job.get("departments") or []),
+                "pillar": "life",
+                "source": f"greenhouse-{token}",
+                "source_url": abs_url,
+            }
+        )
+    return out
+
+
+def _fetch_ashby_company(company: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tier A ATS: Ashby public job board (verified tokens in `companies`)."""
+    token = company.get("board_token")
+    if not token:
+        return []
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true"
+    payload = _fetch_json(url)
+    if not payload:
+        return []
+    out: list[dict[str, Any]] = []
+    for job in payload.get("jobs") or []:
+        title = (job.get("title") or "").strip()
+        apply_url = job.get("applyUrl") or ""
+        if not title or not apply_url:
+            continue
+        loc = job.get("location")
+        loc_name = (loc.get("name") if isinstance(loc, dict) else str(loc or "")).strip()
+        comp = (job.get("compensation") or {}).get("compensationTierSummary") or {}
+        sal = (comp.get("summaryComponents") or {}).get("base") or {}
+        out.append(
+            {
+                "title": title,
+                "company": company["name"],
+                "company_url": company.get("careers_url"),
+                "company_logo": None,
+                "location": loc_name or "Remote",
+                "location_type": "remote" if "remote" in loc_name.lower() else "onsite",
+                "employment_type": "full_time",
+                "salary_min": sal.get("minValue"),
+                "salary_max": sal.get("maxValue"),
+                "salary_currency": sal.get("currency") or "USD",
+                "salary_period": "yearly",
+                "description": (job.get("descriptionHtml") or "")[:30000],
+                "tags": _stringified_list(job.get("department") or []) if job.get("department") else [],
+                "pillar": "life",
+                "source": f"ashby-{token}",
+                "source_url": apply_url,
+            }
+        )
+    return out
+
+
+def run_job_scouter(
+    enabled_sources: list[str] | None = None,
+    supabase: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch and normalize job listings from every enabled source (+ ATS boards)."""
     sources = enabled_sources or list(SOURCES.keys())
     items: list[dict[str, Any]] = []
     for source in sources:
@@ -409,6 +494,29 @@ def run_job_scouter(enabled_sources: list[str] | None = None) -> list[dict[str, 
             logger.info("Job source %s: %d items", source, len(items))
         except Exception as exc:  # noqa: BLE001 - a broken source must not kill the run
             logger.warning("Job source %s failed: %s", source, exc)
+
+    # Tier A: editorial ATS boards (verified tokens in `companies` table).
+    if supabase is not None:
+        try:
+            companies = (
+                supabase.table("companies")
+                .select("name,ats,board_token,careers_url")
+                .eq("active", True)
+                .execute()
+            )
+            for company in companies.data or []:
+                if company.get("ats") == "greenhouse":
+                    items.extend(_fetch_greenhouse_company(company))
+                elif company.get("ats") == "ashby":
+                    items.extend(_fetch_ashby_company(company))
+            ats_count = sum(
+                1
+                for c in companies.data or []
+                if c.get("ats") in ("greenhouse", "ashby")
+            )
+            logger.info("ATS boards: %d companies", ats_count)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ATS board ingestion failed: %s", exc)
 
     # EN-only platform (§2.1 brand rule). Drop German-language jobs at ingestion.
     # Detection heuristic: common DE gender-notation and business-entity markers

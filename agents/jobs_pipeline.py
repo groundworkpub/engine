@@ -83,7 +83,7 @@ def main() -> int:
 
     try:
         supabase = create_client(supabase_url, supabase_key)
-        raw_items = run_job_scouter(args.source)
+        raw_items = run_job_scouter(args.source, supabase)
         # Cap per-run harvest so the active job pool stays bounded (only ~500
         # listings are statically built; excess URLs would 404/301 and burn crawl
         # budget). Full freshness is preserved across runs via dedup + stale purge.
