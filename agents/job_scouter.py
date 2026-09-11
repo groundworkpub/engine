@@ -431,8 +431,14 @@ def _fetch_ashby_company(company: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         loc = job.get("location")
         loc_name = (loc.get("name") if isinstance(loc, dict) else str(loc or "")).strip()
-        comp = (job.get("compensation") or {}).get("compensationTierSummary") or {}
-        sal = (comp.get("summaryComponents") or {}).get("base") or {}
+        sal: dict[str, Any] = {}
+        comp = job.get("compensation")
+        if isinstance(comp, dict):
+            tier = comp.get("compensationTierSummary")
+            if isinstance(tier, dict):
+                base = (tier.get("summaryComponents") or {}).get("base")
+                if isinstance(base, dict):
+                    sal = base
         out.append(
             {
                 "title": title,
@@ -505,10 +511,13 @@ def run_job_scouter(
                 .execute()
             )
             for company in companies.data or []:
-                if company.get("ats") == "greenhouse":
-                    items.extend(_fetch_greenhouse_company(company))
-                elif company.get("ats") == "ashby":
-                    items.extend(_fetch_ashby_company(company))
+                try:
+                    if company.get("ats") == "greenhouse":
+                        items.extend(_fetch_greenhouse_company(company))
+                    elif company.get("ats") == "ashby":
+                        items.extend(_fetch_ashby_company(company))
+                except Exception as exc:  # noqa: BLE001 - one bad board must not abort
+                    logger.warning("ATS board %s failed: %s", company.get("name"), exc)
             ats_count = sum(
                 1
                 for c in companies.data or []
