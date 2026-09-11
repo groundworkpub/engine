@@ -27,7 +27,7 @@ from job_critic import (
 from job_scouter import run_job_scouter
 from scribe import ping_bing, ping_indexnow, trigger_gsc_indexing
 
-MAX_HARVEST_PER_RUN = 300
+MAX_HARVEST_PER_RUN = 2500
 
 logger = logging.getLogger(__name__)
 
