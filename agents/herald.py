@@ -43,7 +43,7 @@ PILLAR_HASHTAGS: dict[str, list[str]] = {
     "tech": ["#tech", "#artificialintelligence", "#smartgadgets", "#software", "#aitools"],
 }
 
-PLATFORMS = ("buffer", "bluesky", "mastodon", "linkedin")
+PLATFORMS = ("buffer", "bluesky", "linkedin")
 
 
 def _env(

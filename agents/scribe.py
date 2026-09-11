@@ -13,6 +13,7 @@ from agents.density import audit_density
 from agents.eval_tracer import OpikTracer
 from agents.headroom_compressor import HeadroomCompressor
 from agents.humanizer import HUMAN_SCORE_THRESHOLD, EditorialHumanizer
+from agents.critic import grade_faithfulness_and_grounding
 from agents.prompts.catalog import get_full_system_prompt
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -1155,7 +1156,7 @@ Return the improved JSON matching the same schema."""
             # Autonomous publishing (AGENTS.md §6.3): output that passes the
             # structural quality gate is published directly with zero human gating.
             now = datetime.now(UTC).isoformat()
-            effective_min = min(min_words, 550)
+            effective_min = min_words
             if word_count < effective_min or len(validated.title) < 10:
                 logger.warning(
                     f"Output below minimum ({word_count} < {effective_min} words) for {url[:60]} — saved as 'review'"
@@ -1163,8 +1164,18 @@ Return the improved JSON matching the same schema."""
                 status = "review"
                 published_at = None
             else:
-                status = "published"
-                published_at = now
+                grounding = grade_faithfulness_and_grounding(
+                    validated.content, item.get("raw_content", "") or compressed_source
+                )
+                if grounding < 0.40:
+                    logger.warning(
+                        f"Grounding below threshold ({grounding:.2f} < 0.40) for {url[:60]} — saved as 'review'"
+                    )
+                    status = "review"
+                    published_at = None
+                else:
+                    status = "published"
+                    published_at = now
 
             author_id = resolve_author_id(supabase, pillar, author_slugs, site_url)
             reviewer_id = resolve_reviewer_id(supabase, pillar, reviewer_slugs)

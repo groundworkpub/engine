@@ -75,13 +75,26 @@ def compute_hash(url: str, title: str, algorithm: str = "sha256") -> str:
 
 
 def get_existing_hashes(supabase: Any) -> set[str]:
-    """Fetch all known source_hash values from Supabase."""
+    """Fetch all known source_hash values from Supabase (paginated past 1000-row cap)."""
+    hashes: set[str] = set()
     try:
-        result = supabase.table("articles").select("source_hash").execute()
-        return {row["source_hash"] for row in result.data if row.get("source_hash")}
+        start = 0
+        batch_size = 1000
+        while True:
+            result = (
+                supabase.table("articles")
+                .select("source_hash")
+                .range(start, start + batch_size - 1)
+                .execute()
+            )
+            batch = [row["source_hash"] for row in result.data if row.get("source_hash")]
+            hashes.update(batch)
+            if len(batch) < batch_size:
+                break
+            start += batch_size
     except Exception as e:
         logger.warning(f"Failed to fetch existing hashes: {e}")
-        return set()
+    return hashes
 
 
 def check_cannibalization_risk(title: str, pillar: str, supabase: Any | None = None) -> tuple[bool, str | None]:
