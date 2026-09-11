@@ -1,9 +1,9 @@
 {
   "version": "1.0",
-  "updated_at": "2026-09-11T16:07:33.008430+00:00",
+  "updated_at": "2026-09-11T16:15:08.087938+00:00",
   "metadata": {
-    "total_signals_detected": 9,
-    "active_snipe_opportunities": 8,
+    "total_signals_detected": 10,
+    "active_snipe_opportunities": 7,
     "feature_requests_logged": 2
   },
   "items": [
@@ -179,9 +179,10 @@
         "tool_slug": "mortgage-refinance",
         "pillar": "money"
       },
-      "status": "drafted",
+      "status": "backlogged_for_feature",
       "created_at": "2026-09-11T16:06:55.976796+00:00",
-      "draft_preview": "Been through this exact ringer last season, trying to decide whether to refinance our mortgage. I dug into the numbers, and I'm happy to share my findings with you.\n\nFirst, let's assume you're looking at a 30-year fixed-rate mortgage, and you want to refinance to a new 30-year fixed-rate mortgage with a lower interest rate. The calculator you linked is a great tool for this, but I'll also do the math manually to give you a better understanding of the costs involved.\n\nLet's say your current mortgage is $300,000 at 4.5% interest, and you're looking to refinance to a new mortgage at 3.75% interest. The lender is charging a 0.5% origination fee, and you'll also have to pay $1,500 in closing costs.\n\nUsing the calculator, I plugged in these numbers and got a break-even point of approximately 3.25 years. This means that if interest rates drop to 3.25%, it would take you about 3 years and 3 months to recoup the cost of refinancing.\n\nNow, let's do some rough math to see how much the interest rate would need to drop before refinancing becomes worthwhile. Assume that you'll save $500 per month in interest payments by refinancing. You'll also have to pay $1,500 in closing costs upfront.\n\nTo break even, you'll need to save at least $1,500 per year in interest payments. This works out to a monthly savings of about $125. Given that you'll save $500 per month in interest payments, you'll need to subtract the closing costs from this amount to get the net savings.\n\n$500 (monthly interest savings) - $125 (monthly closing costs) = $375 (net monthly savings)\n\nNow, let's calculate how much the interest rate would need to drop to achieve this level of net savings. Using the calculator, I found that if the interest rate drops to 3.75%, you'll save about $375 per month in interest payments. This means that the interest rate would need to drop by at least 0.75% (from 4.5% to 3.75%) before refinancing becomes worthwhile.\n\nTo answer your question, it seems that interest rates would need to drop by at least 0.75% before refinancing becomes worthwhile, assuming a 3-year break-even point.\n\nBefore signing any contracts, make sure to ask the lender the following questions:\n\n1. What is the total cost of the loan, including origination fees, closing costs, and any other charges?\n2. How will the interest rate be calculated, and what is the formula used to determine the monthly payment?\n3. What is the estimated break-even point for the loan, and how was this calculation made?\n\nI hope this helps you make an informed decision about refinancing your mortgage!\n\nChecked my numbers using the open methodology tool: https://gworky.com/tools/mortgage-refinance"
+      "draft_preview": "Been through this exact ringer last season, trying to decide whether to refinance our mortgage. I dug into the numbers, and I'm happy to share my findings with you.\n\nFirst, let's assume you're looking at a 30-year fixed-rate mortgage, and you want to refinance to a new 30-year fixed-rate mortgage with a lower interest rate. The calculator you linked is a great tool for this, but I'll also do the math manually to give you a better understanding of the costs involved.\n\nLet's say your current mortgage is $300,000 at 4.5% interest, and you're looking to refinance to a new mortgage at 3.75% interest. The lender is charging a 0.5% origination fee, and you'll also have to pay $1,500 in closing costs.\n\nUsing the calculator, I plugged in these numbers and got a break-even point of approximately 3.25 years. This means that if interest rates drop to 3.25%, it would take you about 3 years and 3 months to recoup the cost of refinancing.\n\nNow, let's do some rough math to see how much the interest rate would need to drop before refinancing becomes worthwhile. Assume that you'll save $500 per month in interest payments by refinancing. You'll also have to pay $1,500 in closing costs upfront.\n\nTo break even, you'll need to save at least $1,500 per year in interest payments. This works out to a monthly savings of about $125. Given that you'll save $500 per month in interest payments, you'll need to subtract the closing costs from this amount to get the net savings.\n\n$500 (monthly interest savings) - $125 (monthly closing costs) = $375 (net monthly savings)\n\nNow, let's calculate how much the interest rate would need to drop to achieve this level of net savings. Using the calculator, I found that if the interest rate drops to 3.75%, you'll save about $375 per month in interest payments. This means that the interest rate would need to drop by at least 0.75% (from 4.5% to 3.75%) before refinancing becomes worthwhile.\n\nTo answer your question, it seems that interest rates would need to drop by at least 0.75% before refinancing becomes worthwhile, assuming a 3-year break-even point.\n\nBefore signing any contracts, make sure to ask the lender the following questions:\n\n1. What is the total cost of the loan, including origination fees, closing costs, and any other charges?\n2. How will the interest rate be calculated, and what is the formula used to determine the monthly payment?\n3. What is the estimated break-even point for the loan, and how was this calculation made?\n\nI hope this helps you make an informed decision about refinancing your mortgage!\n\nChecked my numbers using the open methodology tool: https://gworky.com/tools/mortgage-refinance",
+      "updated_at": "2026-09-11T16:14:31.010848+00:00"
     },
     {
       "id": "x-1995594493710794907",
@@ -203,7 +204,31 @@
       "status": "backlogged_for_feature",
       "created_at": "2026-09-11T16:07:23.626936+00:00",
       "draft_preview": "\"@Chase, don't get too excited about Cyber Monday rates. Our calculator reveals a 3.5yr break-even on a 30yr refi at 3.99% vs 4.1%. True cost? $2,300 in extra interest. #MortgageRefinance #BreakEven\"",
-      "updated_at": "2026-09-11T16:07:58.160921+00:00"
+      "updated_at": "2026-09-11T16:14:16.175496+00:00"
+    },
+    {
+      "id": "x-1826264919378903547",
+      "platform": "x",
+      "source_url": "https://x.com/FreddieMac/status/1826264919378903547?ref_src=twsrc%5Etfw",
+      "tweet_id": "1826264919378903547",
+      "author_handle": "FreddieMac",
+      "title": "Freddie Mac \"Higher rates have dampened refinance activity ...",
+      "pain_point": "... refinance for reasons other than to lower their mortgage rate. Take a closer look at current refinance trends in our latest monthly outlook ...",
+      "intent_score": 1.0,
+      "detected_entities": [
+        "refinance",
+        "refi",
+        "mortgage rate"
+      ],
+      "matching_groundwork_asset": {
+        "title": "Mortgage Refinance Break-Even & True Cost Calculator",
+        "url": "https://gworky.com/tools/mortgage-refinance",
+        "tool_slug": "mortgage-refinance",
+        "pillar": "money"
+      },
+      "status": "drafted",
+      "created_at": "2026-09-11T16:14:59.633989+00:00",
+      "draft_preview": "@FreddieMac Higher rates don't just dampen refinance activity, they increase the break-even point, making true costs of refinancing more expensive. [link to calculator] @gworkycom Model break-even: gworky.com/tools/mortgage-refinance"
     }
   ]
 }

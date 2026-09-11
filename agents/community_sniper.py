@@ -424,7 +424,11 @@ def fetch_x_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
             if "/status/" not in link:
                 continue
 
-            tweet_id = link.split("/status/")[-1].split("?")[0].split("/")[0]
+            match = re.search(r"(?:twitter|x)\.com/([^/?#]+)/status/(\d+)", link)
+            if not match:
+                continue
+            username = match.group(1)
+            tweet_id = match.group(2)
             opp_id = f"x-{tweet_id}"
 
             if not opp_id or opp_id in seen:
@@ -436,6 +440,8 @@ def fetch_x_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
                     "id": opp_id,
                     "platform": "x",
                     "source_url": link,
+                    "tweet_id": tweet_id,
+                    "author_handle": username,
                     "title": title.replace(" / X", "").replace(" on X:", ""),
                     "pain_point": snippet,
                     "intent_score": score,
@@ -519,31 +525,48 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
 
 
 def generate_elena_x_sniper_draft(opp: dict[str, Any]) -> str:
-    """Generates a sharp, data-backed Elena reply for X under 280 characters with zero top-level link."""
+    """Generates a sharp, data-backed Elena reply for X including handle and direct tool link under 280 chars."""
     asset = opp["matching_groundwork_asset"]
     title = opp["title"]
+    author = opp.get("author_handle", "")
+    author_prefix = f"@{author} " if author and author.lower() not in ("x", "twitter", "i", "status") else ""
+
+    # Clean short URL representation for link preview, e.g., gworky.com/tools/mortgage-refinance
+    raw_url = asset.get("url", "https://gworky.com")
+    clean_url = raw_url.replace("https://", "").replace("http://", "")
+    link_cta = f"Model break-even: {clean_url}"
 
     prompt = (
-        "You are writing a sniper reply on X (Twitter) as 'Elena GROUNDWORK' (@gworkycom).\n"
-        "VOICE: Lead Research Strategist & Unvarnished Consumer Watchdog. Concise, dry wit, data-first.\n"
-        "RULES:\n"
-        "1. Strictly UNDER 260 CHARACTERS.\n"
-        "2. ZERO LINKS (External links in tweets are algorithmically de-boosted by 80%).\n"
-        "3. Reveal the hidden numerical variable, break-even reality, or mispriced trade-off.\n\n"
-        f"TOPIC / TWEET TITLE: {title}\n"
-        f"RELEVANT DOMAIN: {asset['title']}\n\n"
-        "Write the exact tweet reply text:"
+        "You are writing a surgical reply on X (Twitter) as Elena (@gworkycom), consumer research watchdog.\n"
+        "VOICE: Direct, analytical, dry wit, zero fluff or guru talk. Expose the hidden mathematical variable.\n"
+        f"RULES:\n"
+        f"1. Core reasoning MUST BE UNDER 170 CHARACTERS to leave room for link and username.\n"
+        f"2. Do NOT repeat the username or include hashtags.\n\n"
+        f"TARGET TWEET TITLE / TOPIC: {title}\n"
+        f"RELEVANT TOOL: {asset['title']}\n\n"
+        "Write only the concise reasoning sentence:"
     )
 
+    core_reply = ""
     if call_llm:
         try:
-            response = call_llm([{"role": "user", "content": prompt}], max_tokens=120)
-            if response and len(response.strip()) <= 280:
-                return response.strip()
+            response = call_llm([{"role": "user", "content": prompt}], max_tokens=90)
+            if response:
+                core_reply = response.strip().strip('"').strip("'")
         except Exception as e:
             logger.warning(f"Elena LLM generation failed: {e}")
 
-    return "The missing variable in this math is the break-even horizon. On a 50 bps spread, upfront closing costs take ~42 months to recoup. If you move or refinance before year 4, the lender captures 90% of your theoretical savings."
+    if not core_reply:
+        core_reply = "The catch is the break-even horizon. On a 50 bps spread, closing friction takes ~42 mo to recoup before net gains."
+
+    # Assemble full draft under Twitter 280-char limit
+    full_draft = f"{author_prefix}{core_reply} {link_cta}".strip()
+    if len(full_draft) > 280:
+        budget = 280 - len(author_prefix) - len(link_cta) - 5
+        core_reply = core_reply[:budget].rsplit(" ", 1)[0] + "..."
+        full_draft = f"{author_prefix}{core_reply} {link_cta}".strip()
+
+    return full_draft
 
 
 def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
@@ -564,12 +587,25 @@ def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
     escaped_draft = html.escape(draft)
 
     if opp["platform"] == "x":
-        primary_action_url = f"https://twitter.com/intent/tweet?text={encoded_draft}"
-        primary_action_text = "🐦 Buka di X (Teks Langsung Terisi)"
+        tweet_id = opp.get("tweet_id")
+        if not tweet_id and "/status/" in opp.get("source_url", ""):
+            m = re.search(r"/status/(\d+)", opp["source_url"])
+            if m:
+                tweet_id = m.group(1)
+
+        author = opp.get("author_handle", "")
+        # Official Twitter Web Intent for replying directly to a tweet:
+        # https://twitter.com/intent/tweet?in_reply_to={tweet_id}&text={encoded_draft}
+        if tweet_id:
+            primary_action_url = f"https://twitter.com/intent/tweet?in_reply_to={tweet_id}&text={encoded_draft}"
+            primary_action_text = f"🐦 Reply ke @{author} di X (Teks Terisi)" if author else "🐦 Reply Tweet di X (Teks Terisi)"
+        else:
+            primary_action_url = f"https://twitter.com/intent/tweet?text={encoded_draft}"
+            primary_action_text = "🐦 Reply di X (Teks Terisi)"
     else:
         # For Reddit and Quora: inject draft via URL hash for Tampermonkey Auto-Fill Userscript
         primary_action_url = f"{opp['source_url']}#gw_draft={encoded_draft}"
-        primary_action_text = "⚡ Buka & Auto-Fill Komentar"
+        primary_action_text = "🌐 Buka Thread & Tempel Draf"
 
     text = (
         f"🎯 <b>[COMMUNITY SNIPER ALERT: {platform_icon}]</b>\n\n"
@@ -581,7 +617,9 @@ def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
         f"<code>{opp['pain_point'][:220]}...</code>\n\n"
         f"📋 <b>Suggested Draft (Ketuk untuk 1-Tap Copy):</b>\n"
         f"<pre><code>{escaped_draft}</code></pre>\n\n"
-        f"<i>💡 Ketuk kotak teks di atas untuk menyalin draf ke clipboard, atau klik tombol di bawah untuk auto-fill.</i>"
+        f"<i>💡 <b>Cara Kirim:</b>\n"
+        f"1. Ketuk teks draf di atas (otomatis tersalin ke clipboard).\n"
+        f"2. Klik tombol di bawah (di X otomatis membuka dialog reply; di Reddit/Quora tinggal paste & submit).</i>"
     )
 
     inline_keyboard = [
