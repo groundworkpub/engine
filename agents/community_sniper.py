@@ -402,7 +402,7 @@ def generate_elena_x_sniper_draft(opp: dict[str, Any]) -> str:
 def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
     """Dispatches a 1-Click Opportunity Card to @gwelena_bot in Telegram."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_FOUNDER_CHAT_ID")
 
     if not bot_token or not chat_id:
         logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment. Cannot dispatch.")
