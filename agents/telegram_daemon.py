@@ -14,6 +14,7 @@ Features:
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import subprocess
@@ -246,6 +247,8 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
     # 1. Handle Callback Queries (Interactive Action Buttons)
     if "callback_query" in update:
         cq = update["callback_query"]
+        cq_id = cq.get("id")
+        data = cq.get("data", "")
         chat_id = cq.get("message", {}).get("chat", {}).get("id")
         # Immediate UI toast feedback to dismiss loading spinner
         toast_msg = None
