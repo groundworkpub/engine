@@ -26,6 +26,7 @@ import random
 import re
 import sys
 import time
+import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -412,8 +413,17 @@ def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
     platform_icon = "🔴 Reddit" if opp["platform"] == "reddit" else "🔵 Quora" if opp["platform"] == "quora" else "🐦 X"
     asset = opp["matching_groundwork_asset"]
 
-    # Shorten draft snippet for Telegram display if long
-    draft_display = draft if len(draft) <= 900 else draft[:900] + "..."
+    # Prepare URLs
+    encoded_draft = urllib.parse.quote(draft)
+    escaped_draft = html.escape(draft)
+
+    if opp["platform"] == "x":
+        primary_action_url = f"https://twitter.com/intent/tweet?text={encoded_draft}"
+        primary_action_text = "🐦 Buka di X (Teks Langsung Terisi)"
+    else:
+        # For Reddit and Quora: inject draft via URL hash for Tampermonkey Auto-Fill Userscript
+        primary_action_url = f"{opp['source_url']}#gw_draft={encoded_draft}"
+        primary_action_text = "⚡ Buka & Auto-Fill Komentar"
 
     text = (
         f"🎯 <b>[COMMUNITY SNIPER ALERT: {platform_icon}]</b>\n\n"
@@ -423,14 +433,17 @@ def send_telegram_snipe_card(opp: dict[str, Any], draft: str) -> bool:
         f"• <b>Matched Tool:</b> <a href=\"{asset['url']}\">{asset['title']}</a>\n\n"
         f"💡 <b>Pain Point:</b>\n"
         f"<code>{opp['pain_point'][:220]}...</code>\n\n"
-        f"📋 <b>Suggested Draft:</b>\n"
-        f"<blockquote>{draft_display}</blockquote>\n\n"
-        f"<i>Tap below to open thread directly in your browser and paste the draft.</i>"
+        f"📋 <b>Suggested Draft (Ketuk untuk 1-Tap Copy):</b>\n"
+        f"<pre><code>{escaped_draft}</code></pre>\n\n"
+        f"<i>💡 Ketuk kotak teks di atas untuk menyalin draf ke clipboard, atau klik tombol di bawah untuk auto-fill.</i>"
     )
 
     inline_keyboard = [
         [
-            {"text": "🔗 Open Thread in Browser", "url": opp["source_url"]},
+            {"text": primary_action_text, "url": primary_action_url},
+        ],
+        [
+            {"text": "🔗 Buka Thread Asli", "url": opp["source_url"]},
         ],
         [
             {"text": "📥 Save to Backlog", "callback_data": f"backlog_snipe:{opp['id']}"},
@@ -464,7 +477,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Groundwork Multi-Channel Community Sniper")
     parser.add_argument("--scan", action="store_true", help="Execute public community scans")
     parser.add_argument("--platform", choices=["reddit", "x", "quora", "all"], default="all", help="Target platform to scan")
-    parser.add_argument("--limit", type=int, default=10, help="Maximum opportunities to process")
+    parser.add_argument("--limit", type=int, default=4, help="Maximum opportunities to process (default 4)")
+    parser.add_argument("--min-score", type=float, default=0.70, help="Minimum intent score (default 0.70)")
     parser.add_argument("--notify-telegram", action="store_true", help="Push 1-click draft cards to @gwelena_bot")
     parser.add_argument("--dry-run", action="store_true", help="Inspect opportunities without saving or sending alerts")
     args = parser.parse_args()
@@ -487,7 +501,11 @@ def main() -> int:
         reddit_opps = fetch_reddit_opportunities(target_subs[:6], limit_per_sub=15)
         opportunities.extend(reddit_opps)
 
-    logger.info(f"Discovered {len(opportunities)} high-intent community opportunities.")
+    # Sort opportunities by intent score descending to prioritize high-value targets
+    opportunities = [o for o in opportunities if o["intent_score"] >= args.min_score]
+    opportunities.sort(key=lambda x: x["intent_score"], reverse=True)
+
+    logger.info(f"Discovered {len(opportunities)} high-intent community opportunities (score >= {args.min_score}).")
 
     processed = 0
     for opp in opportunities:
