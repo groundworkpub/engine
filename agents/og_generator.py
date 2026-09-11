@@ -149,6 +149,28 @@ def upload_og_to_r2(slug: str, data: bytes) -> bool:
         logger.error("R2 upload error for %s: %s", slug, e)
         return False
 
+def generate_og_svg(title: str, pillar: str, is_digest: bool = False) -> str:
+    """Branded 1200x630 OG SVG string (for static GitHub Pages mirror)."""
+    esc = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    sub = "Groundwork research digest" if is_digest else "Groundwork practical guides & tools"
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f2a4a"/>
+      <stop offset="0.55" stop-color="#1a3a63"/>
+      <stop offset="1" stop-color="#0e2238"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="56" y="56" width="72" height="72" rx="14" fill="#10b981"/>
+  <text x="92" y="104" font-family="Arial,Helvetica,sans-serif" font-size="40" font-weight="800" fill="#0f2a4a" text-anchor="middle">G</text>
+  <text x="148" y="104" font-family="Arial,Helvetica,sans-serif" font-size="44" font-weight="800" fill="#ffffff" letter-spacing="1">GROUNDWORK</text>
+  <text x="80" y="360" font-family="Arial,Helvetica,sans-serif" font-size="56" font-weight="700" fill="#ffffff">{esc}</text>
+  <text x="80" y="430" font-family="Arial,Helvetica,sans-serif" font-size="28" fill="#b9cfe8">{sub}</text>
+  <text x="80" y="560" font-family="Arial,Helvetica,sans-serif" font-size="22" fill="#8fb3d9">gworky.com · Money · Body · Home · Life · Tech</text>
+</svg>'''
+
+
 def main():
     parser = argparse.ArgumentParser(description="Autonomous Groundwork OpenGraph Generator.")
     parser.add_argument("--slug", type=str, help="Generate for a specific article slug.")
