@@ -45,6 +45,21 @@ jobs:
           GSC_WEBHOOK_SECRET: ${{ secrets.REVALIDATE_SECRET }}
         run: PYTHONPATH=. python agents/jobs_pipeline.py
 
+      - name: Trigger media production rebuild
+        if: success()
+        env:
+          MEDIA_DEPLOY_TOKEN: ${{ secrets.GH_PAT_MEDIA }}
+        run: |
+          echo "Triggering media build-deploy workflow (new job pages)..."
+          curl -s -X POST \
+            "https://api.github.com/repos/groundworkpub/media/actions/workflows/build-deploy.yml/dispatches" \
+            -H "Authorization: token ${MEDIA_DEPLOY_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"trigger_run_id\":\"${{ github.run_id }}\"}}" | jq . || {
+              echo "::warning::Failed to trigger media rebuild — jobs published to DB but static pages not regenerated."
+            }
+          echo "Media rebuild dispatch sent at $(date -u)"
+
       - name: Notify on failure
         if: failure()
         run: |
