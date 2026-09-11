@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Groundwork Autonomous Brand Keyword Booster Engine (Search-Only)
-Repository: https://github.com/groundworkpub/media
+Platform: Groundwork (https://gworky.com)
+Repository: https://github.com/groundworkpub/engine
 Architecture: Zero-Traffic to Money Site (Zero Hits on gworky.com)
 
 Purpose:

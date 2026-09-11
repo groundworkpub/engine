@@ -814,6 +814,11 @@ def publish_to_buffer(
         body={"query": channel_query},
     )
 
+    if c_status != 200:
+        err_msg = c_err or (c_payload.get("errors") if isinstance(c_payload, dict) else str(c_payload))
+        logger.warning("Buffer channels query failed (HTTP %s): %s", c_status, err_msg)
+        return {"ok": False, "status": c_status, "error": f"buffer channels query failed ({c_status}): {err_msg}"}
+
     channels = []
     scheduled_counts: dict[str, int] = {}
     if c_status == 200:
@@ -1285,9 +1290,10 @@ def _supabase() -> Any:
 
 
 def _fetch_published_articles(supabase: Any, limit: int, slug: str | None = None) -> list[dict[str, Any]]:
+    fetch_limit = limit if slug else max(limit * 5, 25)
     query = supabase.table("articles").select("slug,title,excerpt,pillar,status,takeaway,image_url,published_at,updated_at")
     query = query.eq("slug", slug) if slug else query.eq("status", "published").order("published_at", desc=True)
-    result = query.limit(limit).execute()
+    result = query.limit(fetch_limit).execute()
     return result.data or []
 
 
@@ -1326,22 +1332,32 @@ def amplify_article(
 ) -> list[dict[str, Any]]:
     env = _env(env)
     rows: list[dict[str, Any]] = []
+    slug = article.get("slug", "")
     for platform in platforms:
         result = dispatch(article, platform, env)
         status = "posted" if result.get("ok") else ("skipped" if result.get("skipped") else "failed")
+        err = result.get("error")
         row: dict[str, Any] = {
-            "slug": article.get("slug", ""),
+            "slug": slug,
             "platform": platform,
             "status": status,
             "post_id": result.get("post_id") or None,
             "post_url": result.get("post_url") or None,
-            "error_log": result.get("error"),
+            "error_log": err,
         }
         persisted = status == "posted" or (
             status == "failed" and result.get("status") is not None and not _is_config_error(result)
         )
         if persisted:
             rows.append(row)
+        else:
+            logger.info(
+                "%s → %s [%s]%s",
+                slug,
+                platform,
+                status,
+                f" ({err})" if err else "",
+            )
     if supabase is not None and not env.get("HERALD_DRY_RUN"):
         _record_ledger(supabase, rows)
     return rows
@@ -1383,7 +1399,20 @@ def main() -> int:
         logger.error("DB unavailable: %s", exc)
         return 1
 
-    articles = _fetch_published_articles(supabase, args.limit, args.slug)
+    candidates = _fetch_published_articles(supabase, args.limit, args.slug)
+    ledger = _existing_ledger(supabase)
+
+    articles: list[dict[str, Any]] = []
+    for art in candidates:
+        slug = art.get("slug", "")
+        if args.slug or any((slug, p) not in ledger for p in platforms):
+            articles.append(art)
+        if len(articles) >= args.limit:
+            break
+
+    if not articles:
+        logger.info("All candidate articles are already fully amplified across %s — nothing to do.", platforms)
+        return 0
 
     # Warm CDN image transforms BEFORE social amplification drives traffic,
     # so the first click never hits a cold /cdn-cgi/image/ transform (~1.5s).
@@ -1408,8 +1437,6 @@ def main() -> int:
         ping_new(supabase, limit=max(len(articles), 10))
     except Exception as exc:  # noqa: BLE001
         logger.warning("indexnow skipped: %s", exc)
-
-    ledger = _existing_ledger(supabase)
 
     processed = 0
     published = 0

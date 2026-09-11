@@ -160,8 +160,9 @@ def normalize_platform(platform: str) -> str:
 
 
 def build_stealth_script(
+    persona: Any = None,
     *,
-    platform: str,
+    platform: str = "",
     is_mobile: bool = False,
     is_firefox: bool = False,
     session_seed: str = "",
@@ -169,13 +170,20 @@ def build_stealth_script(
     """Build a persona-aware CDP stealth injection script.
 
     The returned JS syncs WebGL vendor/renderer, navigator.platform,
-    hardwareConcurrency and deviceMemory with the persona's OS so the
-    fingerprint matrix is internally consistent (Windows persona -> NVIDIA,
-    macOS persona -> Apple, iOS -> Apple GPU, Android -> Adreno).
+    hardwareConcurrency, deviceMemory, and modern Client Hints (getHighEntropyValues)
+    with the persona's OS so the fingerprint matrix is internally consistent.
 
     Adds sparse canvas-noise so each session produces a unique but subtle
     canvas hash, and hardens WebRTC to avoid local-IP leakage.
     """
+    if persona is not None:
+        if isinstance(persona, dict):
+            platform = persona.get("platform") or persona.get("user_agent", "")
+            is_mobile = persona.get("is_mobile", False) or "mobile" in str(persona.get("name", "")).lower()
+        else:
+            platform = getattr(persona, "user_agent", "") or getattr(persona, "name", "")
+            is_mobile = getattr(persona, "is_mobile", False) or "mobile" in str(getattr(persona, "name", "")).lower()
+
     key = normalize_platform(platform)
     gl = WEBGL_MATRIX[key]
     concurrency_choices = HARDWARE_CONCURRENCY.get(key, (8,))
@@ -279,8 +287,63 @@ def build_stealth_script(
         if (p && p.name === 'notifications') return {{ state: 'denied' }};
         return origQuery.call(this, p);
     }};
+
+    // 9. Full Chromium Client Hints (Low-Entropy & High-Entropy userAgentData)
+    if (!navigator.userAgentData) {{
+        const isMob = {'true' if is_mobile else 'false'};
+        const platformName = '{key}';
+        const pVersion = platformName === 'macos' ? '14.5.0' : (platformName === 'windows' ? '15.0.0' : '14.0.0');
+        const architecture = platformName === 'macos' ? 'arm' : 'x86';
+        const devModel = isMob ? (platformName === 'ios' ? 'iPhone 15 Pro' : 'Pixel 8 Pro') : '';
+        const brandsList = [
+            {{ brand: 'Chromium', version: '128' }},
+            {{ brand: 'Not;A=Brand', version: '24' }},
+            {{ brand: 'Google Chrome', version: '128' }}
+        ];
+
+        Object.defineProperty(navigator, 'userAgentData', {{
+            get: () => ({{
+                brands: brandsList,
+                mobile: isMob,
+                platform: platformName === 'macos' ? 'macOS' : (platformName === 'windows' ? 'Windows' : (platformName === 'ios' ? 'iOS' : 'Android')),
+                getHighEntropyValues: async (hints) => ({{
+                    brands: brandsList,
+                    mobile: isMob,
+                    platform: platformName === 'macos' ? 'macOS' : (platformName === 'windows' ? 'Windows' : 'Android'),
+                    architecture: architecture,
+                    bitness: '64',
+                    model: devModel,
+                    platformVersion: pVersion,
+                    fullVersionList: [
+                        {{ brand: 'Chromium', version: '128.0.6613.120' }},
+                        {{ brand: 'Not;A=Brand', version: '24.0.0.0' }},
+                        {{ brand: 'Google Chrome', version: '128.0.6613.120' }}
+                    ]
+                }}),
+                toJSON: () => ({{ brands: brandsList, mobile: isMob, platform: platformName }})
+            }})
+        }});
+    }}
 }})();
 """
+
+
+def check_subnet_diversity(ip_list: list[str], max_same_subnet: int = 3) -> bool:
+    """Verify that simulated sessions are not clustered inside the same /24 subnet.
+
+    Returns False if more than `max_same_subnet` IPs share the same first 3 octets.
+    """
+    if not ip_list or len(ip_list) <= 1:
+        return True
+    subnets: dict[str, int] = {}
+    for ip in ip_list:
+        parts = ip.strip().split(".")
+        if len(parts) == 4:
+            subnet = ".".join(parts[:3])
+            subnets[subnet] = subnets.get(subnet, 0) + 1
+            if subnets[subnet] > max_same_subnet:
+                return False
+    return True
 
 
 def stealth_launch_args() -> list[str]:

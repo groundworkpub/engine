@@ -11,7 +11,19 @@ import logging
 import os
 import time
 import urllib.request
+from pathlib import Path
 from typing import Any
+
+# Auto-load .env.local
+_root = Path(__file__).resolve().parent.parent
+_env_path = _root / ".env.local"
+if _env_path.exists():
+    with open(_env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip("'\""))
 
 logger = logging.getLogger("egress_router")
 

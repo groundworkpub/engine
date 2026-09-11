@@ -18,7 +18,19 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
+
+# Auto-load .env.local
+_root = Path(__file__).resolve().parent.parent
+_env_path = _root / ".env.local"
+if _env_path.exists():
+    with open(_env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip("'\""))
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +61,12 @@ _GEO_LABEL = {
     "fr": "France",
     "in": "India",
 }
+
+# Target geos supported for human simulation (Triage C quarantine).
+# Any geo outside this allow-list is denied residential/synthetic routing —
+# geo hubs like ID/SG/datacenter exits (K1.3) are excluded to keep GA4/GSC
+# attribution coherent with the US/UK/AU/CA audience (ADR-0006).
+_TARGET_GEO_ALLOWLIST = {"us", "uk", "gb", "au", "ca"}
 
 
 def verify_geo_coherence(geo: str, ip_context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -112,7 +130,13 @@ class SmartPolicySelector:
         # Import each egress module — any import failure is non-fatal.
         try:
             from egress_mobile import MobileRotator
+        except ImportError:
+            try:
+                from agents.egress_mobile import MobileRotator
+            except ImportError:
+                MobileRotator = None
 
+        if MobileRotator is not None:
             self._routes.append(
                 {
                     "name": "mobile_rotator",
@@ -122,12 +146,16 @@ class SmartPolicySelector:
                     "cost": 0,
                 }
             )
-        except ImportError:
-            pass
 
         try:
             from egress_wireguard import WireGuardMesh
+        except ImportError:
+            try:
+                from agents.egress_wireguard import WireGuardMesh
+            except ImportError:
+                WireGuardMesh = None
 
+        if WireGuardMesh is not None:
             self._routes.append(
                 {
                     "name": "wireguard_mesh",
@@ -137,8 +165,6 @@ class SmartPolicySelector:
                     "cost": 0,
                 }
             )
-        except ImportError:
-            pass
 
         # Cloudflare Workers Egress (100k req/day free, zero-cost edge proxy)
         cf_worker_url = os.environ.get("CLOUDFLARE_EGRESS_WORKER_URL")
@@ -170,7 +196,13 @@ class SmartPolicySelector:
         # Public Proxy Pool (Zero-Cost multi-source feeds with SQLite caching)
         try:
             from egress_public_pool import EgressPublicPoolProvider
+        except ImportError:
+            try:
+                from agents.egress_public_pool import EgressPublicPoolProvider
+            except ImportError:
+                EgressPublicPoolProvider = None
 
+        if EgressPublicPoolProvider is not None:
             self._routes.append(
                 {
                     "name": "public_proxy_pool",
@@ -180,13 +212,17 @@ class SmartPolicySelector:
                     "cost": 0,
                 }
             )
-        except ImportError:
-            pass
 
         # DataImpulse Residential Proxy (Cloud Priority & Local Geo Targeting)
         try:
             from egress_dataimpulse import DataImpulseProxyRouter
+        except ImportError:
+            try:
+                from agents.egress_dataimpulse import DataImpulseProxyRouter
+            except ImportError:
+                DataImpulseProxyRouter = None
 
+        if DataImpulseProxyRouter is not None:
             self._routes.append(
                 {
                     "name": "dataimpulse",
@@ -196,21 +232,21 @@ class SmartPolicySelector:
                     "cost": 1,  # pay-per-GB
                 }
             )
-        except ImportError:
-            pass
 
     def get_proxy(
         self,
         task_type: str = "browse",
         geo: str = "us",
         force: str | None = None,
+        session_id: str | None = None,
     ) -> str | None:
         """Select the best proxy URL for the given task.
 
         Args:
-            task_type: "browse" | "crawl" | "scrape" | "journey_qa"
+            task_type: "browse" | "crawl" | "scrape" | "journey_qa" | "serp_journey"
             geo: Target country code ("us", "gb", "au", "ca")
             force: Force a specific egress route name (e.g. "dataimpulse")
+            session_id: Optional sticky session ID for residential proxy pinning
 
         Returns:
             Proxy URL string, or None for direct connection.
@@ -219,16 +255,36 @@ class SmartPolicySelector:
 
         # Force a specific route if requested
         if force:
-            return self._get_from_route(force, geo)
+            return self._get_from_route(force, geo, session_id=session_id)
 
-        # SERP recon: MUST route through geo-coherent residential egress (a bare
+        # Query task types that simulate a real human over the target market
+        # MUST stay geo-coherent. Non-target geos (ID/SG/datacenter hubs) are
+        # denied residential routing so engagement never leaks from the wrong
+        # exit country (Triage C → ADR-0006).
+        normalized_geo = geo.lower().replace("gb", "uk")
+        if normalized_geo not in _TARGET_GEO_ALLOWLIST:
+            logger.warning(
+                "Egress denied for non-target geo '%s' (allow-list: %s). Returning None.",
+                geo,
+                sorted(_TARGET_GEO_ALLOWLIST),
+            )
+            return None
+
+        # SERP recon / journey: MUST route through geo-coherent residential egress (a bare
         # direct/VPN hit triggers the Google bot-gate — verified live). DataImpulse
         # residential is the only route that returns a real proxied HTTP URL for
-        # SERP position scanning. Fall back to cloud-worker/public-pool only if
-        # DataImpulse is unavailable; never return None (direct) here.
+        # SERP position scanning. Fall back to public-pool only if
+        # DataImpulse is unavailable; never return None (direct) or non-CONNECT endpoints here.
+        if task_type == "serp_journey":
+            for name in ["dataimpulse", "public_proxy_pool"]:
+                url = self._get_from_route(name, geo, session_id=session_id)
+                if url:
+                    return url
+            return None
+
         if task_type == "serp_recon":
             for name in ["dataimpulse", "cloudflare_workers", "public_proxy_pool"]:
-                url = self._get_from_route(name, geo)
+                url = self._get_from_route(name, geo, session_id=session_id)
                 if url:
                     return url
             return None
@@ -237,9 +293,26 @@ class SmartPolicySelector:
         # with fallback to Cloudflare Workers, then Public Pool.
         if _is_cloud():
             for name in ["dataimpulse", "cloudflare_workers", "public_proxy_pool"]:
-                url = self._get_from_route(name, geo)
+                url = self._get_from_route(name, geo, session_id=session_id)
                 if url:
                     return url
+            return None
+
+        # Local human-sim tasks (browse/journey): DataImpulse residential FIRST.
+        # The legacy public AWS pool caused `ERR_TUNNEL_CERT_AUTHORITY_INVALID`
+        # (K1.3, 2026-09-03) — residential geo-coherent exit is mandatory here.
+        if task_type in ("browse", "journey", "journey_qa"):
+            for name in ["dataimpulse", "public_proxy_pool"]:
+                url = self._get_from_route(name, geo, session_id=session_id)
+                if url:
+                    logger.info(
+                        "Using residential egress (%s) for %s (geo=%s)",
+                        name,
+                        task_type,
+                        geo,
+                    )
+                    return url
+            logger.warning("No residential egress available for %s (geo=%s); falling back to direct.", task_type, geo)
             return None
 
         # Local mode: try routes in priority order
@@ -276,25 +349,31 @@ class SmartPolicySelector:
             if name == "dataimpulse":
                 from egress_dataimpulse import DataImpulseProxyRouter
 
-                url = DataImpulseProxyRouter.get_proxy_url(geo)
+                url = DataImpulseProxyRouter.get_proxy_url(geo, session_id=session_id)
                 if url:
-                    logger.info("Using DataImpulse residential proxy (geo=%s)", geo)
+                    logger.info("Using DataImpulse residential proxy (geo=%s, session_id=%s)", geo, session_id)
                     return url
 
         logger.info("No egress route available — using direct connection")
         return None
 
-    def _get_from_route(self, name: str, geo: str) -> str | None:
+    def _get_from_route(self, name: str, geo: str, session_id: str | None = None) -> str | None:
         """Get proxy URL from a specific named route."""
         self._ensure_init()
         for route in self._routes:
             if route["name"] == name and route["provider"].is_available():
                 if name == "dataimpulse":
-                    from egress_dataimpulse import DataImpulseProxyRouter
+                    try:
+                        from egress_dataimpulse import DataImpulseProxyRouter
+                    except ImportError:
+                        from agents.egress_dataimpulse import DataImpulseProxyRouter
 
-                    return DataImpulseProxyRouter.get_proxy_url(geo)
+                    return DataImpulseProxyRouter.get_proxy_url(geo, session_id=session_id)
                 if name == "public_proxy_pool":
-                    from egress_public_pool import EgressPublicPoolProvider
+                    try:
+                        from egress_public_pool import EgressPublicPoolProvider
+                    except ImportError:
+                        from agents.egress_public_pool import EgressPublicPoolProvider
 
                     return EgressPublicPoolProvider.get_proxy_url()
                 return None  # Other routes use direct/tunnel connections

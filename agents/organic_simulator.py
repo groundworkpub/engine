@@ -15,6 +15,7 @@ and stays within the project's $0 infrastructure budget.
 import argparse
 import asyncio
 import logging
+import math
 import os
 import random
 import sys
@@ -205,6 +206,25 @@ class ReferralContext:
     extra_headers: dict[str, str] = field(default_factory=dict)
 
 
+def _extract_clean_query(referrer_url: str) -> str:
+    """Extracts the raw keyword from a Google redirect/search URL.
+
+    Handles both the modern `/search?q=...` form and the legacy
+    `/url?q=...&url=<dest>` redirect form used by organic SERP clicks.
+    Falls back to the bare hostname so `keyword_queried` never stores a
+    full verbose redirect URL or an empty string.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(referrer_url)
+        if parsed.hostname in ("www.google.com", "google.com"):
+            q = urllib.parse.parse_qs(parsed.query).get("q")
+            if q and q[0]:
+                return q[0]
+    except Exception:
+        pass
+    return urllib.parse.urlsplit(referrer_url).hostname or referrer_url
+
+
 def generate_referral_context(
     article_slug: str,
     article_title: str,
@@ -352,14 +372,33 @@ def generate_referral_context(
         )
 
     elif channel == "tier2_buffer":
-        # Emulate traffic arriving from verified DR 90+ Tier-2 assets (BACKLINK-REGISTRY.md)
+        # Emulate traffic arriving from verified Tier-2 assets (BACKLINK-REGISTRY.md).
+        # All URLs curl-verified HTTP 200 on 2026-09-10 — zero fabricated routes.
+        verified_devto = {
+            "money": ["analysis-mortgage-rates-today-september-2026-a-pragmatic-analysis-55lc"],
+            "home": ["analysis-heat-pump-vs-gas-furnace-in-2026-15-year-lifecycle-cost-and-sub-zero-efficiency-guide-134m"],
+            "tech": ["analysis-optimize-solar-energy-storage-with-re-pilot-5fh6"],
+            "body": ["analysis-zone-2-training-and-mitochondrial-density-the-150-minute-protocol-for-desk-bound-adults-59i3"],
+            "life": ["analysis-southwest-lounges-and-a-new-premium-credit-card-are-coming-in-2027-4n0d"],
+        }
+        verified_hf = [
+            "https://huggingface.co/datasets/elenagroundwork/mortgage-escrow-benchmarks-2026",
+            "https://huggingface.co/datasets/elenagroundwork/nem3-utility-rate-benchmarks-2026",
+            "https://huggingface.co/datasets/elenagroundwork/glp1-peptide-dosage-benchmarks-2026",
+            "https://huggingface.co/datasets/elenagroundwork/ev-depreciation-kwh-benchmarks-2026",
+            "https://huggingface.co/datasets/elenagroundwork/llm-api-pricing-latency-2026",
+        ]
+        p = pillar.lower().strip()
+        devto_slug = (verified_devto.get(p) or verified_devto["money"])[0]
         t2_sources = [
-            f"https://dev.to/groundworkpub/{article_slug}",
+            f"https://dev.to/groundworkpub/{devto_slug}",
             "https://groundworkpub.github.io/",
-            "https://gworky.blogspot.com/",
+            f"https://gworky.blogspot.com/search/label/{p}",
             "https://telegra.ph/best-ai-note-taking-app-2026-meeting-vs-personal-notes-09-02",
-            "https://huggingface.co/datasets/elenagroundwork/groundwork-tech-2026",
-            "https://doi.org/10.5281/zenodo.22011566",
+            random.choice(verified_hf),
+            "https://doi.org/10.5281/zenodo.22040427",
+            "https://deregulationnation.substack.com/",
+            "https://tbphx.tumblr.com/",
         ]
         referrer = random.choice(t2_sources)
         return ReferralContext(
@@ -398,27 +437,39 @@ class HumanPhysics:
     Generates authentic human motion curves, reading timings, and micro-pause
     patterns that match real browser session telemetry for Tier-1 readers.
 
-    AdSense / Mediavine Safe-Harbor bounds:
-      • Dwell time:  45–120 seconds  (avg 82s for 750-word article)
-      • Scroll depth: 70–100%        (readers who land typically read through)
+    AdSense / Mediavine Safe-Harbor bounds (post-2026-09-10 naturalization):
+      • Dwell time:  lognormal long-tailed, ≈8s for bounces up to 300s ceiling
+        (median ~60–100s for a 750-word article, no hard 45/120 clamp saturation)
+      • Scroll depth: 12% bounce (0–30%), 18% partial (30–65%), 70% full read
+        (65–100%)
       • Micro-pauses: 0.3–2.1s per scroll step (re-read / highlight behavior)
     """
 
     @staticmethod
     def calculate_reading_time_seconds(word_count: int) -> int:
         """
-        Dwell time model: 180–240 WPM with skimming variance.
-        Hard clamped to 45–120s to stay within natural human session bounds
-        and well below any IVT (Invalid Traffic) detection thresholds.
+        Dwell time model: lognormal-distributed with skimming variance, shaped
+        like real session telemetry (right-skewed, long-tailed). Lognormal
+        avoids the machine-visible 45s/120s floor/ceiling saturation that a
+        hard clamp produces.
+
+        Per-page deltas are taken and multiplied by a per-persona speed anchor
+        (captures "this reader reads slowly" across pages), then a lognormal
+        multiplier injects per-page variance with occasional skimmers/hoverers.
         """
-        wpm = random.uniform(180, 240)
+        wpm = random.uniform(200, 260)
         base_seconds = (word_count / wpm) * 60.0
-        # Skimming (0.55) vs deep-reading (1.0) mode selection
-        reading_mode = random.choice(["skim", "skim", "read", "read", "deep"])
-        mode_factor = {"skim": 0.55, "read": 0.80, "deep": 1.0}[reading_mode]
-        dwell = int(base_seconds * mode_factor)
-        # Hard clamp: 45s minimum (engagement signal), 120s maximum (natural cap)
-        return max(45, min(dwell, 120))
+        # Lognormal multiplier: median ~1.0, right tail up to ~2.5x for deep
+        # readers, left tail down to ~0.35x for quick skimmers. Inverse-transform:
+        # draw norm -> exp(norm) ~ lognormal(mu=delta, sigma). mu stored unused.
+        lognorm_mu = -0.08
+        lognorm_sigma = 0.55
+        mult = math.exp(random.gauss(lognorm_mu, lognorm_sigma))
+        dwell = int(base_seconds * mult)
+        # No hard 45/120 clamp: allow the natural long-tailed spread, but cap an
+        # absurd outlier (a 3000-word deep read at slow WPM could exceed 900s) at
+        # 300s — a generous ceiling that never saturates normal sessions.
+        return max(8, min(dwell, 300))
 
     @staticmethod
     def calculate_topical_hop_dwell() -> int:
@@ -623,6 +674,7 @@ class SessionTelemetry:
     article_slug: str
     geo_region: str
     persona_name: str
+    search_query: str | None = None
     dwell_time_seconds: int = 0
     scroll_depth_percent: int = 0
     actions_triggered: list[str] = field(default_factory=list)
@@ -726,6 +778,15 @@ class AdvancedOrganicSimulator:
         self.allow_analytics = allow_analytics
 
     def resolve_proxy(self, geo_region: str, session_id: str) -> str | None:
+        # Triage C geo-coherence guard (ADR-0006): only target EN geos may route
+        # through residential egress. Hubs like ID/SG/datacenter exits (K1.3)
+        # stay quarantined to keep GA4/GSC attribution coherent.
+        if geo_region.lower().replace("gb", "uk") not in ("us", "uk", "au", "ca"):
+            logger.warning(
+                "Geo-coherence guard: non-target geo '%s' denied residential egress.",
+                geo_region,
+            )
+            return None
         if self.proxy_url:
             return self.proxy_url
         try:
@@ -766,6 +827,7 @@ class AdvancedOrganicSimulator:
             article_slug=target.article_slug,
             geo_region=persona.geo_region,
             persona_name=persona.name,
+            search_query=referral.search_query,
         )
 
         logger.info(
@@ -987,14 +1049,30 @@ class AdvancedOrganicSimulator:
         if not self.dry_run:
             _, effective_proxy = await verify_proxy_egress(candidate_proxy, persona.geo_region)
 
-        dwell = HumanPhysics.calculate_reading_time_seconds(target.word_count)
-        scroll = random.randint(65, 100)
+        roll = random.random()
+        if roll < 0.12:
+            bounce = True
+            scroll = random.randint(0, 30)
+        elif roll < 0.30:
+            bounce = False
+            scroll = random.randint(30, 65)
+        else:
+            bounce = False
+            scroll = random.randint(65, 100)
+
+        dwell = (
+            random.randint(8, 28)
+            if bounce
+            else HumanPhysics.calculate_reading_time_seconds(target.word_count)
+        )
 
         actions = [
             f"arrived_from_{referral.channel}",
             f"read_article_{target.word_count}_words",
             f"scrolled_{scroll}pct",
         ]
+        if bounce:
+            actions.append("quick_bounce_abandoned")
 
         if referral.search_query:
             actions.append(f"searched_query:{referral.search_query[:30]}")
@@ -1015,6 +1093,7 @@ class AdvancedOrganicSimulator:
             article_slug=target.article_slug,
             geo_region=persona.geo_region,
             persona_name=persona.name,
+            search_query=referral.search_query,
             dwell_time_seconds=dwell,
             scroll_depth_percent=scroll,
             actions_triggered=actions,
@@ -1024,7 +1103,7 @@ class AdvancedOrganicSimulator:
         # Ping canonical URL with authentic referral headers
         try:
             client_kwargs: dict[str, Any] = {"timeout": 15.0, "follow_redirects": True}
-            effective_proxy = proxy_url or self.proxy_url
+            effective_proxy = effective_proxy or self.proxy_url
             if effective_proxy:
                 client_kwargs["proxy"] = effective_proxy
             async with httpx.AsyncClient(**client_kwargs) as client:
@@ -1066,7 +1145,7 @@ class AdvancedOrganicSimulator:
             "article_slug": t.article_slug,
             "geo_region": t.geo_region,
             "target_platform": platform,
-            "keyword_queried": t.referrer_url,
+            "keyword_queried": t.search_query or _extract_clean_query(t.referrer_url),
             "dwell_time_seconds": t.dwell_time_seconds,
             "scroll_depth_percent": t.scroll_depth_percent,
             "actions_triggered": t.actions_triggered,
@@ -1328,6 +1407,14 @@ async def main() -> None:
             preferred_channel=args.channel,
         )
 
+        # Humanized inter-session spacing: quick sequential reads look like a
+        # bot scheduler; real visitors arrive at irregular 12–190s gaps with a
+        # light bimodal (some sessions back-to-back, most well apart).
+        if idx > 1 or random.random() < 0.35:
+            gap = random.choice([random.uniform(12, 45), random.uniform(60, 190)])
+            logger.info(f"⏳ Cooldown before next session: {gap:.0f}s")
+            await asyncio.sleep(gap)
+
         logger.info(f"\n--- Target [{idx}/{len(targets)}]: {target.article_title[:45]}... ---")
         logger.info(f"👤 Persona: {persona.name} ({persona.city}, {persona.geo_region})")
         logger.info(f"🔗 Channel: {referral.channel} (Referrer: {referral.referrer_url[:60]}...)")
@@ -1345,8 +1432,6 @@ async def main() -> None:
                 target_url=target.canonical_url,
                 pillar=target.pillar,
                 pogo_competitor=True,
-                min_dwell_seconds=45,
-                max_dwell_seconds=90,
             )
             logger.info(f"[✔] Ghost journey finished for: {chosen_kw} (status: {telemetry_dict.get('status')})")
         elif args.browser:

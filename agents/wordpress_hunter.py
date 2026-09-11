@@ -128,7 +128,7 @@ def seed_database_targets() -> int:
     return inserted
 
 
-def probe_site_capabilities(domain: str, use_proxy: bool = False) -> dict[str, Any]:
+def probe_site_capabilities(domain: str, use_proxy: bool = False, article_url: str | None = None) -> dict[str, Any]:
     """Probes a target WordPress domain for XML-RPC, Comment forms, and Open Registration."""
     domain = domain.strip().lower()
     clean_domain = domain.replace("https://", "").replace("http://", "").rstrip("/")
@@ -142,9 +142,41 @@ def probe_site_capabilities(domain: str, use_proxy: bool = False) -> dict[str, A
         "comments_url": f"{base_url}/wp-comments-post.php",
         "registration_enabled": False,
         "registration_url": f"{base_url}/wp-login.php?action=register",
+        "sample_article": None,
+        "redirected": False,
     }
 
     with get_http_client(use_proxy=use_proxy) as client:
+        # 0. Cross-host redirect guard: a WP domain that 30x-redirects to a DIFFERENT host
+        #    (e.g. blogs.harvard.edu -> archive.blogs.harvard.edu) is a decommissioned/legacy
+        #    installation — posting there is dead-end. Abort the probe before any capability
+        #    can be mis-attributed to the (redirecting) registered domain.
+        #    A www-only redirect (smashingmagazine.com -> www.smashingmagazine.com) is NORMAL
+        #    and the probe proceeds against the canonical host.
+        def _norm_host(h: str) -> str:
+            return h[4:] if h.startswith("www.") else h
+
+        try:
+            home_resp = client.get(f"{base_url}/")
+            resolved = home_resp.request.url.host
+            if resolved and resolved != clean_domain:
+                legacy_tokens = ("archive.", "legacy.", "old.", "web.archive.org")
+                is_legacy = any(t in resolved for t in legacy_tokens)
+                crossed_domain = _norm_host(resolved) != _norm_host(clean_domain)
+                if is_legacy or crossed_domain:
+                    capabilities["redirected"] = True
+                    logger.info(
+                        f"[{clean_domain}] redirects to {resolved} ({home_resp.status_code}) — "
+                        "marking redirected, skipping capability probe"
+                    )
+                    return capabilities
+                base_url = f"https://{resolved}"
+                capabilities["comments_url"] = f"{base_url}/wp-comments-post.php"
+                capabilities["xmlrpc_url"] = f"{base_url}/xmlrpc.php"
+                capabilities["registration_url"] = f"{base_url}/wp-login.php?action=register"
+        except Exception as e:
+            logger.debug(f"[{clean_domain}] redirect guard probe failed: {e}")
+
         # 1. Probe XML-RPC Pingback capability
         try:
             xml_payload = (
@@ -159,20 +191,83 @@ def probe_site_capabilities(domain: str, use_proxy: bool = False) -> dict[str, A
         except Exception as e:
             logger.debug(f"[{clean_domain}] XML-RPC probe failed: {e}")
 
-        # 2. Probe HTML / REST Comment Capability
-        try:
-            resp = client.get(f"{base_url}/wp-json/wp/v2/comments")
-            if resp.status_code in (200, 400):
-                capabilities["comments_enabled"] = True
-                capabilities["comments_url"] = f"{base_url}/wp-json/wp/v2/comments"
-                logger.info(f"[{clean_domain}] REST comments endpoint available (HTTP {resp.status_code})")
-            else:
-                resp_form = client.get(capabilities["comments_url"])
-                if resp_form.status_code in (200, 405, 302):
-                    capabilities["comments_enabled"] = True
-                    logger.info(f"[{clean_domain}] HTML comments endpoint available (HTTP {resp_form.status_code})")
-        except Exception as e:
-            logger.debug(f"[{clean_domain}] Comment probe failed: {e}")
+        # 2. Probe Comment Capability (authoritative, per-post)
+        #    NOTE: GET /wp-json/wp/v2/comments returning 200 is a READ endpoint present on
+        #    nearly all WordPress installs — it does NOT mean comments are open for posting.
+        #    Authoritative signal: `comment_status` on recent published posts via the posts REST
+        #    endpoint (WP sets this to "open"/"closed" from the Discussion settings per post),
+        #    or — strongest — the real HTML comment form on a concrete article.
+        comment_probed: bool = False
+        if article_url and len(article_url) > len(base_url):
+            try:
+                art = client.get(article_url)
+                if art.status_code == 200:
+                    low = art.text.lower()
+                    if ("comment_post_ID" in low or "wp-comments-post.php" in low) and "comments are closed" not in low:
+                        capabilities["comments_enabled"] = True
+                        capabilities["comments_url"] = f"{base_url}/wp-comments-post.php"
+                        capabilities["sample_article"] = article_url
+                        comment_probed = True
+                        logger.info(f"[{clean_domain}] HTML comment form open on discovered article {article_url}")
+            except Exception as e:
+                logger.debug(f"[{clean_domain}] article HTML probe failed: {e}")
+
+        if not comment_probed:
+            try:
+                posts_resp = client.get(
+                    f"{base_url}/wp-json/wp/v2/posts",
+                    params={"per_page": "5", "_fields": "link,comment_status", "orderby": "date", "order": "desc"},
+                )
+                if posts_resp.status_code == 200:
+                    try:
+                        posts = posts_resp.json()
+                        open_posts = [p for p in posts if p.get("comment_status") == "open"]
+                    except ValueError:
+                        posts, open_posts = [], []
+                    if open_posts:
+                        capabilities["comments_enabled"] = True
+                        capabilities["comments_url"] = f"{base_url}/wp-json/wp/v2/comments"
+                        capabilities["sample_article"] = open_posts[0].get("link")
+                        comment_probed = True
+                        logger.info(f"[{clean_domain}] REST POST default-open (comment_status=open on {len(open_posts)} recent posts)")
+                    elif posts and not article_url:
+                        comment_probed = True
+                        logger.info(f"[{clean_domain}] REST comment_status=closed on all {len(posts)} recent posts")
+                elif posts_resp.status_code in (404, 401, 403):
+                    logger.debug(f"[{clean_domain}] REST posts unavailable (HTTP {posts_resp.status_code}) — falling back to HTML probe")
+            except Exception as e:
+                logger.debug(f"[{clean_domain}] REST posts probe failed: {e}")
+
+        # HTML homepage-crawl fallback when neither a discovered article nor REST gave a verdict
+        if not capabilities["comments_enabled"] and not comment_probed:
+            candidates: list[str] = []
+            try:
+                home = client.get(f"{base_url}/")
+                if home.status_code == 200:
+                    m_ids = re.findall(r'(?:article|entry-title|post-title)[^"<>]*href="(https?://[^"#]+)"|href="(https?://[^"#]+)"[^>]*>', home.text)
+                    for a, b in m_ids:
+                        u = (a or b).rstrip("/")
+                        if u not in candidates and len(u) > len(base_url):
+                            candidates.append(u)
+            except Exception as e:
+                logger.debug(f"[{clean_domain}] homepage scrape failed: {e}")
+            for u in candidates[:5]:
+                try:
+                    art = client.get(u)
+                    if art.status_code != 200:
+                        continue
+                    low = art.text.lower()
+                    if ("comment_post_ID" in low or "wp-comments-post.php" in low) and "comments are closed" not in low:
+                        capabilities["comments_enabled"] = True
+                        capabilities["comments_url"] = f"{base_url}/wp-comments-post.php"
+                        capabilities["sample_article"] = u
+                        comment_probed = True
+                        logger.info(f"[{clean_domain}] HTML comment form open on {u}")
+                        break
+                except Exception:
+                    continue
+            if not capabilities["comments_enabled"] and len(candidates):
+                logger.info(f"[{clean_domain}] HTML probe found no open comment form across {len(candidates[:5])} articles")
 
         # 3. Probe Open Contributor Registration
         try:
@@ -200,6 +295,7 @@ def update_probed_capabilities(cap: dict[str, Any]) -> None:
             comments_url = %s,
             registration_enabled = %s,
             registration_url = %s,
+            last_article_scraped = COALESCE(%s, last_article_scraped),
             last_probed_at = NOW(),
             updated_at = NOW()
         WHERE domain = %s
@@ -211,6 +307,7 @@ def update_probed_capabilities(cap: dict[str, Any]) -> None:
             cap["comments_url"],
             cap["registration_enabled"],
             cap["registration_url"],
+            cap.get("sample_article"),
             cap["domain"],
         ),
     )
@@ -267,6 +364,35 @@ def discover_dynamic_articles(pillar: str, limit: int = 5, use_proxy: bool = Fal
     return discovered_urls
 
 
+def upsert_discovered_targets(urls: list[str], pillar: str) -> int:
+    """Records discovered article URLs into wp_target_sites so they get probed next run."""
+    conn = get_db_connection()
+    conn.autocommit = True
+    cur = conn.cursor()
+    inserted = 0
+    for url in urls:
+        try:
+            host = urlparse(url).hostname or ""
+        except Exception:
+            continue
+        if not host:
+            continue
+        cur.execute(
+            """
+            INSERT INTO public.wp_target_sites (domain, pillar, comments_url, xmlrpc_url, last_article_scraped)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (domain) DO UPDATE
+            SET last_article_scraped = EXCLUDED.last_article_scraped,
+                updated_at = NOW()
+            """,
+            (host, pillar, f"https://{host}/wp-comments-post.php", f"https://{host}/xmlrpc.php", url),
+        )
+        inserted += 1
+    cur.close()
+    conn.close()
+    return inserted
+
+
 def print_stats() -> None:
     """Prints current status of WordPress target inventory."""
     conn = get_db_connection()
@@ -310,6 +436,7 @@ def main() -> None:
     parser.add_argument("--probe", action="store_true", help="Probe endpoints for capability flags")
     parser.add_argument("--discover", action="store_true", help="Run dynamic Google Dork discovery")
     parser.add_argument("--limit", type=int, default=10, help="Max sites to probe or discover")
+    parser.add_argument("--force", action="store_true", help="Re-probe all targets, not just unprobed ones")
     parser.add_argument("--proxy", action="store_true", help="Route traffic via DataImpulse residential proxy")
     parser.add_argument("--stats", action="store_true", help="Print summary statistics")
     args = parser.parse_args()
@@ -318,7 +445,7 @@ def main() -> None:
         print_stats()
         return
 
-    if args.seed_only or args.probe or args.discover or True:
+    if args.seed_only or args.probe or args.discover:
         # Always ensure seeds exist
         seed_database_targets()
 
@@ -326,14 +453,18 @@ def main() -> None:
         conn = get_db_connection()
         cur = conn.cursor()
         pillar_clause = "" if args.pillar == "all" else f"AND pillar = '{args.pillar}'"
-        cur.execute(f"SELECT domain FROM public.wp_target_sites WHERE last_probed_at IS NULL {pillar_clause} ORDER BY dr_rating DESC LIMIT {args.limit}")
+        probed_clause = "" if args.force else "AND last_probed_at IS NULL"
+        cur.execute(
+            f"SELECT domain, last_article_scraped FROM public.wp_target_sites "
+            f"WHERE 1=1 {probed_clause} {pillar_clause} ORDER BY dr_rating DESC LIMIT {args.limit}"
+        )
         rows = cur.fetchall()
         cur.close()
         conn.close()
 
         logger.info(f"Probing capabilities for {len(rows)} targets...")
-        for (domain,) in rows:
-            cap = probe_site_capabilities(domain, use_proxy=args.proxy)
+        for domain, article_url in rows:
+            cap = probe_site_capabilities(domain, use_proxy=args.proxy, article_url=article_url)
             update_probed_capabilities(cap)
             time.sleep(1.0)
 
@@ -343,6 +474,9 @@ def main() -> None:
         print(f"\nDiscovered {len(urls)} live WordPress URLs for {pillar}:")
         for u in urls:
             print(f"  → {u}")
+        if urls:
+            stored = upsert_discovered_targets(urls, pillar)
+            print(f"\nRecorded {stored} target domains into wp_target_sites (run --probe to evaluate them).")
 
 
 if __name__ == "__main__":

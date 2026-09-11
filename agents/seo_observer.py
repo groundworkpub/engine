@@ -455,8 +455,14 @@ def find_related_articles(
     all_articles: list[dict],
     pillar: str = "",
     top_n: int = 2,
+    hub_bias: bool = True,
 ) -> list[dict]:
-    """Find top_n most similar articles within the same topical pillar using TF-IDF on title+excerpt."""
+    """Find top_n most similar articles within the same topical pillar using TF-IDF on title+excerpt.
+
+    When hub_bias is True, weights candidate host articles by topological authority
+    (flagship status, comprehensive depth >= 1500 words, reader engagement) so authoritative
+    cluster hubs preferentially funnel link equity to the target.
+    """
     orphan_text = f"{orphan_title} {orphan_excerpt}"
     scored = []
     for art in all_articles:
@@ -466,9 +472,25 @@ def find_related_articles(
         if pillar and art.get("pillar") != pillar:
             continue
         candidate_text = f"{art.get('title', '')} {art.get('excerpt', '')}"
-        score = _tfidf_similarity(orphan_text, candidate_text)
-        if score >= 0.40:
-            scored.append((score, art))
+        sim = _tfidf_similarity(orphan_text, candidate_text)
+        if sim >= 0.35:
+            # Topological Authority Multiplier
+            auth_multiplier = 1.0
+            if hub_bias:
+                if art.get("is_flagship"):
+                    auth_multiplier += 0.35
+                word_count = art.get("word_count") or 0
+                if word_count >= 1500:
+                    auth_multiplier += 0.20
+                elif word_count >= 1000:
+                    auth_multiplier += 0.10
+
+                views = art.get("view_count") or 0
+                if views > 100:
+                    auth_multiplier += min(0.30, math.log10(views) * 0.1)
+
+            final_score = sim * auth_multiplier
+            scored.append((final_score, art))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [art for _, art in scored[:top_n]]
 
@@ -1042,8 +1064,72 @@ def detect_cannibalization(articles: list[dict]) -> list[dict[str, Any]]:
     return conflicts
 
 
+OPENSERP_URL = _env("OPENSERP_URL", "http://127.0.0.1:7001")
+
+# Known Google PAA lazy-load artifact that OpenSERP sometimes concatenates onto
+# question text when the browser snapshot catches the still-loading module.
+_PAA_ARTIFACT_RE = re.compile(
+    r"(Terjadi error\.\s*Coba lagi nanti\.|An error occurred\.\s*Please try again\.)$",
+    re.IGNORECASE,
+)
+
+
+def _query_openserp_features(keyword: str, limit: int = 10) -> dict[str, Any]:
+    """Query self-hosted OpenSERP for a keyword and return serp_features.
+
+    Uses the mega endpoint with google+bing so PAA/PASF/answer-box modules
+    (which only browser engines emit) are captured. Returns {"engine"→feature}
+    mapping keyed by feature type, or empty dict when OpenSERP is unreachable.
+    """
+    try:
+        url = f"{OPENSERP_URL}/mega/search"
+        params = {
+            "text": keyword,
+            "engines": "google,bing",
+            "limit": str(limit),
+            "features": "true",
+        }
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+        envelope = resp.json()
+    except Exception as e:
+        log.debug("OpenSERP features query skipped for %r: %s", keyword, e)
+        return {}
+    features: dict[str, list[dict[str, Any]]] = {}
+    for feat in envelope.get("serp_features", []):
+        ftype = feat.get("type") or ""
+        features.setdefault(ftype, []).append(feat)
+    return features
+
+
+def _clean_paa_question(q: str) -> str:
+    q = _PAA_ARTIFACT_RE.sub("", q.strip()).strip()
+    return q
+
+
 def extract_search_intent_paa(keyword: str) -> list[str]:
-    """Fetch People Also Ask / related questions for search intent enrichment."""
+    """Fetch People Also Ask / related questions for search intent enrichment.
+
+    OpenSERP-first (real PAA from google+bing), falling back to Google
+    suggest, then domain-aware templates. PAA module question strings are
+    taken from the `title` field and stripped of known lazy-load artifacts.
+    """
+    try:
+        features = _query_openserp_features(keyword)
+        for ftype in ("people_also_ask", "related_questions"):
+            items = features.get(ftype, [])
+            questions: list[str] = []
+            for feat in items:
+                for item in feat.get("items", []) or []:
+                    q = _clean_paa_question(item.get("title") or "")
+                    if q:
+                        questions.append(q)
+            if questions:
+                return questions[:8]
+    except Exception as e:
+        log.debug("OpenSERP PAA extraction skipped: %s", e)
+
     try:
         url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={quote(keyword)}"
         with httpx.Client(timeout=5) as client:
@@ -1059,6 +1145,92 @@ def extract_search_intent_paa(keyword: str) -> list[str]:
         f"What are the benefits of {keyword}?",
         f"Is {keyword} worth it in 2026?",
     ]
+
+
+def harvest_paa_pasf(
+    keyword: str,
+    *,
+    pillar: str | None = None,
+    seed_keyword: str | None = None,
+    url_context: str | None = None,
+) -> dict[str, Any]:
+    """G5 — harvest real People Also Ask + related-search intents and persist.
+
+    Queries OpenSERP for the keyword, normalizes every PAA/PASF module, and
+    upserts the questions into `seo_paa_questions`. The `source` column obeys
+    the CHECK constraint ('google_paa' | 'bing_paa' | 'google_suggest').
+
+    Returns a summary dict; callers must always receive a dict (never raise)
+    so the pipeline can record partial success.
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"keyword": keyword, "harvested": 0, "source": "skipped", "error": "supabase_missing"}
+
+    source = "google_suggest"
+    features = _query_openserp_features(keyword)
+    questions: list[tuple[str, str]] = []  # (question, source)
+
+    if features:
+        for ftype in ("people_also_ask", "related_questions"):
+            for feat in features.get(ftype, []):
+                engine = feat.get("engine") or ""
+                src = "bing_paa" if engine == "bing" else "google_paa"
+                source = src
+                for item in feat.get("items", []) or []:
+                    q = _clean_paa_question(item.get("title") or item.get("text") or "")
+                    if q:
+                        questions.append((q, src))
+
+    # PASF — related searches module (not questions, but same storage table).
+    for feat in features.get("related_searches", []) or []:
+        engine = feat.get("engine") or ""
+        src = "bing_paa" if engine == "bing" else "google_paa"
+        for item in feat.get("items", []) or []:
+            q = _clean_paa_question(item.get("title") or item.get("text") or "")
+            if q:
+                questions.append((q, src))
+
+    if features and not questions:
+        # Transient browser-capture degrade: retry once before falling back.
+        retry = _query_openserp_features(keyword)
+        for ftype in ("people_also_ask", "related_questions", "related_searches"):
+            for feat in retry.get(ftype, []):
+                engine = feat.get("engine") or ""
+                src = "bing_paa" if engine == "bing" else "google_paa"
+                source = src
+                for item in feat.get("items", []) or []:
+                    q = _clean_paa_question(item.get("title") or item.get("text") or "")
+                    if q:
+                        questions.append((q, src))
+
+    if not questions:
+        # Fallback: Google suggest (legacy source tag honored by CHECK).
+        for q in extract_search_intent_paa(keyword):
+            if not q.startswith(("How does ", "What are the benefits of ", "Is ")):
+                questions.append((q, "google_suggest"))
+
+    rows = [
+        {
+            "question": q,
+            "pillar": pillar,
+            "source": src,
+            "seed_keyword": seed_keyword or keyword,
+            "url_context": url_context,
+            "captured_at": datetime.now(UTC).isoformat(),
+        }
+        for q, src in questions
+    ]
+    if rows:
+        supa_upsert("seo_paa_questions", rows, on_conflict="question")
+
+    ok = sum(1 for _, src in questions if src != "google_suggest")
+    return {
+        "keyword": keyword,
+        "harvested": len(questions),
+        "openserp_sourced": ok,
+        "source": source,
+        "pillar": pillar,
+    }
 
 
 def get_decaying_articles(supabase: Any | None = None) -> list[dict[str, Any]]:
@@ -1120,13 +1292,35 @@ def main() -> None:
     parser.add_argument("--priority-max", type=int, default=1, help="Max priority band to inspect via GSC (0=P0 only, 1=P0+P1)")
     parser.add_argument("--aeo", help="Score AEO/GEO readiness for a given article slug")
     parser.add_argument("--cannibalization", action="store_true", help="Detect keyword cannibalization across published articles")
-    parser.add_argument("--paa", help="Extract People Also Ask questions for a keyword")
+    parser.add_argument("--paa", help="Extract People Also Ask questions for a keyword (read-only)")
+    parser.add_argument("--harvest-paa", help="G5: persist PAA/PASF questions for a keyword into seo_paa_questions")
+    parser.add_argument("--harvest-pillar", default="", help="Pillar tag for harvested PAA rows (money|body|home|life|tech)")
+    parser.add_argument("--harvest-paa-all", action="store_true", help="G5: persist PAA/PASF for every config.yml keyword_scout seed")
     parser.add_argument("--decay", action="store_true", help="List decaying articles needing remediation")
     args = parser.parse_args()
 
     if args.paa:
         questions = extract_search_intent_paa(args.paa)
-        print(json.dumps({"keyword": args.paa, "paa_questions": questions}, indent=2))
+        print(json.dumps({"keyword": args.paa, "source": "openserp|suggest", "paa_questions": questions}, indent=2))
+        return
+
+    if args.harvest_paa:
+        result = harvest_paa_pasf(args.harvest_paa, pillar=args.harvest_pillar or None)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.harvest_paa_all:
+        import yaml
+
+        cfg_path = Path(__file__).resolve().parent / "config.yml"
+        cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+        seeds: dict[str, list[str]] = (cfg.get("keyword_scout") or {}).get("seeds", {}) or {}
+        results = []
+        for pillar, kws in seeds.items():
+            for kw in kws:
+                results.append(harvest_paa_pasf(kw, pillar=pillar))
+        totals = {"pillars": list(seeds.keys()), "keywords": sum(len(v) for v in seeds.values()), "results": results}
+        print(json.dumps(totals, indent=2))
         return
 
     if not SUPABASE_URL or not SUPABASE_KEY:

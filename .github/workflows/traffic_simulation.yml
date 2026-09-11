@@ -12,7 +12,7 @@ on:
       allow_ga4:
         description: "Allow GA4 & GTM network requests (AdSense remains 100% blocked)"
         required: false
-        default: "true"
+        default: "false"
       slug:
         description: "Target specific article slug (optional)"
         required: false
@@ -23,6 +23,10 @@ on:
         default: ""
       run_brand_booster:
         description: "Execute Stage 1: Brand Keyword Booster (search-only queries)"
+        required: false
+        default: "true"
+      run_rank_adaptive:
+        description: "Execute Rank-Adaptive Behavioral Controller (SERP triangulation; founder-approved by design)"
         required: false
         default: "true"
 
@@ -82,9 +86,9 @@ jobs:
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
         run: |
           echo "🚀 Executing Stage 2: Organic Browser Engagement Simulator"
-          GA4_FLAG="--allow-ga4"
-          if [ "${{ github.event.inputs.allow_ga4 }}" = "false" ]; then
-            GA4_FLAG=""
+          GA4_FLAG=""
+          if [ "${{ github.event.inputs.allow_ga4 }}" = "true" ]; then
+            GA4_FLAG="--allow-ga4"
           fi
 
           SLUG_FLAG=""
@@ -100,19 +104,17 @@ jobs:
           LIMIT="${{ github.event.inputs.limit || '2' }}"
           PYTHONPATH=agents python agents/organic_simulator.py --browser --limit "$LIMIT" $GA4_FLAG $SLUG_FLAG $CHANNEL_FLAG
 
-      - name: Stage 3 — Rank-Adaptive Ghost User Loop (SERP Pogo-Sticking)
+      - name: Stage 3 — Rank-Adaptive Controller (Founder-Approved SERP Triangulation)
+        if: ${{ github.event.inputs.run_rank_adaptive == 'true' || github.event_name == 'schedule' }}
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SITE_URL: https://gworky.com
-          GSC_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON_B64 }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLOUDFLARE_EGRESS_WORKER_URL: ${{ secrets.CLOUDFLARE_EGRESS_WORKER_URL }}
           DATAIMPULSE_LOGIN: ${{ secrets.DATAIMPULSE_LOGIN }}
           DATAIMPULSE_PASSWORD: ${{ secrets.DATAIMPULSE_PASSWORD }}
           DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
         run: |
-          echo "🚀 Executing Stage 3: Closed-Loop Rank-Adaptive Ghost User Engine"
-          PYTHONPATH=agents python agents/rank_adaptive_controller.py --max-targets 2
+          echo "🚀 Executing Stage 3: Rank-Adaptive Behavioral Controller"
+          PYTHONPATH=agents python agents/rank_adaptive_controller.py --dry-run

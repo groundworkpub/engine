@@ -53,6 +53,33 @@ def _load_env_local() -> None:
 _load_env_local()
 _searchapi_exhausted: bool = False
 
+OPENSERP_URL: str = os.getenv("OPENSERP_URL", "http://127.0.0.1:7001")
+
+
+def _query_openserp_organic(query: str, limit: int = 10) -> tuple[list[dict[str, Any]], bool]:
+    """Probes local self-hosted OpenSERP for organic results + PAA presence (T6.3, $0).
+
+    Returns (organic_results, paa_present). Empty tuple (False) on upstream failure,
+    mirroring the SearchAPI circuit-breaker semantics but free and quota-less.
+    """
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(
+                f"{OPENSERP_URL}/mega/search",
+                params={"text": query, "engines": "google", "limit": max(10, limit), "features": "true"},
+            )
+            if resp.status_code != 200:
+                logger.info("OpenSERP probe non-200 (%s) for '%s'.", resp.status_code, query)
+                return [], False
+            data = resp.json()
+            organic = data.get("results", []) or []
+            feature_types = {f.get("type") for f in data.get("serp_features", []) or []}
+            paa_present = bool("people_also_ask" in feature_types or "related_questions" in feature_types)
+            return organic, paa_present
+    except Exception as e:
+        logger.debug("OpenSERP probe error for '%s': %s", query, e)
+        return [], False
+
 
 # ─── SEED EXPANSION CONFIGURATION ─────────────────────────────────────────────
 
@@ -139,11 +166,25 @@ def expand_seeds(pillars: list[str] | None = None) -> list[dict[str, Any]]:
 # ─── PHASE 2: SERP WEAKNESS AUDITOR ───────────────────────────────────────────
 
 def fetch_google_autocomplete(query: str) -> list[str]:
-    """Fetches real-time search queries from Google Autocomplete."""
+    """Fetches real-time search queries from Google Autocomplete.
+
+    Routes through the DataImpulse rotating residential proxy when credentials
+    are present in .env.local (same pool OpenSERP uses), so suggest requests
+    survive Google blocking. Falls back to direct when proxy is unavailable.
+    """
     url = f"https://suggestqueries.google.com/complete/search?client=chrome&q={httpx.URL(query)}"
     headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+
+    proxy_url = ""
+    login = os.getenv("DATAIMPULSE_LOGIN")
+    password = os.getenv("DATAIMPULSE_PASSWORD")
+    host = os.getenv("DATAIMPULSE_HOST", "gw.dataimpulse.com")
+    port = os.getenv("DATAIMPULSE_PORT", "823")
+    if login and password and host and port:
+        proxy_url = f"http://{login}__cr.us:{password}@{host}:{port}"
+
     try:
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=10.0, **({"proxy": proxy_url} if proxy_url else {})) as client:
             resp = client.get(url, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
@@ -170,7 +211,24 @@ def calculate_serp_weakness(query: str, searchapi_key: str | None = None) -> dic
         score += 0.20
         signals.append("interactive_utility_intent")
 
-    # If SearchAPI key is present and not exhausted, execute deep probe
+    # OpenSERP deep probe first ($0 local, T6.3): forum/tool/PAA signals
+    organic, paa_present = _query_openserp_organic(query)
+    if organic:
+        has_forum = any("reddit.com" in (r.get("url", "") or "") or "quora.com" in (r.get("url", "") or "") for r in organic)
+        has_interactive = any("calculator" in (r.get("title", "") or "").lower() for r in organic)
+
+        if has_forum:
+            score += 0.15
+            signals.append("forum_serp_vulnerability")
+        if not has_interactive and has_high_intent:
+            score += 0.15
+            signals.append("missing_interactive_tool")
+        if paa_present:
+            score += 0.10
+            signals.append("question_module_present")
+        return _finalize_weakness(score, signals, suggestions)
+
+    # SearchAPI fallback (only when OpenSERP unreachable & quota not exhausted)
     global _searchapi_exhausted
     if searchapi_key and not _searchapi_exhausted:
         try:
@@ -196,6 +254,10 @@ def calculate_serp_weakness(query: str, searchapi_key: str | None = None) -> dic
         except Exception as e:
             logger.debug("SearchAPI probe error: %s", e)
 
+    return _finalize_weakness(score, signals, suggestions)
+
+
+def _finalize_weakness(score: float, signals: list[str], suggestions: list[str]) -> dict[str, Any]:
     final_score = min(1.0, round(score, 2))
     return {
         "weakness_score": final_score,
