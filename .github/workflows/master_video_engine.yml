@@ -19,9 +19,6 @@ on:
         required: true
         default: true
         type: boolean
-  schedule:
-    # Bi-Weekly: Every Wednesday & Sunday at 14:00 UTC (21:00 WIB)
-    - cron: '0 14 * * 0,3'
 
 jobs:
   produce_master_video:

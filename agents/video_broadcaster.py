@@ -221,16 +221,107 @@ class VideoBroadcaster:
             "-pix_fmt",
             "yuv420p",
             "-shortest",
-            output_mp4,
         ]
+        if is_shorts:
+            cmd += ["-t", "58"]
+        cmd.append(output_mp4)
 
         logger.info(f"Rendering {format_mode} video with FFmpeg...")
         res = subprocess.run(cmd, capture_output=True, timeout=180)
         if res.returncode == 0 and os.path.exists(output_mp4):
-            logger.info(f"Video successfully rendered at: {output_mp4}")
-            return True
+            specs = self.verify_video_specs(output_mp4, format_mode=format_mode)
+            if specs.get("valid"):
+                logger.info(
+                    f"Video successfully rendered & verified [{format_mode.upper()}]: "
+                    f"{specs['width']}x{specs['height']} ({specs['duration']:.1f}s) at: {output_mp4}"
+                )
+                return True
+            else:
+                logger.error(f"Rendered video failed specification verification: {specs.get('error')}")
+                return False
         logger.error(f"FFmpeg error: {res.stderr.decode('utf-8')[:400]}")
         return False
+
+    def verify_video_specs(self, video_path: str, format_mode: str = "shorts") -> dict[str, Any]:
+        """
+        Validates post-render MP4 specifications using ffprobe.
+        Guarantees:
+          - Shorts: 1080x1920 (9:16 aspect ratio), duration <= 60.5s
+          - Landscape: 1920x1080 (16:9 aspect ratio)
+          - Non-empty video and audio streams
+        """
+        if not os.path.exists(video_path):
+            return {"valid": False, "error": f"File does not exist: {video_path}"}
+
+        try:
+            probe_cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "stream=index,codec_type,width,height,duration:format=duration",
+                "-of", "json",
+                video_path,
+            ]
+            res = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
+            if res.returncode != 0:
+                return {"valid": False, "error": f"ffprobe execution failed: {res.stderr[:200]}"}
+
+            data = json.loads(res.stdout)
+            streams = data.get("streams", [])
+            format_info = data.get("format", {})
+
+            video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+            audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+            if not video_stream:
+                return {"valid": False, "error": "No video stream found in rendered MP4"}
+            if not audio_stream:
+                return {"valid": False, "error": "No audio stream found in rendered MP4"}
+
+            width = int(video_stream.get("width", 0))
+            height = int(video_stream.get("height", 0))
+            duration = float(format_info.get("duration") or video_stream.get("duration") or 0.0)
+
+            is_shorts = format_mode.lower() in ("shorts", "9:16", "vertical", "tiktok")
+
+            if is_shorts:
+                # Shorts must be vertical (height > width) with target 1080x1920 (9:16)
+                if width != 1080 or height != 1920:
+                    return {
+                        "valid": False,
+                        "error": f"Invalid Shorts resolution: {width}x{height} (expected 1080x1920 9:16)",
+                        "width": width,
+                        "height": height,
+                        "duration": duration,
+                    }
+                # YouTube Shorts strict duration limit: <= 60.5 seconds
+                if duration > 60.5:
+                    return {
+                        "valid": False,
+                        "error": f"Shorts duration {duration:.1f}s exceeds 60s YouTube Shorts limit",
+                        "width": width,
+                        "height": height,
+                        "duration": duration,
+                    }
+            else:
+                # Landscape must be horizontal (width > height) with target 1920x1080 (16:9)
+                if width != 1920 or height != 1080:
+                    return {
+                        "valid": False,
+                        "error": f"Invalid Landscape resolution: {width}x{height} (expected 1920x1080 16:9)",
+                        "width": width,
+                        "height": height,
+                        "duration": duration,
+                    }
+
+            return {
+                "valid": True,
+                "width": width,
+                "height": height,
+                "duration": duration,
+                "format_mode": format_mode,
+            }
+        except Exception as e:
+            return {"valid": False, "error": f"Verification exception: {e}"}
 
     def build_youtube_metadata(self, episode: dict[str, Any], is_shorts: bool = False) -> dict[str, Any]:
         title = episode.get("title", "Groundwork Deep Dive")
@@ -240,14 +331,17 @@ class VideoBroadcaster:
 
         if is_shorts:
             # YouTube Shorts requires #Shorts in title or description and <= 60s
-            yt_title = f"{title[:80]} #Shorts"
+            clean_title = title.replace("#Shorts", "").replace("#shorts", "").strip()
+            yt_title = f"{clean_title[:80]} #Shorts"
             description = (
                 f"{episode.get('description', '')}\n\n"
                 f"📊 Read the full research breakdown & interactive tools:\n{url}\n\n"
                 f"#Groundwork #{pillar} #Shorts #Research #EvidenceBased"
             )
+            tags = ["Groundwork", pillar, "Shorts", "YouTube Shorts", "Evidence Based", "Research", "Guide"]
         else:
-            yt_title = f"{title[:90]} | Groundwork"
+            clean_title = title.replace("#Shorts", "").replace("#shorts", "").strip()
+            yt_title = f"{clean_title[:90]} | Groundwork"
             description = (
                 f"{episode.get('description', '')}\n\n"
                 f"📖 Full interactive guide with mathematical models & data sources:\n{url}\n\n"
@@ -256,12 +350,13 @@ class VideoBroadcaster:
                 f"—\nGroundwork Media • Evidence-based guides for high-impact life decisions.\n"
                 f"#Groundwork #{pillar} #Podcast #Analysis"
             )
+            tags = ["Groundwork", pillar, "Evidence Based", "Research", "Guide", "Calculators"]
 
         return {
             "snippet": {
                 "title": yt_title,
                 "description": description,
-                "tags": ["Groundwork", pillar, "Evidence Based", "Research", "Guide", "Calculators"],
+                "tags": tags,
                 "categoryId": "27",  # Education
                 "defaultLanguage": "en",
                 "defaultAudioLanguage": "en-US",

@@ -556,20 +556,17 @@ class AccountWarmingConductor:
         logger.info(f"👤 Processing Account [{account.account_id}] ({account.email}) at Warming Stage {stage}...")
 
         if dry_run:
-            next_stage = min(4, stage + 1)
-            is_sub = (next_stage == 4)
-            self.id_mgr.advance_account_stage(
-                account.account_id,
-                next_stage,
-                subscribed=is_sub,
-                notes="dry_run_advancement",
+            simulated_next_stage = min(4, stage + 1)
+            logger.info(
+                f"[DRY-RUN] Simulated warming step for [{account.account_id}] ({account.email}): "
+                f"stage {stage} -> {simulated_next_stage}. (Ledger unmutated, zero fake subscriptions)."
             )
             return {
                 "account_id": account.account_id,
-                "previous_stage": stage,
-                "new_stage": next_stage,
-                "subscribed": is_sub,
-                "status": "dry_run_success",
+                "current_stage": stage,
+                "simulated_next_stage": simulated_next_stage,
+                "subscribed": account.subscribed_to_groundwork,
+                "status": "dry_run_simulated",
             }
 
         session_path = self.get_session_file(account.account_id)
@@ -1560,6 +1557,7 @@ async def main():
                         thumbnail_url=f"https://media.gworky.com/covers/master_{args.pillar}.webp",
                         chapters=meta.get("chapters", []),
                         pillar=args.pillar,
+                        video_path=master_video_path if os.path.exists(master_video_path) else None,
                     )
                 except Exception as b_err:
                     logger.warning(f"Buffer queue notice: {b_err}")

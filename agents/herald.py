@@ -998,12 +998,30 @@ def queue_master_video_campaign(
     thumbnail_url: str,
     chapters: list[dict[str, Any]],
     pillar: str = "money",
+    video_path: str | None = None,
+    video_url: str | None = None,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Queue tiered multi-channel campaign in Buffer for a Master Video release."""
+    """Queue tiered multi-channel campaign in Buffer for a Master Video release with native MP4 video asset."""
     logger.info("Scheduling Buffer Master Video launch campaign for: %s", title)
 
-    # 1. Master Launch Announcement Post
+    # 1. Resolve or upload native MP4 video asset via Cloudflare R2
+    resolved_video_url = video_url
+    if not resolved_video_url and video_path and os.path.exists(video_path):
+        try:
+            from agents.media_uploader import MEDIA_BASE_URL, R2Uploader
+            uploader = R2Uploader()
+            filename = Path(video_path).name
+            s3_key = f"videos/teasers/{filename}"
+            with open(video_path, "rb") as vf:
+                video_bytes = vf.read()
+            if uploader.put(s3_key, video_bytes, content_type="video/mp4"):
+                resolved_video_url = f"{MEDIA_BASE_URL}/{s3_key}"
+                logger.info("✅ Uploaded teaser video to Cloudflare R2: %s", resolved_video_url)
+        except Exception as e:
+            logger.warning("Could not upload teaser video to R2 (%s); falling back to image preview.", e)
+
+    # 2. Master Launch Announcement Post
     hashtags = " ".join(PILLAR_HASHTAGS.get(pillar.lower(), ["#Groundwork", "#Research", "#Finance"]))
     launch_text = (
         f"🎙️ NEW MASTER SUITE RELEASE: {title}\n\n"
@@ -1018,11 +1036,12 @@ def queue_master_video_campaign(
         title=f"[MASTER SUITE] {title}",
         text=launch_text,
         image_url=thumbnail_url,
+        video_url=resolved_video_url,
         env=env,
     )
     results.append({"step": "launch_announcement", "result": r_main})
 
-    # 2. Queue chapter teaser snippets
+    # 3. Queue chapter teaser snippets
     for idx, ch in enumerate(chapters[:3], start=1):
         ch_title = ch.get("title", f"Chapter {idx}")
         ch_stat = ch.get("key_stat", "")
@@ -1038,11 +1057,13 @@ def queue_master_video_campaign(
             title=f"Chapter {idx} Teaser: {ch_title}",
             text=ch_text,
             image_url=thumbnail_url,
+            video_url=resolved_video_url,
             env=env,
         )
         results.append({"step": f"chapter_{idx}_teaser", "result": r_ch})
 
-    return {"ok": True, "campaign_steps": results}
+    return {"ok": True, "campaign_steps": results, "video_url": resolved_video_url}
+
 
 
 
