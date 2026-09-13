@@ -559,11 +559,14 @@ class TelemetryManager:
             logger.info("Telegram credentials not configured; skipping daily digest.")
             return False
 
-        progress_text = self.render_progress_bar()
+        yt_progress = self.render_progress_bar()
+        web_telem = WebTelemetryManager()
+        web_progress = web_telem.render_summary()
+
         msg = (
-            "📊 *GROUNDWORK YOUTUBE DAILY PROGRESS DIGEST*\n\n"
-            f"```text\n{progress_text}\n```\n"
-            "⚡ *Status*: Hybrid Cloud & Local Engine Active ($0 USD)"
+            "📊 *GROUNDWORK UNIFIED 24H GROWTH DIGEST*\n\n"
+            f"```text\n{yt_progress}\n\n{web_progress}\n```\n"
+            "⚡ *Status*: Hybrid Cloud (6-Shard YT, 3-Shard Web) & Local Engine Active ($0 USD)"
         )
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = json.dumps({
@@ -575,11 +578,84 @@ class TelemetryManager:
             req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status == 200:
-                    logger.info("✅ Daily progress digest dispatched to Telegram.")
+                    logger.info("✅ Unified 24h progress digest dispatched to Telegram.")
                     return True
         except Exception as e:
             logger.warning(f"Failed to dispatch Telegram daily digest: {e}")
         return False
+
+
+class WebTelemetryManager:
+    """Manages local ledger for website (gworky.com) organic engagement sessions."""
+
+    def __init__(self, json_path: Path | None = None):
+        self.json_path = json_path or (_root_dir / "database" / "web_traffic_telemetry.json")
+        self._ensure_file()
+
+    def _ensure_file(self) -> None:
+        if not self.json_path.exists():
+            default_data = {
+                "total_sessions": 0,
+                "total_dwell_seconds": 0,
+                "avg_dwell_seconds": 0.0,
+                "articles_read": 0,
+                "tools_interacted": 0,
+                "internal_hops": 0,
+                "last_updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "sessions_history": [],
+            }
+            self.json_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.json_path, "w", encoding="utf-8") as f:
+                json.dump(default_data, f, indent=2)
+
+    def load_data(self) -> dict[str, Any]:
+        self._ensure_file()
+        try:
+            with open(self.json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def log_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        data = self.load_data()
+        data["total_sessions"] = data.get("total_sessions", 0) + 1
+        dwell = session.get("dwell_time_seconds", 0)
+        data["total_dwell_seconds"] = data.get("total_dwell_seconds", 0) + dwell
+        if data["total_sessions"] > 0:
+            data["avg_dwell_seconds"] = round(data["total_dwell_seconds"] / data["total_sessions"], 1)
+        data["articles_read"] = data.get("articles_read", 0) + 1
+        actions = session.get("actions_triggered", [])
+        if any("calc" in a or "tool" in a for a in actions):
+            data["tools_interacted"] = data.get("tools_interacted", 0) + 1
+        if any("hop" in a for a in actions):
+            data["internal_hops"] = data.get("internal_hops", 0) + 1
+        data["last_updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        history = data.get("sessions_history", [])
+        history.append({
+            "session_id": session.get("session_id"),
+            "article_slug": session.get("article_slug"),
+            "geo_region": session.get("geo_region"),
+            "dwell_seconds": dwell,
+            "actions": actions,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+        data["sessions_history"] = history[-100:]
+
+        with open(self.json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return data
+
+    def render_summary(self) -> str:
+        data = self.load_data()
+        return (
+            f"🌐 Website Engagement (gworky.com):\n"
+            f"   • Total Reader Sessions : {data.get('total_sessions', 0)} visits\n"
+            f"   • Guides/Articles Read  : {data.get('articles_read', 0)} articles\n"
+            f"   • Avg Dwell Time        : {data.get('avg_dwell_seconds', 0.0):.1f}s / session\n"
+            f"   • Multi-Hop Traversal   : {data.get('internal_hops', 0)} internal hops\n"
+            f"   • Interactive Tools Run : {data.get('tools_interacted', 0)} calculator simulations"
+        )
 
 
 # ==============================================================================

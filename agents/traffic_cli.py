@@ -186,7 +186,11 @@ PILLAR_TOOLS = {
 }
 
 
-def build_referral(target: SessionTarget, preferred_channel: str | None = None) -> tuple[str, str, dict[str, str]]:
+def build_referral(
+    target: SessionTarget,
+    preferred_channel: str | None = None,
+    search_query: str | None = None,
+) -> tuple[str, str, dict[str, str]]:
     """Generates authentic Google Search, YouTube, or Topic Silo referrers."""
     site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
     dest_url = f"{site_url}/article/{target.article_slug}"
@@ -198,7 +202,7 @@ def build_referral(target: SessionTarget, preferred_channel: str | None = None) 
         channel = preferred_channel
 
     if channel == "google_search":
-        q = f"{target.pillar} {target.article_title.lower()}".replace("how to how to", "how to")
+        q = search_query or f"{target.pillar} {target.article_title.lower()}".replace("how to how to", "how to")
         ved = f"2ahUKEwi{uuid.uuid4().hex[:12]}_{uuid.uuid4().hex[:6]}"
         ref = f"https://www.google.com/url?sa=t&rct=j&q={urllib.parse.quote_plus(q)}&esrc=s&source=web&cd=1&ved={ved}&url={urllib.parse.quote_plus(dest_url)}"
         headers = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
@@ -231,16 +235,43 @@ async def run_single_session(
     dry_run: bool = False,
     worker_id: int = 1,
 ) -> dict[str, Any]:
-    """Executes a full-DOM Playwright session with CDP stealth and AdSense firewall."""
+    """Executes a full-DOM Playwright session with 3-tier Egress, CDP stealth, multi-hop deep research, and AdSense firewall."""
     from playwright.async_api import async_playwright
 
     session_id = f"gw_{uuid.uuid4().hex[:10]}"
-    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
-    ref_channel, referrer_url, extra_headers = build_referral(target, preferred_channel=channel)
+
+    # Tiered Multi-Egress Selector (Structured Auth - Zero 407 Bug)
+    egress_mgr = EgressSelector()
+    proxy_config = egress_mgr.get_playwright_proxy(
+        task_type="web_browse",
+        geo=persona.geo_region,
+        session_id=session_id,
+    )
+
+    # Synthesize AI cognitive search query for Google Search referrals
+    synth_query = None
+    if use_ai or random.random() < 0.70:
+        try:
+            from llm_router import LLMRouter
+            router = LLMRouter()
+            prompt = (
+                f"You are simulating an adult 35-48 in US/UK searching Google for an evidence-based guide on: '{target.article_title}'. "
+                "Output ONLY a natural, realistic 3-6 word Google search query without quotes, markdown, or punctuation."
+            )
+            raw_q = await asyncio.to_thread(router.generate, prompt, "text", 25, 0.7, 2.5)
+            if raw_q and len(raw_q.strip()) > 4:
+                synth_query = raw_q.strip().replace('"', '').replace("'", "").replace("\n", " ")
+                logger.info(f"🧠 [Worker #{worker_id}] AI Query Synthesized for web referral: '{synth_query}'")
+        except Exception:
+            pass
+
+    ref_channel, referrer_url, extra_headers = build_referral(target, preferred_channel=channel, search_query=synth_query)
 
     logger.info(f"⚡ [Worker #{worker_id}] Session [{session_id}] via {ref_channel.upper()} for: {target.article_slug}")
-    if proxy_url:
-        logger.info(f"   🛡️ Proxy: DataImpulse ({persona.geo_region}) -> {proxy_url.split('@')[-1]}")
+    if proxy_config:
+        logger.info(f"   🛡️ Proxy: EgressSelector ({persona.geo_region}) -> {proxy_config.get('server', '')}")
+    else:
+        logger.info(f"   🌐 Egress: Tier 3 Direct Clean Egress (Zero proxy overhead)")
 
     start_time = time.time()
     actions = [f"arrived_from_{ref_channel}"]
@@ -258,8 +289,8 @@ async def run_single_session(
             if headed:
                 launch_kwargs["slow_mo"] = 100  # Visible human speed
 
-            if proxy_url:
-                launch_kwargs["proxy"] = {"server": proxy_url}
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
 
             browser = await p.chromium.launch(**launch_kwargs)
             context = await browser.new_context(
@@ -308,36 +339,74 @@ async def run_single_session(
 
             actions.append(f"scrolled_{scroll_depth}pct")
 
-            # 3. EmotionBar Interaction
+            # 3. Interactive FAQ Accordion & EmotionBar
             try:
-                emotion_btns = page.locator("button[data-emotion]")
+                accordions = page.locator("details summary, [data-accordion] button, button[aria-expanded='false']")
+                acc_count = await accordions.count()
+                if acc_count > 0:
+                    chosen_acc = accordions.nth(random.randint(0, min(acc_count - 1, 3)))
+                    await chosen_acc.scroll_into_view_if_needed()
+                    await asyncio.sleep(random.uniform(0.6, 1.2))
+                    await chosen_acc.click()
+                    actions.append("toggled_faq_accordion")
+            except Exception:
+                pass
+
+            try:
+                emotion_btns = page.locator("button[data-emotion], [data-testid='emotion-btn']")
                 btn_count = await emotion_btns.count()
                 if btn_count > 0:
                     btn = emotion_btns.nth(random.randint(0, btn_count - 1))
+                    await asyncio.sleep(random.uniform(0.4, 1.0))
                     await btn.click(timeout=3000)
                     actions.append("clicked_emotion_bar")
             except Exception:
                 pass
 
-            # 4. Multi-Step Rabbit-Hole: Run Paired Calculator
-            if target.related_tool_slug and random.random() < 0.60:
-                site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
+            # 4. Multi-Hop Deep Research Traversal (same-pillar article hop)
+            site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
+            if random.random() < 0.65:
+                try:
+                    hop_selector = f"a[href*='/{target.pillar}/']:not([href*='{target.article_slug}']), article a[href^='/']:not([href*='{target.article_slug}'])"
+                    hop_links = page.locator(hop_selector)
+                    hop_count = await hop_links.count()
+                    if hop_count > 0:
+                        chosen_link = hop_links.nth(random.randint(0, min(hop_count - 1, 4)))
+                        hop_href = await chosen_link.get_attribute("href")
+                        if hop_href:
+                            hop_url = hop_href if hop_href.startswith("http") else f"{site_url}{hop_href}"
+                            logger.info(f"🔗 [Worker #{worker_id}] Multi-hop Research Traversal -> {hop_url}")
+                            await asyncio.sleep(random.uniform(1.0, 2.0))
+                            await page.goto(hop_url, wait_until="domcontentloaded", timeout=25000)
+                            actions.append(f"hopped_internal:{hop_url.split('/')[-1][:30]}")
+                            # Natural scroll on hopped article
+                            for pct2 in [30, 65, 95]:
+                                await page.evaluate(f"window.scrollTo({{ top: ((document.body ? document.body.scrollHeight : 1000) * {pct2 / 100.0}), behavior: 'smooth' }});")
+                                await asyncio.sleep(random.uniform(1.2, 2.5))
+                except Exception as hop_err:
+                    logger.debug(f"Multi-hop notice: {hop_err}")
+
+            # 5. Multi-Step Rabbit-Hole: Run Paired Calculator with Multiple Inputs
+            if target.related_tool_slug and random.random() < 0.70:
                 tool_url = f"{site_url}/tools/{target.related_tool_slug}"
+                logger.info(f"🧮 [Worker #{worker_id}] Opening paired calculator: {tool_url}")
                 await page.goto(tool_url, wait_until="domcontentloaded", timeout=30000)
                 actions.append(f"opened_tool_{target.related_tool_slug}")
 
-                # Simulate calculator input interaction
+                # Simulate multi-field calculator interaction
                 try:
                     inputs = page.locator('input[type="number"], input[type="range"]')
                     inp_count = await inputs.count()
                     if inp_count > 0:
-                        inp = inputs.first
-                        await inp.fill(str(random.randint(10, 500)))
-                        actions.append(f"simulated_calc_input_{target.related_tool_slug}")
+                        for idx in range(min(inp_count, 3)):
+                            inp = inputs.nth(idx)
+                            await inp.fill(str(random.randint(15, 500)))
+                            await asyncio.sleep(random.uniform(0.3, 0.8))
+                        actions.append(f"interacted_calc_{target.related_tool_slug}")
                 except Exception:
                     pass
 
-                await asyncio.sleep(random.uniform(4, 10))
+                await asyncio.sleep(random.uniform(4, 8))
 
             await browser.close()
 
@@ -361,12 +430,19 @@ async def run_single_session(
         "error_message": error_msg,
     }
 
+    # Persist to local WebTelemetryManager ledger
+    try:
+        from master_orchestrator import WebTelemetryManager
+        WebTelemetryManager().log_session(telemetry)
+    except Exception as telem_err:
+        logger.debug(f"Local web telemetry log notice: {telem_err}")
+
     # Persist to Supabase
     if not dry_run and supabase:
         try:
             supabase.table("synthetic_engagement_logs").insert(telemetry).execute()
             logger.info(
-                f"✅ [Worker #{worker_id}] Telemetry Logged -> {target.article_slug} (Dwell: {elapsed_dwell}s, Scroll: {scroll_depth}%)"
+                f"✅ [Worker #{worker_id}] Telemetry Logged -> {target.article_slug} (Dwell: {elapsed_dwell}s, Scroll: {scroll_depth}%, Actions: {len(actions)})"
             )
         except Exception as e:
             logger.error(f"Failed to persist telemetry: {e}")

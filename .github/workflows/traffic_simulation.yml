@@ -2,13 +2,13 @@ name: Organic Discovery & Traffic Simulation
 
 on:
   schedule:
-    - cron: "0 */6 * * *" # Every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: "0 */4 * * *" # Every 4 hours: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC (6x daily)
   workflow_dispatch:
     inputs:
       limit:
-        description: "Number of targets to simulate"
+        description: "Number of targets to simulate per shard"
         required: false
-        default: "2"
+        default: "3"
       allow_ga4:
         description: "Allow GA4 & GTM network requests (AdSense remains 100% blocked)"
         required: false
@@ -31,7 +31,7 @@ on:
         default: "true"
 
 concurrency:
-  group: traffic-simulation
+  group: traffic-simulation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false # Let current run finish, skip overlap
 
 permissions:
@@ -39,9 +39,12 @@ permissions:
 
 jobs:
   simulate-organic-traffic:
-    name: Run Dual-Stage Traffic & Brand Discovery Engine
+    name: Run 3-Shard Traffic & Brand Discovery Engine (${{ matrix.runner_shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        runner_shard: [1, 2, 3]
 
     steps:
       - name: Checkout Repository
@@ -61,7 +64,7 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Stage 1 — Brand Keyword Booster (Search-Only)
-        if: ${{ github.event.inputs.run_brand_booster == 'true' || github.event_name == 'schedule' }}
+        if: ${{ (github.event.inputs.run_brand_booster == 'true' || github.event_name == 'schedule') && matrix.runner_shard == 1 }}
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -70,11 +73,14 @@ jobs:
           DATAIMPULSE_PASSWORD: ${{ secrets.DATAIMPULSE_PASSWORD }}
           DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_GLOBAL_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_API_KEY }}
+          CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
         run: |
-          echo "🚀 Executing Stage 1: Brand Keyword Booster across Google Autocomplete, DuckDuckGo & SearXNG"
+          echo "🚀 Shard ${{ matrix.runner_shard }}: Executing Stage 1 Brand Keyword Booster across Google Autocomplete & DuckDuckGo"
           PYTHONPATH=agents python agents/brand_booster.py --limit 5
 
-      - name: Stage 2 — Organic Browser Simulator (Retention & Tool Engagement)
+      - name: Stage 2 — Organic Browser Simulator (Retention, Multi-Hop & Tool Engagement)
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -84,8 +90,11 @@ jobs:
           DATAIMPULSE_PASSWORD: ${{ secrets.DATAIMPULSE_PASSWORD }}
           DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_GLOBAL_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_API_KEY }}
+          CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
         run: |
-          echo "🚀 Executing Stage 2: Organic Browser Engagement Simulator"
+          echo "🚀 Shard ${{ matrix.runner_shard }}/3: Executing Stage 2 Organic Browser Engagement Simulator"
           GA4_FLAG=""
           if [ "${{ github.event.inputs.allow_ga4 }}" = "true" ]; then
             GA4_FLAG="--allow-ga4"
@@ -101,11 +110,11 @@ jobs:
             CHANNEL_FLAG="--channel ${{ github.event.inputs.channel }}"
           fi
 
-          LIMIT="${{ github.event.inputs.limit || '2' }}"
-          PYTHONPATH=agents python agents/organic_simulator.py --browser --limit "$LIMIT" $GA4_FLAG $SLUG_FLAG $CHANNEL_FLAG
+          LIMIT="${{ github.event.inputs.limit || '3' }}"
+          PYTHONPATH=agents python agents/organic_simulator.py --browser --limit "$LIMIT" --shard ${{ matrix.runner_shard }} --total-shards 3 $GA4_FLAG $SLUG_FLAG $CHANNEL_FLAG
 
       - name: Stage 3 — Rank-Adaptive Controller (Founder-Approved SERP Triangulation)
-        if: ${{ github.event.inputs.run_rank_adaptive == 'true' || github.event_name == 'schedule' }}
+        if: ${{ (github.event.inputs.run_rank_adaptive == 'true' || github.event_name == 'schedule') && matrix.runner_shard == 1 }}
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -116,5 +125,5 @@ jobs:
           DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
         run: |
-          echo "🚀 Executing Stage 3: Rank-Adaptive Behavioral Controller"
+          echo "🚀 Shard 1: Executing Stage 3 Rank-Adaptive Behavioral Controller"
           PYTHONPATH=agents python agents/rank_adaptive_controller.py --dry-run
