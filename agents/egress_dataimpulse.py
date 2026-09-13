@@ -200,17 +200,15 @@ class DataImpulseProxyRouter:
             opener = urllib.request.build_opener(proxy_handler)
             start = time.monotonic()
             req = urllib.request.Request(
-                "https://api.ipify.org?format=json",
-                headers={"User-Agent": "Groundwork-EgressCheck/1.0"},
+                "https://www.youtube.com/generate_204",
+                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
             )
-            with opener.open(req, timeout=8) as resp:
+            with opener.open(req, timeout=5) as resp:
                 latency = (time.monotonic() - start) * 1000
-                if resp.status == 200:
-                    import json
-                    body = json.loads(resp.read().decode("utf-8"))
+                if resp.status in (200, 204):
                     result["available"] = True
                     result["latency_ms"] = round(latency, 1)
-                    result["ip"] = body.get("ip")
+                    result["ip"] = "connected"
                     DataImpulseProxyRouter.record_success()
                 else:
                     result["error"] = f"HTTP {resp.status}"
@@ -220,3 +218,22 @@ class DataImpulseProxyRouter:
             DataImpulseProxyRouter.record_failure()
 
         return result
+
+    _LAST_HEALTHY_STATUS: bool = False
+    _LAST_CHECK_TIME: float = 0.0
+
+    @classmethod
+    def is_healthy(cls, max_age_seconds: float = 120.0) -> bool:
+        """Cached fast health check to guarantee proxy doesn't poison browser with 407 NO_USER or timeouts."""
+        now = time.monotonic()
+        if now < _CIRCUIT_BREAKER_TRIPPED_UNTIL:
+            return False
+        if (now - cls._LAST_CHECK_TIME) < max_age_seconds:
+            return cls._LAST_HEALTHY_STATUS
+
+        cls._LAST_CHECK_TIME = now
+        res = cls.health_check()
+        cls._LAST_HEALTHY_STATUS = bool(res.get("available"))
+        if not cls._LAST_HEALTHY_STATUS:
+            cls.record_failure()
+        return cls._LAST_HEALTHY_STATUS

@@ -549,11 +549,19 @@ class TelemetryManager:
         s3 = len([a for a in accounts if a.warmup_stage == 3])
         s4 = len([a for a in accounts if a.warmup_stage == 4])
 
+        # Compute traffic sources mix
+        funnels_count: dict[str, int] = {}
+        for s in data.get("sessions_history", []):
+            fn = s.get("funnel_mode", "auto")
+            funnels_count[fn] = funnels_count.get(fn, 0) + 1
+        top_funnels = ", ".join(f"{k}: {v}" for k, v in sorted(funnels_count.items(), key=lambda x: -x[1])[:5]) or "organic_auto"
+
         return (
             f"🎯 4,000 Watch-Hours Goal Progress:\n"
             f"   [{bar}] {pct:.2f}% ({data.get('total_watch_hours', 0.0):,.1f} / {data.get('goal_hours', 4000):,.1f} Hours)\n"
             f"   📊 Total Completed Sessions: {data.get('total_sessions', 0)} sessions\n"
             f"   🔁 Full Video 100% Loops: {data.get('total_loops_completed', 0)} completed loops\n"
+            f"   🌐 Traffic Sources Mix: {top_funnels}\n"
             f"   💾 Bandwidth Saved (144p vs 1080p): {data.get('bandwidth_saved_mb', 0.0) / 1024.0:.2f} GB (92% reduction)\n\n"
             f"👥 1,000 Subscribers Goal Progress:\n"
             f"   [{sub_bar}] {sub_pct:.2f}% ({subs:,} / {sub_goal:,} Subscribers)\n"
@@ -1089,10 +1097,11 @@ class WatchTimeGovernor:
         search_keyword: str | None = None,
         funnel_mode: str = "auto",
         quality: str = "144p",
+        egress: str = "auto",
     ):
         from traffic_cli import PERSONAS, run_youtube_watch_session
 
-        logger.info(f"🚀 Dispatching {concurrency} Watch-Time workers for: {video_url} ({duration}s, {quality}, funnel: {funnel_mode})")
+        logger.info(f"🚀 Dispatching {concurrency} Watch-Time workers for: {video_url} ({duration}s, {quality}, funnel: {funnel_mode}, egress: {egress})")
         load = self.get_system_load()
         if load > 4.0 and not headed:
             logger.warning(f"High CPU load ({load:.2f}); throttling concurrency to max 2.")
@@ -1111,6 +1120,7 @@ class WatchTimeGovernor:
                     funnel_mode=funnel_mode,
                     quality=quality,
                     worker_id=i + 1,
+                    egress_mode=egress,
                 )
             )
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1122,7 +1132,7 @@ class WatchTimeGovernor:
                     session_id=r.get("session_id", f"yt_{int(time.time())}"),
                     video_url=video_url,
                     duration_sec=float(r.get("duration", duration)),
-                    funnel_mode=funnel_mode,
+                    funnel_mode=str(r.get("funnel", funnel_mode)),
                     quality=quality,
                     status="completed",
                     loops_completed=int(r.get("loops_completed", 0)),
@@ -1291,11 +1301,17 @@ async def main():
     p_wt.add_argument("--search-keyword", type=str, default=None, help="Search term for Search-to-Watch Journey")
     p_wt.add_argument(
         "--funnel-mode",
-        choices=["auto", "search", "embed", "shorts_bridge", "direct"],
+        choices=["auto", "search", "channel", "google_search", "embed", "shorts_bridge", "suggested", "direct"],
         default="auto",
         help="Traffic funnel mode (default: auto)",
     )
     p_wt.add_argument("--quality", type=str, default="144p", help="Playback resolution (default: 144p)")
+    p_wt.add_argument(
+        "--egress",
+        choices=["auto", "direct", "proxy"],
+        default="auto",
+        help="Egress connection mode (default: auto)",
+    )
 
     # Command: shorts
     p_sh = subparsers.add_parser("shorts", help="Subsystem D: YouTube Shorts Retention Looping")
@@ -1458,6 +1474,7 @@ async def main():
             search_keyword=args.search_keyword,
             funnel_mode=args.funnel_mode,
             quality=args.quality,
+            egress=args.egress,
         )
 
     elif args.command == "shorts":

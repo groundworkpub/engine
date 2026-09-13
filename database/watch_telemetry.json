@@ -1,12 +1,116 @@
 {
   "goal_hours": 4000.0,
-  "total_watch_seconds": 16935.0,
-  "total_watch_hours": 4.704,
-  "completion_percentage": 0.118,
-  "total_sessions": 54,
-  "bandwidth_saved_mb": 3161.2,
-  "last_updated": "2026-09-13T08:05:31Z",
+  "total_watch_seconds": 19450.0,
+  "total_watch_hours": 5.403,
+  "completion_percentage": 0.135,
+  "total_sessions": 64,
+  "bandwidth_saved_mb": 3630.66,
+  "last_updated": "2026-09-13T09:00:04Z",
   "sessions_history": [
+    {
+      "session_id": "yt_567ce9c414",
+      "video_url": "https://youtu.be/C4d4fMeA_Yc",
+      "duration_sec": 62,
+      "loops_completed": 0,
+      "completion_rate": "95%",
+      "funnel_mode": "google_search",
+      "quality": "144p",
+      "saved_mb": 11.57,
+      "status": "completed",
+      "timestamp": "2026-09-13T09:00:04Z"
+    },
+    {
+      "session_id": "yt_3341cfa606",
+      "video_url": "https://youtu.be/C4d4fMeA_Yc",
+      "duration_sec": 68,
+      "loops_completed": 0,
+      "completion_rate": "93%",
+      "funnel_mode": "search",
+      "quality": "144p",
+      "saved_mb": 12.69,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:58:19Z"
+    },
+    {
+      "session_id": "short_f554a42de6",
+      "video_url": "https://youtu.be/_0CGS0MXnGc",
+      "duration_sec": 120,
+      "funnel_mode": "shorts_loop",
+      "quality": "mobile",
+      "saved_mb": 22.4,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:56:37Z"
+    },
+    {
+      "session_id": "short_d24beaa391",
+      "video_url": "https://youtu.be/_0CGS0MXnGc",
+      "duration_sec": 128,
+      "funnel_mode": "shorts_loop",
+      "quality": "mobile",
+      "saved_mb": 23.89,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:56:37Z"
+    },
+    {
+      "session_id": "yt_2f1338752f",
+      "video_url": "https://youtu.be/C4d4fMeA_Yc",
+      "duration_sec": 453,
+      "funnel_mode": "auto",
+      "quality": "144p",
+      "saved_mb": 84.56,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:30:41Z"
+    },
+    {
+      "session_id": "yt_e644e112cf",
+      "video_url": "https://youtu.be/C4d4fMeA_Yc",
+      "duration_sec": 482,
+      "funnel_mode": "auto",
+      "quality": "144p",
+      "saved_mb": 89.97,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:30:41Z"
+    },
+    {
+      "session_id": "yt_5dbf210fc8",
+      "video_url": "https://youtu.be/-yh59eacYJM",
+      "duration_sec": 489,
+      "funnel_mode": "auto",
+      "quality": "144p",
+      "saved_mb": 91.28,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:24:31Z"
+    },
+    {
+      "session_id": "yt_e4d417cde6",
+      "video_url": "https://youtu.be/-yh59eacYJM",
+      "duration_sec": 490,
+      "funnel_mode": "auto",
+      "quality": "144p",
+      "saved_mb": 91.47,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:24:31Z"
+    },
+    {
+      "session_id": "short_a3cd4abd6f",
+      "video_url": "https://youtu.be/_0CGS0MXnGc",
+      "duration_sec": 102,
+      "funnel_mode": "shorts_loop",
+      "quality": "mobile",
+      "saved_mb": 19.04,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:16:20Z"
+    },
+    {
+      "session_id": "short_59e8d7f900",
+      "video_url": "https://youtu.be/_0CGS0MXnGc",
+      "duration_sec": 121,
+      "funnel_mode": "shorts_loop",
+      "quality": "mobile",
+      "saved_mb": 22.59,
+      "status": "completed",
+      "timestamp": "2026-09-13T08:16:20Z"
+    },
     {
       "session_id": "yt_0672c1fd98",
       "video_url": "https://youtu.be/C4d4fMeA_Yc",

@@ -370,15 +370,20 @@ class SmartPolicySelector:
           2. Fallback HTTP proxies (Cloudflare Worker, Render/HF, Custom)
           3. Direct Clean Egress (returns None for direct connection)
         """
-        self._ensure_init()
-        from egress_dataimpulse import DataImpulseProxyRouter
-
-        # Tier 1: DataImpulse with structured credentials
         try:
-            cfg = DataImpulseProxyRouter.get_playwright_proxy_config(geo, session_id=session_id)
-            if cfg:
-                logger.info("Using Tier 1 Structured Egress (DataImpulse) for %s [geo=%s]", task_type, geo)
-                return cfg
+            from egress_dataimpulse import DataImpulseProxyRouter
+        except ImportError:
+            from agents.egress_dataimpulse import DataImpulseProxyRouter
+
+        # Tier 1: DataImpulse with structured credentials (probed via fast health check)
+        try:
+            if DataImpulseProxyRouter.is_healthy():
+                cfg = DataImpulseProxyRouter.get_playwright_proxy_config(geo, session_id=session_id)
+                if cfg:
+                    logger.info("Using Tier 1 Structured Egress (DataImpulse) for %s [geo=%s]", task_type, geo)
+                    return cfg
+            else:
+                logger.info("Tier 1 Egress (DataImpulse) offline/tripped; falling back to Tier 2/3")
         except Exception as e:
             logger.warning("Tier 1 Egress check notice: %s", e)
 

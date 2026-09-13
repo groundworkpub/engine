@@ -392,6 +392,7 @@ async def run_youtube_watch_session(
     funnel_mode: str = "auto",
     quality: str = "144p",
     worker_id: int = 1,
+    egress_mode: str = "auto",
 ) -> dict[str, Any]:
     """Executes a qualified YouTube Watch-Time session with multi-source organic funnel, 144p bandwidth throttle, and search-to-watch."""
     from playwright.async_api import async_playwright
@@ -399,24 +400,37 @@ async def run_youtube_watch_session(
     session_id = f"yt_{uuid.uuid4().hex[:10]}"
     
     # Tiered Multi-Egress Selector (Structured Auth - Zero 407 Bug)
-    egress_mgr = EgressSelector()
-    proxy_config = egress_mgr.get_playwright_proxy(
-        task_type="youtube_watch",
-        geo=persona.geo_region,
-        session_id=session_id,
-    )
+    if egress_mode == "direct" or os.environ.get("PREFER_DIRECT_EGRESS") == "true":
+        proxy_config = None
+        logger.info(f"🌐 [Worker #{worker_id}] Using Tier 3 Direct Clean Egress")
+    else:
+        egress_mgr = EgressSelector()
+        proxy_config = egress_mgr.get_playwright_proxy(
+            task_type="youtube_watch",
+            geo=persona.geo_region,
+            session_id=session_id,
+        )
     
-    # Resolve discovery funnel mode
+    # Extract video ID for in-page click targeting
+    video_id = ""
+    if "youtu.be/" in video_url:
+        video_id = video_url.split("youtu.be/")[1].split("?")[0].split("&")[0]
+    elif "v=" in video_url:
+        video_id = video_url.split("v=")[1].split("&")[0]
+
+    # Resolve discovery funnel mode (Natural Organic Multi-Vector Distribution)
     if funnel_mode == "auto":
         roll = random.random()
-        if roll < 0.40:
-            active_funnel = "search"
-        elif roll < 0.70:
-            active_funnel = "embed"
+        if roll < 0.35:
+            active_funnel = "search"          # 35% YouTube Search
+        elif roll < 0.60:
+            active_funnel = "channel"         # 25% Channel Pages / Browse
+        elif roll < 0.80:
+            active_funnel = "google_search"   # 20% External (Google SERP Referrer)
         elif roll < 0.90:
-            active_funnel = "shorts_bridge"
+            active_funnel = "embed"           # 10% External (gworky.com embed)
         else:
-            active_funnel = "direct"
+            active_funnel = "suggested"       # 10% Suggested / Shorts Bridge
     else:
         active_funnel = funnel_mode
 
@@ -458,17 +472,49 @@ async def run_youtube_watch_session(
 
         await page.route("**/*", block_ads)
 
+        # Keyword resolution for search-driven funnels (AI Cognitive Intent Synthesis)
+        if not search_keyword:
+            fallback_pool = [
+                "Groundwork Master Briefing 2026",
+                "household capital allocation debt mortgages wealth Groundwork",
+                "mortgage recast vs refinance 2026 interest rate traps Groundwork",
+                "Groundwork personal finance research guide",
+                "AI tools autonomous defense analysis Groundwork",
+                "evidence based financial decisions Groundwork",
+            ]
+            try:
+                from llm_router import LLMRouter
+                router = LLMRouter()
+                prompt = (
+                    "You are simulating a realistic human viewer in the US/UK searching for an insightful guide on YouTube or Google. "
+                    f"The target video discusses personal finance, mortgages, wealth allocation, and evidence-based living: {video_url}. "
+                    "Output ONLY a natural, realistic 3-6 word search query that a real person would type into the search bar. "
+                    "Do not include quotes, punctuation, or any other text."
+                )
+                query = await asyncio.to_thread(router.generate, prompt, "text", 30, 0.7, 3.0)
+                if query and len(query.strip()) > 5:
+                    clean_q = query.strip().replace('"', '').replace("'", "").replace("\n", " ")
+                    logger.info(f"🧠 [Worker #{worker_id}] AI Cognitive Intent Synthesized: '{clean_q}'")
+                    search_keyword = clean_q
+                else:
+                    search_keyword = random.choice(fallback_pool)
+            except Exception as e:
+                logger.debug(f"AI cognitive intent fallback: {e}")
+                search_keyword = random.choice(fallback_pool)
+
+        in_page_clicked = False
+
         try:
             # Funnel Step 1: Execute funnel discovery
-            if active_funnel == "search" and search_keyword:
-                logger.info(f"🔍 [Worker #{worker_id}] Executing Search-to-Watch: '{search_keyword}'")
+            if active_funnel == "search":
+                logger.info(f"🔍 [Worker #{worker_id}] Executing YouTube Search-to-Watch: '{search_keyword}'")
                 try:
                     await page.goto("https://www.youtube.com", wait_until="commit", timeout=20000)
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(random.uniform(1.5, 2.5))
                     for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue", "Accept"]:
                         try:
                             btn = page.locator(f"button:has-text('{btn_text}')").first
-                            if await btn.is_visible(timeout=1000):
+                            if await btn.is_visible(timeout=800):
                                 await btn.click()
                                 break
                         except Exception:
@@ -477,51 +523,126 @@ async def run_youtube_watch_session(
                     if await search_box.is_visible(timeout=3000):
                         await search_box.click()
                         for char in search_keyword:
-                            await page.keyboard.type(char, delay=random.randint(30, 90))
+                            await page.keyboard.type(char, delay=random.randint(25, 75))
                         await page.keyboard.press("Enter")
-                        await asyncio.sleep(random.uniform(2.0, 4.0))
+                        await asyncio.sleep(random.uniform(2.5, 4.0))
                         actions.append("searched_keyword")
+
+                        # In-page click discovery: search for video thumbnail or title in results
+                        if video_id:
+                            for scroll_pass in range(3):
+                                target_card = page.locator(f"ytd-video-renderer a[href*='{video_id}'], ytd-video-renderer a#video-title[href*='{video_id}']").first
+                                if await target_card.is_visible(timeout=1500):
+                                    logger.info(f"🎯 [Worker #{worker_id}] Found target video in YouTube Search results! In-page clicking...")
+                                    box = await target_card.bounding_box()
+                                    if box:
+                                        await page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2, steps=8)
+                                    await target_card.click()
+                                    in_page_clicked = True
+                                    actions.append("clicked_search_result")
+                                    break
+                                await page.evaluate("window.scrollBy({ top: 450, behavior: 'smooth' });")
+                                await asyncio.sleep(random.uniform(1.0, 1.8))
                 except Exception as e:
                     logger.warning(f"Search navigation notice: {e}")
+
+            elif active_funnel == "channel":
+                logger.info(f"📺 [Worker #{worker_id}] Executing Channel Browse: @GroundworkMedia/videos")
+                try:
+                    await page.goto("https://www.youtube.com/@GroundworkMedia/videos", wait_until="commit", timeout=22000)
+                    await asyncio.sleep(random.uniform(2.0, 3.5))
+                    for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue"]:
+                        try:
+                            btn = page.locator(f"button:has-text('{btn_text}')").first
+                            if await btn.is_visible(timeout=800):
+                                await btn.click()
+                                break
+                        except Exception:
+                            pass
+                    await page.evaluate("window.scrollBy({ top: 350, behavior: 'smooth' });")
+                    await asyncio.sleep(random.uniform(1.2, 2.0))
+
+                    if video_id:
+                        target_card = page.locator(f"ytd-rich-item-renderer a[href*='{video_id}'], ytd-grid-video-renderer a[href*='{video_id}']").first
+                        if await target_card.is_visible(timeout=2000):
+                            logger.info(f"🎯 [Worker #{worker_id}] Found target video in Channel Videos grid! In-page clicking...")
+                            await target_card.click()
+                            in_page_clicked = True
+                            actions.append("clicked_channel_video")
+                except Exception as e:
+                    logger.warning(f"Channel browse warning: {e}")
+
+            elif active_funnel == "google_search":
+                logger.info(f"🌐 [Worker #{worker_id}] Executing Google Search External Referral: '{search_keyword}'")
+                try:
+                    google_search_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(search_keyword)}"
+                    await page.goto(google_search_url, wait_until="commit", timeout=20000)
+                    await asyncio.sleep(random.uniform(2.0, 3.5))
+                    await page.evaluate("window.scrollBy({ top: 250, behavior: 'smooth' });")
+                    actions.append("visited_google_serp")
+                except Exception as e:
+                    logger.warning(f"Google search referrer warning: {e}")
 
             elif active_funnel == "embed":
                 logger.info(f"🌐 [Worker #{worker_id}] Executing Embed Web Referral via gworky.com")
                 try:
                     await page.goto("https://gworky.com/wire", wait_until="commit", timeout=20000)
-                    await asyncio.sleep(random.uniform(3.0, 5.0))
+                    await asyncio.sleep(random.uniform(2.5, 4.0))
+                    await page.evaluate("window.scrollBy({ top: 350, behavior: 'smooth' });")
                     actions.append("visited_embed_referrer")
                 except Exception as e:
                     logger.warning(f"Embed referrer warning: {e}")
 
-            elif active_funnel == "shorts_bridge":
-                logger.info(f"📱 [Worker #{worker_id}] Executing Shorts Bridge Discovery")
+            elif active_funnel in ("suggested", "shorts_bridge"):
+                logger.info(f"📱 [Worker #{worker_id}] Executing Suggested / Shorts Bridge Co-visitation")
                 try:
                     short_bridge_url = "https://youtu.be/Ygr-u9OZZWY"
                     await page.goto(short_bridge_url, wait_until="commit", timeout=20000)
-                    await asyncio.sleep(random.uniform(5.0, 9.0))
+                    await asyncio.sleep(random.uniform(5.0, 8.0))
                     actions.append("watched_shorts_bridge")
                 except Exception as e:
                     logger.warning(f"Shorts bridge warning: {e}")
 
-            # Step 2: Navigate to target video with resilient commit strategy
-            clean_url = video_url if ("?" in video_url) else f"{video_url}?feature=shared"
-            logger.info(f"🎬 [Worker #{worker_id}] Loading target video: {clean_url}")
-            
-            nav_success = False
-            for attempt in range(2):
-                try:
-                    await page.goto(clean_url, wait_until="commit", timeout=25000)
-                    nav_success = True
-                    break
-                except Exception as e:
-                    logger.warning(f"Worker #{worker_id} navigation attempt {attempt+1} notice: {e}")
-                    await asyncio.sleep(2)
+            # Step 2: Ensure target video is active (canonical watch URL prevents 302 redirect loops under proxy)
+            canonical_watch_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else video_url
+            clean_url = canonical_watch_url
+            curr_url = page.url
+            if in_page_clicked or (video_id and video_id in curr_url):
+                logger.info(f"🎬 [Worker #{worker_id}] Target video active via organic in-page navigation: {curr_url}")
+                actions.append("navigated_in_page_organic")
+            else:
+                ref_map = {
+                    "search": f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(search_keyword)}",
+                    "channel": "https://www.youtube.com/@GroundworkMedia/videos",
+                    "google_search": "https://www.google.com/",
+                    "embed": "https://gworky.com/wire",
+                    "suggested": "https://www.youtube.com/shorts/Ygr-u9OZZWY",
+                }
+                chosen_referer = ref_map.get(active_funnel, "https://www.youtube.com/")
+                logger.info(f"🎬 [Worker #{worker_id}] Loading target video with referrer [{chosen_referer}]: {clean_url}")
+                nav_success = False
+                for attempt in range(2):
+                    try:
+                        await page.goto(clean_url, referer=chosen_referer, wait_until="domcontentloaded", timeout=25000)
+                        nav_success = True
+                        break
+                    except Exception as e:
+                        logger.warning(f"Worker #{worker_id} navigation attempt {attempt+1} notice: {e}")
+                        await asyncio.sleep(2)
 
-            if not nav_success:
-                logger.error(f"❌ [Worker #{worker_id}] Navigation failed completely. Aborting.")
-                return {"status": "failed_navigation", "session_id": session_id, "duration": 0}
+                if not nav_success:
+                    if proxy_config:
+                        logger.warning(f"⚠️ [Worker #{worker_id}] Proxy failed to reach YouTube. Tripping circuit breaker for automatic direct fallback.")
+                        try:
+                            from egress_dataimpulse import DataImpulseProxyRouter
+                            for _ in range(3):
+                                DataImpulseProxyRouter.record_failure()
+                        except Exception:
+                            pass
+                    logger.error(f"❌ [Worker #{worker_id}] Navigation failed completely. Aborting.")
+                    return {"status": "failed_navigation", "session_id": session_id, "duration": 0}
 
-            actions.append("opened_video_url")
+                actions.append("opened_video_url")
 
             # Wait for player attachment
             try:
@@ -548,7 +669,7 @@ async def run_youtube_watch_session(
             except Exception:
                 pass
 
-            # Inject 144p resolution & unmute/play
+            # Inject 144p resolution & start playback muted for guaranteed browser autoplay compliance
             await page.evaluate("""() => {
                 try {
                     const player = document.getElementById('movie_player');
@@ -622,6 +743,18 @@ async def run_youtube_watch_session(
 
                     # Advance confirmed when currentTime increases while playing
                     if curr_t > last_t and not paused and p_state == 1:
+                        # Once active playback is verified, ensure active audio context in DOM (Chromium --mute-audio protects speakers)
+                        try:
+                            await page.evaluate("""() => {
+                                const p = document.getElementById('movie_player');
+                                if (p && p.unMute) p.unMute();
+                                if (p && p.setVolume) p.setVolume(25);
+                                const v = document.querySelector('video');
+                                if (v) { v.muted = false; v.volume = 0.25; }
+                            }""")
+                        except Exception:
+                            pass
+
                         # Protect against timeline jumps inflating real streamed time
                         delta_t = curr_t - (last_t if last_t >= 0 else 0)
                         if delta_t > sample_interval * 2.0:
@@ -634,8 +767,22 @@ async def run_youtube_watch_session(
                         last_t = curr_t
                         stalled_streak = 0
                     else:
-                        # If buffering (state 3), don't penalize as stalled streak immediately
-                        if p_state == 3:
+                        # If unstarted (-1), attempt multi-layer user-gesture & universal hotkey 'k'
+                        if p_state == -1:
+                            logger.info(f"⏳ [Worker #{worker_id}] Player unstarted (state=-1). Sending user gesture click & 'k' hotkey...")
+                            try:
+                                for btn_sel in ["button:has-text('Accept all')", "button:has-text('I agree')", "button:has-text('Reject all')", "form[action*='consent'] button", ".ytp-large-play-button"]:
+                                    b = page.locator(btn_sel).first
+                                    if await b.is_visible(timeout=400):
+                                        await b.click()
+                                        break
+                                await page.mouse.click(640, 360)
+                                await page.keyboard.press("k")
+                                await page.keyboard.press("Space")
+                                await page.locator("video, #movie_player, .ytp-play-button").first.click(timeout=1000)
+                            except Exception:
+                                pass
+                        elif p_state == 3:
                             logger.info(f"⏳ [Worker #{worker_id}] Video buffering at {curr_t:.1f}s (playerState=3)...")
                         else:
                             stalled_streak += 1
@@ -653,7 +800,8 @@ async def run_youtube_watch_session(
                                 }
                                 const v = document.querySelector('video');
                                 if (v) {
-                                    v.muted = true;
+                                    v.muted = false;
+                                    v.volume = 0.25;
                                     if (v.paused) v.play().catch(() => {});
                                 }
                             }""")
@@ -761,6 +909,7 @@ async def run_youtube_watch_session(
         "status": status,
         "session_id": session_id,
         "duration": verified_duration,
+        "funnel": active_funnel,
         "loops_completed": loops_completed,
         "completion_rate": final_completion,
         "raw_elapsed": total_time,

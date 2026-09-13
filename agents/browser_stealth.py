@@ -354,6 +354,25 @@ def build_stealth_script(
         return origQuery.call(this, p);
     }};
 
+    // 8b. Page Visibility API & Foreground Window Focus Hardening (Zero-Drop Viewport Invariant)
+    // Guarantees YouTube /api/stats/watchtime beacon transmits vis=1 and hasFocus=true, preventing 48h audit deductions.
+    try {{
+        Object.defineProperty(document, 'visibilityState', {{ get: () => 'visible', configurable: true }});
+        Object.defineProperty(document, 'hidden', {{ get: () => false, configurable: true }});
+        Object.defineProperty(document, 'hasFocus', {{ value: () => true, configurable: true }});
+        window.addEventListener('visibilitychange', (e) => {{ e.stopImmediatePropagation(); }}, true);
+    }} catch (e) {{}}
+
+    // 8c. AudioContext Hardware Emulation
+    if (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined') {{
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC && AC.prototype) {{
+            try {{
+                Object.defineProperty(AC.prototype, 'state', {{ get: () => 'running', configurable: true }});
+            }} catch (e) {{}}
+        }}
+    }}
+
     // 9. Full Chromium Client Hints (Low-Entropy & High-Entropy userAgentData)
     if (!navigator.userAgentData) {{
         const isMob = {'true' if is_mobile else 'false'};
@@ -423,6 +442,8 @@ def stealth_launch_args() -> list[str]:
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
         "--no-sandbox",
+        "--mute-audio",
+        "--autoplay-policy=no-user-gesture-required",
         "--force-webrtc-ip-handling-policy=default_public_interface_only",
         "--webrtc-ip-handling-policy=default_public_interface_only",
     ]
