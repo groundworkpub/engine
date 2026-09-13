@@ -357,6 +357,48 @@ class SmartPolicySelector:
         logger.info("No egress route available — using direct connection")
         return None
 
+    def get_playwright_proxy(
+        self,
+        task_type: str = "youtube_watch",
+        geo: str = "us",
+        session_id: str | None = None,
+    ) -> dict[str, str] | None:
+        """Get structured Playwright proxy dictionary with multi-tier failover.
+
+        Tiers:
+          1. DataImpulse Residential Gateway (structured credentials)
+          2. Fallback HTTP proxies (Cloudflare Worker, Render/HF, Custom)
+          3. Direct Clean Egress (returns None for direct connection)
+        """
+        self._ensure_init()
+        from egress_dataimpulse import DataImpulseProxyRouter
+
+        # Tier 1: DataImpulse with structured credentials
+        try:
+            cfg = DataImpulseProxyRouter.get_playwright_proxy_config(geo, session_id=session_id)
+            if cfg:
+                logger.info("Using Tier 1 Structured Egress (DataImpulse) for %s [geo=%s]", task_type, geo)
+                return cfg
+        except Exception as e:
+            logger.warning("Tier 1 Egress check notice: %s", e)
+
+        # Tier 2: Custom / Cloudflare / HuggingFace proxy fallback
+        fallback_url = os.environ.get("SIMULATOR_PROXY_URL") or os.environ.get("CLOUDFLARE_WORKER_PROXY_URL")
+        if fallback_url:
+            from urllib.parse import urlparse
+            p = urlparse(fallback_url)
+            cfg = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+            if p.username:
+                cfg["username"] = p.username
+            if p.password:
+                cfg["password"] = p.password
+            logger.info("Using Tier 2 Structured Egress (%s) for %s", p.hostname, task_type)
+            return cfg
+
+        # Tier 3: Direct Connection (clean residential / runner network)
+        logger.info("Using Tier 3 Direct Clean Egress for %s", task_type)
+        return None
+
     def _get_from_route(self, name: str, geo: str, session_id: str | None = None) -> str | None:
         """Get proxy URL from a specific named route."""
         self._ensure_init()

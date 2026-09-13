@@ -78,6 +78,56 @@ class DataImpulseProxyRouter:
         return f"http://{login}__cr.{c_tag}:{pwd}@{host}:{port}"
 
     @staticmethod
+    def get_playwright_proxy_config(country: str = "us", session_id: str | None = None) -> dict[str, str] | None:
+        """Build structured Playwright proxy configuration dict (server, username, password).
+
+        Chromium's `--proxy-server` CLI arg ignores embedded user:password strings, returning
+        HTTP 407. Playwright requires 'username' and 'password' as separate dictionary keys.
+        """
+        global _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_TRIPPED_UNTIL
+
+        now = time.monotonic()
+        if now < _CIRCUIT_BREAKER_TRIPPED_UNTIL:
+            logger.debug("Egress circuit breaker active; falling back to alternative egress.")
+            fallback = DataImpulseProxyRouter._get_fallback_proxy()
+            if fallback:
+                from urllib.parse import urlparse
+                p = urlparse(fallback)
+                cfg = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+                if p.username:
+                    cfg["username"] = p.username
+                if p.password:
+                    cfg["password"] = p.password
+                return cfg
+            return None
+
+        login = os.environ.get("DATAIMPULSE_LOGIN")
+        pwd = os.environ.get("DATAIMPULSE_PASSWORD")
+        host = os.environ.get("DATAIMPULSE_HOST", "gw.dataimpulse.com")
+        port = os.environ.get("DATAIMPULSE_PORT", "823")
+
+        if not login or not pwd:
+            fallback = DataImpulseProxyRouter._get_fallback_proxy()
+            if fallback:
+                from urllib.parse import urlparse
+                p = urlparse(fallback)
+                cfg = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+                if p.username:
+                    cfg["username"] = p.username
+                if p.password:
+                    cfg["password"] = p.password
+                return cfg
+            return None
+
+        c_tag = _COUNTRY_MAP.get(country.lower(), "us")
+        uname = f"{login}__cr.{c_tag}__sessid.{session_id}" if session_id else f"{login}__cr.{c_tag}"
+        return {
+            "server": f"http://{host}:{port}",
+            "username": uname,
+            "password": pwd,
+        }
+
+    @staticmethod
     def _get_fallback_proxy() -> str | None:
         """Check for zero-cost fallbacks: Tor SOCKS5, Cloudflare Worker Egress, or SIMULATOR_PROXY_URL."""
         # Check custom simulator proxy

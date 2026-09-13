@@ -1135,6 +1135,81 @@ class WatchTimeGovernor:
         return results
 
 
+async def execute_pyramid_funnel(
+    concurrency: int = 2,
+    base_watch_duration: int = 330,
+    headed: bool = False,
+):
+    """
+    Executes the Groundwork Pyramid Funnel Target Matrix:
+    - Tier 1 (40% Weight): Shorts Velocity & Algorithmic Discovery (e.g. Ygr-u9OZZWY)
+    - Tier 2 (40% Weight): Master Video Focus (C4d4fMeA_Yc, 5-7m Gaussian Dwell)
+    - Tier 3 (20% Weight): 1-Hour Longform Deep Dive (-yh59eacYJM, High Watch-Hour Accumulation)
+    """
+    gov = WatchTimeGovernor()
+    logger.info(f"Executing Autonomous Pyramid Funnel Traffic Cycle (Concurrency: {concurrency})...")
+
+    # ── TIER 1 (40% Weight): Shorts Velocity & Algorithmic Discovery ──────
+    short_targets = [
+        "https://youtu.be/Ygr-u9OZZWY",
+        "https://youtu.be/ryvLLcVg4qQ",
+        "https://youtu.be/QjXztZt8kbQ",
+    ]
+    picked_short = random.choice(short_targets)
+    logger.info(f"📱 Tier 1 (40%): Dispatching Shorts retention loop -> {picked_short}")
+    try:
+        await gov.run_batch_shorts(
+            short_url=picked_short,
+            concurrency=concurrency,
+            headed=headed,
+        )
+    except Exception as e:
+        logger.error(f"Shorts batch error: {e}")
+
+    # ── TIER 2 (40% Weight): Master Video Focus (C4d4fMeA_Yc, 5-7m Dwell) ──
+    master_url = "https://youtu.be/C4d4fMeA_Yc"
+    master_dwell = int(random.gauss(base_watch_duration, 50))
+    master_dwell = max(180, min(480, master_dwell))
+
+    conductor = AICognitiveConductor()
+    queries = conductor.synthesize_search_queries("Household Capital Allocation Blueprint Debt Mortgage", count=3)
+    picked_keyword = random.choice(queries) if queries else "Groundwork Master Suite Household Capital"
+    logger.info(f"🎬 Tier 2 (40%): Dispatching Master Video session -> {master_url} ({master_dwell}s, query='{picked_keyword}')")
+    try:
+        await gov.run_batch_watch(
+            video_url=master_url,
+            concurrency=concurrency,
+            duration=master_dwell,
+            headed=headed,
+            search_keyword=picked_keyword,
+            funnel_mode="auto",
+            quality="144p",
+        )
+    except Exception as e:
+        logger.error(f"Master video batch error: {e}")
+
+    # ── TIER 3 (20% Weight): 1-Hour Longform Deep Dive (High Watch Hours) ─
+    if random.random() < 0.50:
+        longform_url = "https://youtu.be/-yh59eacYJM"
+        longform_dwell = int(random.gauss(600, 120))
+        longform_dwell = max(300, min(1200, longform_dwell))
+        logger.info(f"🏛️ Tier 3 (20%): Dispatching 1-Hour Deep Dive session -> {longform_url} ({longform_dwell}s)")
+        try:
+            await gov.run_batch_watch(
+                video_url=longform_url,
+                concurrency=concurrency,
+                duration=longform_dwell,
+                headed=headed,
+                search_keyword="Groundwork Executive Briefing",
+                funnel_mode="auto",
+                quality="144p",
+            )
+        except Exception as e:
+            logger.error(f"Longform deep dive batch error: {e}")
+
+    logger.info("✅ Autonomous Pyramid Funnel cycle complete.")
+
+
 # ==============================================================================
 # 4. MASTER CLI DISPATCHER
 # ==============================================================================
@@ -1214,6 +1289,10 @@ async def main():
 
     # Command: status
     subparsers.add_parser("status", help="Print overall OAE system status and assets")
+
+    # Command: yt-stats
+    p_yt = subparsers.add_parser("yt-stats", help="Query live YouTube Data API metrics for channel or specific video")
+    p_yt.add_argument("--video-id", type=str, default=None, help="Target YouTube video ID")
 
     args = parser.parse_args()
 
@@ -1368,38 +1447,43 @@ async def main():
         print(json.dumps(res, indent=2))
 
     elif args.command == "auto":
-        id_mgr = IdentityManager()
-        if args.provision > 0:
-            logger.info(f"Provisioning {args.provision} new identity profiles before watch loop...")
-            id_mgr.provision_account_batch(count=args.provision)
-
-        gov = WatchTimeGovernor()
-        logger.info(f"Executing Autonomous Dual-Tier Watch & Shorts Cycle (Concurrency: {args.concurrency}, Watch: {args.watch_duration}s)...")
-
-        # 1. Run Shorts Loop on live verified Short
-        await gov.run_batch_shorts(
-            short_url="https://youtu.be/_0CGS0MXnGc",
+        base_dwell = getattr(args, "watch_duration", 330)
+        await execute_pyramid_funnel(
             concurrency=args.concurrency,
+            base_watch_duration=base_dwell,
             headed=args.headed,
         )
 
-        # 2. Synthesize dynamic search query via AI Cognitive Conductor
-        conductor = AICognitiveConductor()
-        queries = conductor.synthesize_search_queries("Groundwork Executive Briefing", count=3)
-        picked_keyword = random.choice(queries)
-        logger.info(f"🧠 AI Cognitive Conductor selected search journey query: '{picked_keyword}'")
+    elif args.command == "yt-stats":
+        from googleapiclient.discovery import build
+        from google.oauth2.credentials import Credentials
 
-        # 3. Run Watch Session on live 1-Hour Mega Video with 144p quality and multi-source funnel
-        await gov.run_batch_watch(
-            video_url="https://youtu.be/-yh59eacYJM",
-            concurrency=args.concurrency,
-            duration=args.watch_duration,
-            headed=args.headed,
-            search_keyword=picked_keyword,
-            funnel_mode="auto",
-            quality="144p",
+        client_id = os.environ.get("YOUTUBE_OAUTH_CLIENT_ID")
+        client_secret = os.environ.get("YOUTUBE_OAUTH_CLIENT_SECRET")
+        refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN")
+
+        creds = Credentials(
+            None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
         )
-        logger.info("Autonomous Dual-Track cycle complete.")
+        youtube = build("youtube", "v3", credentials=creds)
+        if args.video_id:
+            res = youtube.videos().list(part="snippet,statistics,contentDetails", id=args.video_id).execute()
+            items = res.get("items", [])
+            if items:
+                v = items[0]
+                print(f"\n📺 Video: [{args.video_id}] {v['snippet']['title']}")
+                print(f"   Duration: {v['contentDetails']['duration']}")
+                print(f"   Statistics: {json.dumps(v['statistics'], indent=2)}\n")
+            else:
+                print(f"Video {args.video_id} not found.")
+        else:
+            ch_res = youtube.channels().list(part="statistics", mine=True).execute()
+            print(f"\n📊 Channel Statistics: {json.dumps(ch_res['items'][0]['statistics'], indent=2)}\n")
+        return
 
     elif args.command == "master-video":
         from agents.cinematic_studio_renderer import CinematicStudioRenderer

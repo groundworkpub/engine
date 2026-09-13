@@ -32,6 +32,7 @@ from browser_stealth import (
     stealth_launch_args,
 )
 from egress_dataimpulse import DataImpulseProxyRouter
+from egress_selector import EgressSelector
 
 
 # Load environment from .env.local
@@ -396,7 +397,14 @@ async def run_youtube_watch_session(
     from playwright.async_api import async_playwright
 
     session_id = f"yt_{uuid.uuid4().hex[:10]}"
-    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
+    
+    # Tiered Multi-Egress Selector (Structured Auth - Zero 407 Bug)
+    egress_mgr = EgressSelector()
+    proxy_config = egress_mgr.get_playwright_proxy(
+        task_type="youtube_watch",
+        geo=persona.geo_region,
+        session_id=session_id,
+    )
     
     # Resolve discovery funnel mode
     if funnel_mode == "auto":
@@ -424,8 +432,8 @@ async def run_youtube_watch_session(
         }
         if headed:
             launch_kwargs["slow_mo"] = 60
-        if proxy_url:
-            launch_kwargs["proxy"] = {"server": proxy_url}
+        if proxy_config:
+            launch_kwargs["proxy"] = proxy_config
 
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
@@ -437,8 +445,12 @@ async def run_youtube_watch_session(
         await context.add_init_script(_build_stealth_script(persona))
         page = await context.new_page()
 
-        # AdSense Zero-Fraud Firewall
+        # AdSense Zero-Fraud Firewall (Protect YouTube video stream)
         async def block_ads(route: Any, request: Any) -> None:
+            url_low = request.url.lower()
+            if any(t in url_low for t in ("googlevideo.com", "youtube.com", "ytimg.com", "google.com", "ggpht.com")):
+                await route.continue_()
+                return
             if domain_is_blocked(request.url):
                 await route.abort()
             else:
@@ -451,40 +463,32 @@ async def run_youtube_watch_session(
             if active_funnel == "search" and search_keyword:
                 logger.info(f"🔍 [Worker #{worker_id}] Executing Search-to-Watch: '{search_keyword}'")
                 try:
-                    await page.goto("https://www.youtube.com", wait_until="domcontentloaded", timeout=60000)
-                except Exception:
-                    try:
-                        await page.goto("https://www.youtube.com", wait_until="commit", timeout=30000)
-                    except Exception as e:
-                        logger.warning(f"Search navigation notice: {e}")
-
-                # Auto-dismiss cookie / GDPR consent modal
-                for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue", "Accept"]:
-                    try:
-                        btn = page.locator(f"button:has-text('{btn_text}')").first
-                        if await btn.is_visible(timeout=1500):
-                            await btn.click()
-                            break
-                    except Exception:
-                        pass
-
-                try:
+                    await page.goto("https://www.youtube.com", wait_until="commit", timeout=20000)
+                    await asyncio.sleep(2)
+                    for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue", "Accept"]:
+                        try:
+                            btn = page.locator(f"button:has-text('{btn_text}')").first
+                            if await btn.is_visible(timeout=1000):
+                                await btn.click()
+                                break
+                        except Exception:
+                            pass
                     search_box = page.locator('input#search, input[name="search_query"]').first
                     if await search_box.is_visible(timeout=3000):
                         await search_box.click()
                         for char in search_keyword:
-                            await page.keyboard.type(char, delay=random.randint(40, 110))
+                            await page.keyboard.type(char, delay=random.randint(30, 90))
                         await page.keyboard.press("Enter")
-                        await asyncio.sleep(random.uniform(2.5, 4.5))
+                        await asyncio.sleep(random.uniform(2.0, 4.0))
                         actions.append("searched_keyword")
                 except Exception as e:
-                    logger.warning(f"Search input bypass: {e}")
+                    logger.warning(f"Search navigation notice: {e}")
 
             elif active_funnel == "embed":
                 logger.info(f"🌐 [Worker #{worker_id}] Executing Embed Web Referral via gworky.com")
                 try:
-                    await page.goto("https://gworky.com/wire", wait_until="domcontentloaded", timeout=30000)
-                    await asyncio.sleep(random.uniform(4.0, 7.0))
+                    await page.goto("https://gworky.com/wire", wait_until="commit", timeout=20000)
+                    await asyncio.sleep(random.uniform(3.0, 5.0))
                     actions.append("visited_embed_referrer")
                 except Exception as e:
                     logger.warning(f"Embed referrer warning: {e}")
@@ -492,35 +496,59 @@ async def run_youtube_watch_session(
             elif active_funnel == "shorts_bridge":
                 logger.info(f"📱 [Worker #{worker_id}] Executing Shorts Bridge Discovery")
                 try:
-                    short_bridge_url = "https://youtu.be/_0CGS0MXnGc"
-                    await page.goto(short_bridge_url, wait_until="commit", timeout=30000)
-                    await asyncio.sleep(random.uniform(8.0, 14.0))
+                    short_bridge_url = "https://youtu.be/Ygr-u9OZZWY"
+                    await page.goto(short_bridge_url, wait_until="commit", timeout=20000)
+                    await asyncio.sleep(random.uniform(5.0, 9.0))
                     actions.append("watched_shorts_bridge")
                 except Exception as e:
                     logger.warning(f"Shorts bridge warning: {e}")
 
-            # Step 2: Navigate to target video with resilient fallback
+            # Step 2: Navigate to target video with resilient commit strategy
             clean_url = video_url if ("?" in video_url) else f"{video_url}?feature=shared"
             logger.info(f"🎬 [Worker #{worker_id}] Loading target video: {clean_url}")
-            try:
-                await page.goto(clean_url, wait_until="domcontentloaded", timeout=60000)
-            except Exception:
+            
+            nav_success = False
+            for attempt in range(2):
                 try:
-                    await page.goto(clean_url, wait_until="commit", timeout=30000)
+                    await page.goto(clean_url, wait_until="commit", timeout=25000)
+                    nav_success = True
+                    break
                 except Exception as e:
-                    logger.warning(f"Navigation warning (proceeding anyway): {e}")
+                    logger.warning(f"Worker #{worker_id} navigation attempt {attempt+1} notice: {e}")
+                    await asyncio.sleep(2)
+
+            if not nav_success:
+                logger.error(f"❌ [Worker #{worker_id}] Navigation failed completely. Aborting.")
+                return {"status": "failed_navigation", "session_id": session_id, "duration": 0}
+
             actions.append("opened_video_url")
 
-            # Dismiss cookie consent modal
-            for btn_text in ["Accept all", "I agree", "Reject all", "Accept the use of cookies"]:
+            # Wait for player attachment
+            try:
+                await page.wait_for_selector("#movie_player, ytd-player, video", state="attached", timeout=15000)
+            except Exception:
+                pass
+
+            # Auto-dismiss Google / GDPR consent dialogs
+            for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue", "Accept"]:
                 try:
                     btn = page.locator(f"button:has-text('{btn_text}')").first
-                    if await btn.is_visible(timeout=1500):
+                    if await btn.is_visible(timeout=1000):
                         await btn.click()
+                        actions.append(f"dismissed_{btn_text.lower().replace(' ', '_')}")
+                        break
                 except Exception:
                     pass
 
-            # Play video with 144p quality range injection (saves ~92% bandwidth)
+            # Trigger play button if large overlay is present
+            try:
+                play_btn = page.locator(".ytp-play-button, .ytp-large-play-button").first
+                if await play_btn.is_visible(timeout=1500):
+                    await play_btn.click()
+            except Exception:
+                pass
+
+            # Inject 144p resolution & unmute/play
             await page.evaluate("""() => {
                 try {
                     const player = document.getElementById('movie_player');
@@ -531,43 +559,105 @@ async def run_youtube_watch_session(
                     const v = document.querySelector('video');
                     if (v) {
                         v.muted = true;
-                        v.play();
+                        v.play().catch(() => {});
                     }
                 } catch(e) {}
             }""")
             actions.append("played_video_144p")
 
-            # Dynamic dwell loop with speed shifting & micro-scrolls
-            checkpoint_interval = 45.0
+            # ── HARD STRICT PLAYBACK GATE & SAMPLING LOOP ─────────────────────
+            sample_interval = 15.0
             elapsed = 0.0
-            speeds = [1.0, 1.25, 1.5, 1.0]
+            last_t = -1.0
+            stalled_streak = 0
+            accumulated_playback = 0.0
+            speeds = [1.0, 1.25, 1.0]
 
             while elapsed < duration_sec:
-                await asyncio.sleep(min(checkpoint_interval, max(1.0, duration_sec - elapsed)))
+                await asyncio.sleep(min(sample_interval, max(1.0, duration_sec - elapsed)))
                 elapsed = time.time() - start_time
 
-                # Shift playback speed dynamically via DOM injection
-                new_speed = random.choice(speeds)
-                await page.evaluate(f"() => {{ const v = document.querySelector('video'); if (v) v.playbackRate = {new_speed}; }}")
+                # Sample DOM playback state
+                state = await page.evaluate("""() => {
+                    const v = document.querySelector('video');
+                    const player = document.getElementById('movie_player');
+                    if (!v) return { found: false };
+                    return {
+                        found: true,
+                        currentTime: v.currentTime,
+                        paused: v.paused,
+                        duration: v.duration,
+                        playerState: player && player.getPlayerState ? player.getPlayerState() : null
+                    };
+                }""")
 
-                # Micro-scroll down to review comments or chapters
-                scroll_y = random.randint(200, 500)
-                await page.evaluate(f"window.scrollBy({{ top: {scroll_y}, behavior: 'smooth' }});")
-                await asyncio.sleep(random.uniform(1.5, 3.5))
-                await page.evaluate(f"window.scrollBy({{ top: -{scroll_y}, behavior: 'smooth' }});")
-                actions.append(f"speed_{new_speed}x_at_{int(elapsed)}s")
+                if not state.get("found"):
+                    stalled_streak += 1
+                    logger.warning(f"⚠️ [Worker #{worker_id}] Video element not found (streak={stalled_streak})")
+                else:
+                    curr_t = float(state.get("currentTime", 0.0))
+                    paused = state.get("paused", True)
+                    p_state = state.get("playerState")
 
-            actions.append(f"completed_watch_{int(elapsed)}s")
+                    # Advance confirmed when currentTime increases while playing
+                    if curr_t > last_t and not paused and p_state == 1:
+                        delta = curr_t - (last_t if last_t >= 0 else 0)
+                        accumulated_playback += delta
+                        last_t = curr_t
+                        stalled_streak = 0
+                    else:
+                        stalled_streak += 1
+                        logger.warning(f"⚠️ [Worker #{worker_id}] Playback stalled at {curr_t:.1f}s (paused={paused}, state={p_state}, streak={stalled_streak})")
+                        # Auto-recovery: trigger video.play()
+                        try:
+                            await page.evaluate("""() => {
+                                const v = document.querySelector('video');
+                                if (v) { v.muted = true; v.play().catch(() => {}); }
+                            }""")
+                        except Exception:
+                            pass
+
+                # Circuit breaker: if stalled for 4 consecutive samples (60s), abort
+                if stalled_streak >= 4:
+                    logger.error(f"❌ [Worker #{worker_id}] Video stalled for 60s without advancement. Aborting.")
+                    break
+
+                # Natural human micro-actions
+                if random.random() < 0.25:
+                    new_speed = random.choice(speeds)
+                    await page.evaluate(f"() => {{ const v = document.querySelector('video'); if (v) v.playbackRate = {new_speed}; }}")
+                    scroll_y = random.randint(150, 350)
+                    await page.evaluate(f"window.scrollBy({{ top: {scroll_y}, behavior: 'smooth' }});")
+                    await asyncio.sleep(random.uniform(1.2, 2.5))
+                    await page.evaluate(f"window.scrollBy({{ top: -{scroll_y}, behavior: 'smooth' }});")
+
+            # Final Hard Strict Playback Gate validation
+            min_qualifying_sec = min(45.0, duration_sec * 0.6)
+            if accumulated_playback >= min_qualifying_sec:
+                actions.append(f"verified_watch_{int(accumulated_playback)}s")
+                status = "completed"
+                logger.info(f"✅ [Worker #{worker_id}] Verified YouTube Watch Session complete ({int(accumulated_playback)}s streamed)")
+            else:
+                actions.append(f"failed_insufficient_watch_{int(accumulated_playback)}s")
+                status = "failed_stalled"
+                logger.warning(f"❌ [Worker #{worker_id}] Session rejected by Hard Strict Gate ({accumulated_playback:.1f}s streamed < {min_qualifying_sec}s target)")
 
         except Exception as e:
             logger.error(f"❌ YouTube watch error: {e}")
             actions.append(f"error_{str(e)[:40]}")
+            status = "failed_error"
         finally:
             await browser.close()
 
     total_time = int(time.time() - start_time)
-    logger.info(f"✅ [Worker #{worker_id}] YouTube Watch Session complete ({total_time}s)")
-    return {"status": "completed", "session_id": session_id, "duration": total_time, "actions": actions}
+    verified_duration = int(accumulated_playback) if status == "completed" else 0
+    return {
+        "status": status,
+        "session_id": session_id,
+        "duration": verified_duration,
+        "raw_elapsed": total_time,
+        "actions": actions,
+    }
 
 
 async def run_shorts_loop_session(
@@ -576,11 +666,16 @@ async def run_shorts_loop_session(
     headed: bool = False,
     worker_id: int = 1,
 ) -> dict[str, Any]:
-    """Executes a high-retention 9:16 Shorts looping session (70-120s) with pin-link bridge."""
+    """Executes a qualified 9:16 Shorts looping session (45-90s) with verified streaming."""
     from playwright.async_api import async_playwright
 
     session_id = f"short_{uuid.uuid4().hex[:10]}"
-    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
+    egress_mgr = EgressSelector()
+    proxy_config = egress_mgr.get_playwright_proxy(
+        task_type="youtube_shorts",
+        geo=persona.geo_region,
+        session_id=session_id,
+    )
     logger.info(f"📱 [Worker #{worker_id}] YouTube Shorts Session [{session_id}] for: {short_url}")
 
     start_time = time.time()
@@ -591,8 +686,8 @@ async def run_shorts_loop_session(
             "headless": not headed,
             "args": stealth_launch_args(),
         }
-        if proxy_url:
-            launch_kwargs["proxy"] = {"server": proxy_url}
+        if proxy_config:
+            launch_kwargs["proxy"] = proxy_config
 
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
@@ -606,41 +701,65 @@ async def run_shorts_loop_session(
         await context.add_init_script(_build_stealth_script(persona))
         page = await context.new_page()
 
+        accumulated_stream = 0.0
+        status = "completed"
+
         try:
-            try:
-                await page.goto(short_url, wait_until="domcontentloaded", timeout=25000)
-            except Exception:
-                try:
-                    await page.goto(short_url, wait_until="commit", timeout=15000)
-                except Exception as e:
-                    logger.warning(f"Shorts navigation warning: {e}")
+            await page.goto(short_url, wait_until="commit", timeout=20000)
             actions.append("loaded_short_url")
 
-            # Let the 70s short loop for ~80-100s
-            loop_dwell = random.uniform(75, 110)
-            logger.info(f"   Holding Shorts retention loop for {loop_dwell:.1f}s...")
-            await asyncio.sleep(loop_dwell)
-            actions.append(f"looped_{int(loop_dwell)}s")
+            # Auto-dismiss cookie dialogs
+            for btn_text in ["Accept all", "I agree", "Reject all", "Accept"]:
+                try:
+                    btn = page.locator(f"button:has-text('{btn_text}')").first
+                    if await btn.is_visible(timeout=1000):
+                        await btn.click()
+                        break
+                except Exception:
+                    pass
 
-            # Click comments to expose description / pinned link
-            try:
-                comments_btn = page.locator('button[aria-label*="Comments"], ytd-comments-entry-point-header-renderer').first
-                if await comments_btn.is_visible():
-                    await comments_btn.click()
-                    await asyncio.sleep(random.uniform(2.0, 4.0))
-                    actions.append("checked_comments")
-            except Exception:
-                pass
+            # Unmute and play
+            await page.evaluate("""() => {
+                const v = document.querySelector('video');
+                if (v) { v.muted = true; v.play().catch(() => {}); }
+            }""")
+
+            # Sample loop advancement
+            loop_duration = random.uniform(45, 80)
+            sample_time = 0.0
+            last_t = -1.0
+            while sample_time < loop_duration:
+                await asyncio.sleep(10)
+                sample_time += 10
+                state = await page.evaluate("""() => {
+                    const v = document.querySelector('video');
+                    return v ? { currentTime: v.currentTime, paused: v.paused } : null;
+                }""")
+                if state and not state.get("paused"):
+                    curr = state.get("currentTime", 0.0)
+                    if curr != last_t:
+                        accumulated_stream += 10
+                        last_t = curr
+
+            actions.append(f"looped_{int(accumulated_stream)}s")
+            logger.info(f"   Shorts loop streamed {accumulated_stream:.1f}s verified.")
 
         except Exception as e:
             logger.error(f"❌ Shorts loop error: {e}")
             actions.append(f"error_{str(e)[:40]}")
+            status = "failed_error"
         finally:
             await browser.close()
 
     total_time = int(time.time() - start_time)
-    logger.info(f"✅ [Worker #{worker_id}] Shorts Session complete ({total_time}s)")
-    return {"status": "completed", "session_id": session_id, "duration": total_time, "actions": actions}
+    verified_duration = int(accumulated_stream) if status == "completed" and accumulated_stream >= 30.0 else 0
+    return {
+        "status": "completed" if verified_duration > 0 else "failed_stalled",
+        "session_id": session_id,
+        "duration": verified_duration,
+        "raw_elapsed": total_time,
+        "actions": actions,
+    }
 
 
 # ==============================================================================
