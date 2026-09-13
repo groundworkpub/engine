@@ -2,8 +2,8 @@ name: "YouTube Watch-Time Booster & Shorts Loop Engine"
 
 on:
   schedule:
-    # Runs 4 times daily (peak morning, lunch, evening US/UK/AU windows)
-    - cron: "0 6,12,18,23 * * *"
+    # 24/7 Cloud Autonomy: Runs every 3 hours across 6 parallel shards (~144 Watch-Hours / day)
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       concurrency:
@@ -13,7 +13,7 @@ on:
       watch_duration:
         description: "Watch time duration in seconds (e.g. 600 for 10m, 1200 for 20m)"
         required: false
-        default: "600"
+        default: "1200"
       funnel_mode:
         description: "Discovery funnel mode"
         required: false
@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 180
     strategy:
       matrix:
-        runner_shard: [1, 2]
+        runner_shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout Engine Repository
@@ -69,4 +69,4 @@ jobs:
           echo "🚀 Shard ${{ matrix.runner_shard }}: Starting Omni-Automation Watch Engine on GitHub Actions ($0 Free Tier)..."
           python master_orchestrator.py auto \
             --concurrency ${{ github.event.inputs.concurrency || 2 }} \
-            --watch-duration ${{ github.event.inputs.watch_duration || 600 }}
+            --watch-duration ${{ github.event.inputs.watch_duration || 1200 }}

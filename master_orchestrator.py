@@ -495,6 +495,32 @@ class TelemetryManager:
             f"📊 Telemetry logged session [{session_id}]: {duration_sec:.1f}s watched. "
             f"Total: {data['total_watch_hours']:.2f} / 4,000 Hours ({data['completion_percentage']:.2f}%)"
         )
+
+        # Milestone Threshold Notification
+        prev_hours = round((data["total_watch_seconds"] - duration_sec) / 3600.0, 3)
+        curr_hours = data["total_watch_hours"]
+        milestones = [5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4000.0]
+        for m in milestones:
+            if prev_hours < m <= curr_hours:
+                logger.info(f"🎉 [MILESTONE REACHED] YouTube Watch-Time crossed {m:.0f} Hours! ({data['completion_percentage']:.2f}% of goal)")
+                try:
+                    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+                    if bot_token and chat_id:
+                        import urllib.request, urllib.parse
+                        tg_msg = (
+                            f"🎉 *Groundwork YouTube Milestone Reached!*\n\n"
+                            f"⏱ *Total Watch-Hours:* `{curr_hours:.2f} / 4,000.0 hrs` ({data['completion_percentage']:.2f}%)\n"
+                            f"📊 *Total Sessions:* `{data['total_sessions']}`\n"
+                            f"💾 *Bandwidth Saved:* `{data['bandwidth_saved_mb']:.1f} MB` (144p firewall)\n"
+                            f"🚀 *Status:* On track to 4,000 hrs YPP threshold."
+                        )
+                        tg_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                        payload = urllib.parse.urlencode({"chat_id": chat_id, "text": tg_msg, "parse_mode": "Markdown"}).encode()
+                        req = urllib.request.Request(tg_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"})
+                        urllib.request.urlopen(req, timeout=5)
+                except Exception as tg_err:
+                    logger.warning(f"Milestone Telegram notification notice: {tg_err}")
         return data
 
     def render_progress_bar(self, width: int = 30) -> str:
@@ -1185,19 +1211,20 @@ async def execute_pyramid_funnel(
     except Exception as e:
         logger.error(f"Master video batch error: {e}")
 
-    # ── TIER 3 (20% Weight): 1-Hour Longform Deep Dive (High Watch Hours) ─
-    if random.random() < 0.50:
+    # ── TIER 3 (70% Target Watch Hours): 1-Hour Longform Deep Dive ───────
+    if random.random() < 0.90:
         longform_url = "https://youtu.be/-yh59eacYJM"
-        longform_dwell = int(random.gauss(600, 120))
-        longform_dwell = max(300, min(1200, longform_dwell))
-        logger.info(f"🏛️ Tier 3 (20%): Dispatching 1-Hour Deep Dive session -> {longform_url} ({longform_dwell}s)")
+        target_dwell = max(900, min(2400, base_watch_duration))
+        longform_dwell = int(random.gauss(target_dwell, 150))
+        longform_dwell = max(600, min(3000, longform_dwell))
+        logger.info(f"🏛️ Tier 3 (High Watch Hours): Dispatching 1-Hour Deep Dive session -> {longform_url} ({longform_dwell}s)")
         try:
             await gov.run_batch_watch(
                 video_url=longform_url,
                 concurrency=concurrency,
                 duration=longform_dwell,
                 headed=headed,
-                search_keyword="Groundwork Executive Briefing",
+                search_keyword="Groundwork Mega Briefing Evidence-Based",
                 funnel_mode="auto",
                 quality="144p",
             )
