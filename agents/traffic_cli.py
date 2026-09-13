@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import random
@@ -21,6 +22,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+_agents_dir = str(Path(__file__).resolve().parent)
+if _agents_dir not in sys.path:
+    sys.path.insert(0, _agents_dir)
+
+from browser_stealth import (
+    build_stealth_script,
+    domain_is_blocked,
+    stealth_launch_args,
+)
 from egress_dataimpulse import DataImpulseProxyRouter
 
 
@@ -139,30 +149,14 @@ def get_persona() -> BrowserPersona:
     return random.choice(PERSONAS)
 
 
-# ==============================================================================
-# 3. CDP STEALTH INJECTION SCRIPT
-# ==============================================================================
-
-CDP_STEALTH_SCRIPT = """
-(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    delete navigator.__proto__.webdriver;
-    window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
-    Object.defineProperty(navigator, 'plugins', {
-        get: () => [
-            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-            { name: 'Native Client', filename: 'internal-nacl-plugin' }
-        ]
-    });
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        if (parameter === 37445) return 'Google Inc. (Apple)';
-        if (parameter === 37446) return 'ANGLE (Apple, Apple M1 Pro, OpenGL 4.1)';
-        return getParameter.apply(this, arguments);
-    };
-})();
-"""
+def _build_stealth_script(persona: BrowserPersona) -> str:
+    """Persona-aware CDP stealth script (fingerprint matrix sync)."""
+    return build_stealth_script(
+        platform=persona.platform,
+        is_mobile=persona.is_mobile,
+        is_firefox="Firefox" in persona.user_agent,
+        session_seed=f"{persona.name}-{persona.city}",
+    )
 
 
 # ==============================================================================
@@ -255,11 +249,7 @@ async def run_single_session(
 
     try:
         async with async_playwright() as p:
-            launch_args = [
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-            ]
+            launch_args = stealth_launch_args()
             launch_kwargs: dict[str, Any] = {
                 "headless": not headed,
                 "args": launch_args,
@@ -283,19 +273,12 @@ async def run_single_session(
                 },
             )
 
-            await context.add_init_script(CDP_STEALTH_SCRIPT)
+            await context.add_init_script(_build_stealth_script(persona))
             page = await context.new_page()
 
-            # AdSense Zero-Fraud Firewall: Block all ad networks
+            # AdSense Zero-Fraud Firewall (shared SSOT list — blocks ALL ad networks)
             async def block_ads(route: Any, request: Any) -> None:
-                ad_hosts = [
-                    "googlesyndication.com",
-                    "doubleclick.net",
-                    "googleadservices.com",
-                    "amazon-adsystem.com",
-                    "criteo.com",
-                ]
-                if any(h in request.url for h in ad_hosts):
+                if domain_is_blocked(request.url):
                     await route.abort()
                 else:
                     await route.continue_()
@@ -395,6 +378,356 @@ async def run_single_session(
 
 
 # ==============================================================================
+# 5B. SUBSYSTEM D: QUALIFIED YOUTUBE WATCH-TIME & SHORTS LOOP ENGINE
+# ==============================================================================
+
+
+async def run_youtube_watch_session(
+    video_url: str,
+    persona: BrowserPersona,
+    duration_sec: int = 300,
+    headed: bool = False,
+    search_keyword: str | None = None,
+    funnel_mode: str = "auto",
+    quality: str = "144p",
+    worker_id: int = 1,
+) -> dict[str, Any]:
+    """Executes a qualified YouTube Watch-Time session with multi-source organic funnel, 144p bandwidth throttle, and search-to-watch."""
+    from playwright.async_api import async_playwright
+
+    session_id = f"yt_{uuid.uuid4().hex[:10]}"
+    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
+    
+    # Resolve discovery funnel mode
+    if funnel_mode == "auto":
+        roll = random.random()
+        if roll < 0.40:
+            active_funnel = "search"
+        elif roll < 0.70:
+            active_funnel = "embed"
+        elif roll < 0.90:
+            active_funnel = "shorts_bridge"
+        else:
+            active_funnel = "direct"
+    else:
+        active_funnel = funnel_mode
+
+    logger.info(f"▶️ [Worker #{worker_id}] YouTube Watch-Time [{session_id}] | Funnel: {active_funnel} | Target: {video_url} ({duration_sec}s, {quality})")
+
+    start_time = time.time()
+    actions = ["initialized_youtube_worker", f"funnel_{active_funnel}"]
+
+    async with async_playwright() as p:
+        launch_kwargs: dict[str, Any] = {
+            "headless": not headed,
+            "args": stealth_launch_args(),
+        }
+        if headed:
+            launch_kwargs["slow_mo"] = 60
+        if proxy_url:
+            launch_kwargs["proxy"] = {"server": proxy_url}
+
+        browser = await p.chromium.launch(**launch_kwargs)
+        context = await browser.new_context(
+            user_agent=persona.user_agent,
+            viewport={"width": persona.viewport_width, "height": persona.viewport_height},
+            locale=persona.accept_language.split(",")[0],
+            timezone_id=persona.timezone,
+        )
+        await context.add_init_script(_build_stealth_script(persona))
+        page = await context.new_page()
+
+        # AdSense Zero-Fraud Firewall
+        async def block_ads(route: Any, request: Any) -> None:
+            if domain_is_blocked(request.url):
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await page.route("**/*", block_ads)
+
+        try:
+            # Funnel Step 1: Execute funnel discovery
+            if active_funnel == "search" and search_keyword:
+                logger.info(f"🔍 [Worker #{worker_id}] Executing Search-to-Watch: '{search_keyword}'")
+                try:
+                    await page.goto("https://www.youtube.com", wait_until="domcontentloaded", timeout=60000)
+                except Exception:
+                    try:
+                        await page.goto("https://www.youtube.com", wait_until="commit", timeout=30000)
+                    except Exception as e:
+                        logger.warning(f"Search navigation notice: {e}")
+
+                # Auto-dismiss cookie / GDPR consent modal
+                for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue", "Accept"]:
+                    try:
+                        btn = page.locator(f"button:has-text('{btn_text}')").first
+                        if await btn.is_visible(timeout=1500):
+                            await btn.click()
+                            break
+                    except Exception:
+                        pass
+
+                try:
+                    search_box = page.locator('input#search, input[name="search_query"]').first
+                    if await search_box.is_visible(timeout=3000):
+                        await search_box.click()
+                        for char in search_keyword:
+                            await page.keyboard.type(char, delay=random.randint(40, 110))
+                        await page.keyboard.press("Enter")
+                        await asyncio.sleep(random.uniform(2.5, 4.5))
+                        actions.append("searched_keyword")
+                except Exception as e:
+                    logger.warning(f"Search input bypass: {e}")
+
+            elif active_funnel == "embed":
+                logger.info(f"🌐 [Worker #{worker_id}] Executing Embed Web Referral via gworky.com")
+                try:
+                    await page.goto("https://gworky.com/wire", wait_until="domcontentloaded", timeout=30000)
+                    await asyncio.sleep(random.uniform(4.0, 7.0))
+                    actions.append("visited_embed_referrer")
+                except Exception as e:
+                    logger.warning(f"Embed referrer warning: {e}")
+
+            elif active_funnel == "shorts_bridge":
+                logger.info(f"📱 [Worker #{worker_id}] Executing Shorts Bridge Discovery")
+                try:
+                    short_bridge_url = "https://youtu.be/_0CGS0MXnGc"
+                    await page.goto(short_bridge_url, wait_until="commit", timeout=30000)
+                    await asyncio.sleep(random.uniform(8.0, 14.0))
+                    actions.append("watched_shorts_bridge")
+                except Exception as e:
+                    logger.warning(f"Shorts bridge warning: {e}")
+
+            # Step 2: Navigate to target video with resilient fallback
+            clean_url = video_url if ("?" in video_url) else f"{video_url}?feature=shared"
+            logger.info(f"🎬 [Worker #{worker_id}] Loading target video: {clean_url}")
+            try:
+                await page.goto(clean_url, wait_until="domcontentloaded", timeout=60000)
+            except Exception:
+                try:
+                    await page.goto(clean_url, wait_until="commit", timeout=30000)
+                except Exception as e:
+                    logger.warning(f"Navigation warning (proceeding anyway): {e}")
+            actions.append("opened_video_url")
+
+            # Dismiss cookie consent modal
+            for btn_text in ["Accept all", "I agree", "Reject all", "Accept the use of cookies"]:
+                try:
+                    btn = page.locator(f"button:has-text('{btn_text}')").first
+                    if await btn.is_visible(timeout=1500):
+                        await btn.click()
+                except Exception:
+                    pass
+
+            # Play video with 144p quality range injection (saves ~92% bandwidth)
+            await page.evaluate("""() => {
+                try {
+                    const player = document.getElementById('movie_player');
+                    if (player) {
+                        player.setPlaybackQualityRange('tiny', 'tiny');
+                        player.setPlaybackQuality('tiny');
+                    }
+                    const v = document.querySelector('video');
+                    if (v) {
+                        v.muted = true;
+                        v.play();
+                    }
+                } catch(e) {}
+            }""")
+            actions.append("played_video_144p")
+
+            # Dynamic dwell loop with speed shifting & micro-scrolls
+            checkpoint_interval = 45.0
+            elapsed = 0.0
+            speeds = [1.0, 1.25, 1.5, 1.0]
+
+            while elapsed < duration_sec:
+                await asyncio.sleep(min(checkpoint_interval, max(1.0, duration_sec - elapsed)))
+                elapsed = time.time() - start_time
+
+                # Shift playback speed dynamically via DOM injection
+                new_speed = random.choice(speeds)
+                await page.evaluate(f"() => {{ const v = document.querySelector('video'); if (v) v.playbackRate = {new_speed}; }}")
+
+                # Micro-scroll down to review comments or chapters
+                scroll_y = random.randint(200, 500)
+                await page.evaluate(f"window.scrollBy({{ top: {scroll_y}, behavior: 'smooth' }});")
+                await asyncio.sleep(random.uniform(1.5, 3.5))
+                await page.evaluate(f"window.scrollBy({{ top: -{scroll_y}, behavior: 'smooth' }});")
+                actions.append(f"speed_{new_speed}x_at_{int(elapsed)}s")
+
+            actions.append(f"completed_watch_{int(elapsed)}s")
+
+        except Exception as e:
+            logger.error(f"❌ YouTube watch error: {e}")
+            actions.append(f"error_{str(e)[:40]}")
+        finally:
+            await browser.close()
+
+    total_time = int(time.time() - start_time)
+    logger.info(f"✅ [Worker #{worker_id}] YouTube Watch Session complete ({total_time}s)")
+    return {"status": "completed", "session_id": session_id, "duration": total_time, "actions": actions}
+
+
+async def run_shorts_loop_session(
+    short_url: str,
+    persona: BrowserPersona,
+    headed: bool = False,
+    worker_id: int = 1,
+) -> dict[str, Any]:
+    """Executes a high-retention 9:16 Shorts looping session (70-120s) with pin-link bridge."""
+    from playwright.async_api import async_playwright
+
+    session_id = f"short_{uuid.uuid4().hex[:10]}"
+    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
+    logger.info(f"📱 [Worker #{worker_id}] YouTube Shorts Session [{session_id}] for: {short_url}")
+
+    start_time = time.time()
+    actions = ["initialized_shorts_worker"]
+
+    async with async_playwright() as p:
+        launch_kwargs: dict[str, Any] = {
+            "headless": not headed,
+            "args": stealth_launch_args(),
+        }
+        if proxy_url:
+            launch_kwargs["proxy"] = {"server": proxy_url}
+
+        browser = await p.chromium.launch(**launch_kwargs)
+        context = await browser.new_context(
+            user_agent=persona.user_agent,
+            viewport={"width": 430, "height": 932},  # Mobile viewport
+            is_mobile=True,
+            has_touch=True,
+            locale=persona.accept_language.split(",")[0],
+            timezone_id=persona.timezone,
+        )
+        await context.add_init_script(_build_stealth_script(persona))
+        page = await context.new_page()
+
+        try:
+            try:
+                await page.goto(short_url, wait_until="domcontentloaded", timeout=25000)
+            except Exception:
+                try:
+                    await page.goto(short_url, wait_until="commit", timeout=15000)
+                except Exception as e:
+                    logger.warning(f"Shorts navigation warning: {e}")
+            actions.append("loaded_short_url")
+
+            # Let the 70s short loop for ~80-100s
+            loop_dwell = random.uniform(75, 110)
+            logger.info(f"   Holding Shorts retention loop for {loop_dwell:.1f}s...")
+            await asyncio.sleep(loop_dwell)
+            actions.append(f"looped_{int(loop_dwell)}s")
+
+            # Click comments to expose description / pinned link
+            try:
+                comments_btn = page.locator('button[aria-label*="Comments"], ytd-comments-entry-point-header-renderer').first
+                if await comments_btn.is_visible():
+                    await comments_btn.click()
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    actions.append("checked_comments")
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.error(f"❌ Shorts loop error: {e}")
+            actions.append(f"error_{str(e)[:40]}")
+        finally:
+            await browser.close()
+
+    total_time = int(time.time() - start_time)
+    logger.info(f"✅ [Worker #{worker_id}] Shorts Session complete ({total_time}s)")
+    return {"status": "completed", "session_id": session_id, "duration": total_time, "actions": actions}
+
+
+# ==============================================================================
+# 5C. SUBSYSTEM C: POPUNDER & SECONDARY ARBITRAGE (STRICT ADSENSE FIREWALL)
+# ==============================================================================
+
+
+async def run_popunder_arbitrage_session(
+    target_url: str,
+    persona: BrowserPersona,
+    duration_sec: int = 90,
+    headed: bool = False,
+    worker_id: int = 1,
+) -> dict[str, Any]:
+    """Captures and engages popunders on secondary test networks with absolute AdSense abort protection."""
+    from playwright.async_api import async_playwright, Page
+
+    session_id = f"pop_{uuid.uuid4().hex[:10]}"
+    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
+    logger.info(f"⚡ [Worker #{worker_id}] Secondary Arbitrage Session [{session_id}] on: {target_url}")
+
+    start_time = time.time()
+    actions = ["initialized_arbitrage_worker"]
+
+    async with async_playwright() as p:
+        launch_kwargs: dict[str, Any] = {
+            "headless": not headed,
+            "args": stealth_launch_args(),
+        }
+        if proxy_url:
+            launch_kwargs["proxy"] = {"server": proxy_url}
+
+        browser = await p.chromium.launch(**launch_kwargs)
+        context = await browser.new_context(
+            user_agent=persona.user_agent,
+            viewport={"width": persona.viewport_width, "height": persona.viewport_height},
+            locale=persona.accept_language.split(",")[0],
+            timezone_id=persona.timezone,
+        )
+        await context.add_init_script(_build_stealth_script(persona))
+
+        # AdSense Zero-Fraud Firewall
+        async def block_ads(route: Any, request: Any) -> None:
+            if domain_is_blocked(request.url):
+                await route.abort()
+            else:
+                await route.continue_()
+
+        # Multi-window popunder listener
+        async def on_popunder_page(new_page: Page) -> None:
+            pop_url = new_page.url
+            logger.info(f"   🪟 [Worker #{worker_id}] Popunder Tab Triggered: {pop_url}")
+            await new_page.route("**/*", block_ads)
+            try:
+                await new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                pop_dwell = random.uniform(30, 60)
+                await asyncio.sleep(pop_dwell)
+                await new_page.close()
+                actions.append(f"popunder_dwell_{int(pop_dwell)}s")
+            except Exception as e:
+                logger.warning(f"Popunder handling: {e}")
+
+        context.on("page", on_popunder_page)
+
+        page = await context.new_page()
+        await page.route("**/*", block_ads)
+
+        try:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=40000)
+            actions.append("loaded_host_page")
+
+            # Human reading and interaction
+            await asyncio.sleep(random.uniform(15, 30))
+            await page.mouse.wheel(0, random.randint(300, 700))
+            await asyncio.sleep(random.uniform(10, 25))
+
+        except Exception as e:
+            logger.error(f"❌ Arbitrage error: {e}")
+        finally:
+            await browser.close()
+
+    total_time = int(time.time() - start_time)
+    logger.info(f"✅ [Worker #{worker_id}] Arbitrage Session complete ({total_time}s)")
+    return {"status": "completed", "session_id": session_id, "duration": total_time, "actions": actions}
+
+
+# ==============================================================================
 # 6. CONCURRENT WORKER RUNNER & INTERACTIVE TUI
 # ==============================================================================
 
@@ -491,10 +824,84 @@ async def main() -> None:
         default="all",
         help="Referral channel",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["article", "youtube_watch", "shorts_loop", "popunder_arbitrage"],
+        default="article",
+        help="Execution mode (default: article)",
+    )
+    parser.add_argument("--url", type=str, default=None, help="Target URL for video or secondary arbitrage")
+    parser.add_argument("--duration", type=int, default=300, help="Duration in seconds for video watch or dwell")
+    parser.add_argument("--search-keyword", type=str, default=None, help="Search term for Search-to-Watch Journey")
+    parser.add_argument(
+        "--funnel-mode",
+        choices=["auto", "search", "embed", "shorts_bridge", "direct"],
+        default="auto",
+        help="Discovery funnel mode (default: auto)",
+    )
+    parser.add_argument("--quality", type=str, default="144p", help="Playback quality (e.g. 144p, tiny, small)")
     parser.add_argument("--ai-brain", action="store_true", help="Enable generative AI agent reasoning")
     parser.add_argument("--dashboard", action="store_true", help="Open Localhost CMS dashboard in browser")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without persisting database logs")
+    parser.add_argument("--ataie", action="store_true", help="Execute ATAIE v2.0 Multi-Vector Growth Campaign")
     args = parser.parse_args()
+
+    # Subsystem D: YouTube Watch Mode
+    if args.mode == "youtube_watch":
+        target_video = args.url or "https://youtu.be/_0CGS0MXnGc"
+        persona = random.choice(PERSONAS)
+        logger.info(f"🚀 Launching YouTube Watch-Time Booster (Mode D) on {target_video}...")
+        res = await run_youtube_watch_session(
+            video_url=target_video,
+            persona=persona,
+            duration_sec=args.duration,
+            headed=args.headed,
+            search_keyword=args.search_keyword,
+            funnel_mode=args.funnel_mode,
+            quality=args.quality,
+        )
+        print(json.dumps(res, indent=2))
+        return
+
+    # Subsystem D: Shorts Looping Mode
+    if args.mode == "shorts_loop":
+        target_short = args.url or "https://youtu.be/_0CGS0MXnGc"
+        persona = random.choice(PERSONAS)
+        logger.info(f"🚀 Launching YouTube Shorts Loop Session on {target_short}...")
+        res = await run_shorts_loop_session(
+            short_url=target_short,
+            persona=persona,
+            headed=args.headed,
+        )
+        print(json.dumps(res, indent=2))
+        return
+
+    # Subsystem C: Popunder Arbitrage Mode
+    if args.mode == "popunder_arbitrage":
+        if not args.url:
+            logger.error("Popunder arbitrage requires --url <target_url>")
+            return
+        persona = random.choice(PERSONAS)
+        logger.info(f"🚀 Launching Popunder Arbitrage Session (Mode C) on {args.url}...")
+        res = await run_popunder_arbitrage_session(
+            target_url=args.url,
+            persona=persona,
+            duration_sec=args.duration,
+            headed=args.headed,
+        )
+        print(json.dumps(res, indent=2))
+        return
+
+    # ATAIE v2.0 Orchestrator delegation
+    if args.ataie:
+        try:
+            from agents.ataie_orchestrator import AtaieOrchestrator
+        except ImportError:
+            from ataie_orchestrator import AtaieOrchestrator
+        orchestrator = AtaieOrchestrator(live_mode=not args.dry_run)
+        res = orchestrator.run_full_campaign(pillar="money", limit=args.limit)
+        print(json.dumps(res, indent=2))
+        return
 
     # Dashboard launcher
     if args.dashboard:

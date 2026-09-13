@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "pipeline": "omni_content_bridge",
+  "generated_at": "2026-09-13T09:50:00Z",
+  "tasks": [
+    {
+      "task_id": "task_mega_01",
+      "format": "mega_video_1hour",
+      "target_duration_sec": 3660,
+      "pillar": "all",
+      "title": "Groundwork Mega Briefing: 1-Hour Master Evidence-Based Guides & Decision Models",
+      "source_feed": "https://gworky.com/podcast/feed.xml",
+      "output_name": "groundwork_1hour_mega_briefing.mp4",
+      "privacy": "unlisted"
+    },
+    {
+      "task_id": "task_short_01",
+      "format": "short_vertical_9_16",
+      "target_duration_sec": 70,
+      "pillar": "tech",
+      "title": "AI Misuse & Autonomous Defense",
+      "hook_script": "From hacks to biological synthesis, artificial intelligence misuse is now mainstream. Here is the unvarnished math.",
+      "output_name": "short_1_tech.mp4",
+      "privacy": "unlisted"
+    },
+    {
+      "task_id": "task_short_02",
+      "format": "short_vertical_9_16",
+      "target_duration_sec": 70,
+      "pillar": "money",
+      "title": "Mortgage Refinance & Interest Rate Traps",
+      "hook_script": "If your mortgage rate is above 6 percent, refinancing without calculating break-even points costs thousands. Here is the formula.",
+      "output_name": "short_2_money.mp4",
+      "privacy": "unlisted"
+    },
+    {
+      "task_id": "task_short_03",
+      "format": "short_vertical_9_16",
+      "target_duration_sec": 70,
+      "pillar": "body",
+      "title": "Longevity Science & Biomarker Screening",
+      "hook_script": "Most routine checkups miss subclinical cardiovascular inflammation. What peer-reviewed research says to measure instead.",
+      "output_name": "short_3_body.mp4",
+      "privacy": "unlisted"
+    }
+  ]
+}

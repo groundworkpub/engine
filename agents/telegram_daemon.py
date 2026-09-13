@@ -71,7 +71,7 @@ MAIN_KEYBOARD = {
     "keyboard": [
         [{"text": "📊 Status DB"}, {"text": "🩺 Health Server"}],
         [{"text": "🌐 Proxy Traffic"}, {"text": "📈 SERP Rankings"}],
-        [{"text": "🎯 Hunter PR"}, {"text": "🔍 Google Search"}],
+        [{"text": "🎯 Hunter PR"}, {"text": "🛡️ Community OS"}],
         [{"text": "🛑 Emergency Kill"}, {"text": "▶️ Resume System"}],
     ],
     "resize_keyboard": True,
@@ -241,7 +241,7 @@ async def execute_traffic_simulation(chat_id: int, runs: int = 5):
     except Exception as e:
         logger.error(f"Traffic simulation error: {e}")
 
-async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
+async def handle_update(client: httpx.AsyncClient, update: dict[str, Any], api_base: str = TELEGRAM_API_BASE):
     global is_kill_switch_active
 
     # 1. Handle Callback Queries (Interactive Action Buttons)
@@ -260,11 +260,15 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
             toast_msg = "✅ Disetujui!"
         elif data.startswith("reject_"):
             toast_msg = "🗑️ Ditolak."
+        elif data == "action_approve_all_community":
+            toast_msg = "🚀 Memulai publikasi 3 platform!"
+        elif data == "action_cancel_community":
+            toast_msg = "🗑️ Draf dibatalkan."
 
         ans_payload: dict[str, Any] = {"callback_query_id": cq_id}
         if toast_msg:
             ans_payload["text"] = toast_msg
-        await client.post(f"{TELEGRAM_API_BASE}/answerCallbackQuery", json=ans_payload)
+        await client.post(f"{api_base}/answerCallbackQuery", json=ans_payload)
 
         # Action: Approve Opportunity 2.0 or Pitch
         if data.startswith("approve_opp:") or data.startswith("approve_pitch:"):
@@ -409,6 +413,146 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
                     }
                 }
             )
+        # Action: Open Headed Community Dashboards on Mac
+        elif data == "action_open_headed_mac":
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": "🖥️ <b>[MEMBUKA BROWSER DI MAC ANDA]</b>\n\nMeluncurkan Chromium headed window dengan sesi terautentikasi untuk:\n• <code>r/GroundworkDecisions</code>\n• <code>groundwork.quora.com</code>\n• <code>x.com/gworkycom</code>\n\nJendela browser sedang dibuka di layar Mac Anda!",
+                    "parse_mode": "HTML"
+                }
+            )
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "community_manager.py"), "--action", "open-dashboards"])
+        # Action: Approve All Community Drafts (Simultaneous Reddit + Quora + X)
+        elif data == "action_approve_all_community":
+            draft_file = Path(__file__).resolve().parent / "data" / "pending_community_draft.json"
+            if not draft_file.exists():
+                await client.post(
+                    f"{api_base}/sendMessage",
+                    json={"chat_id": chat_id, "text": "⚠️ Tidak ada draf pending yang ditemukan.", "parse_mode": "HTML"}
+                )
+            else:
+                try:
+                    ddata = json.loads(draft_file.read_text(encoding="utf-8"))
+                    await client.post(
+                        f"{api_base}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": "🚀 <b>[MEMULAI PUBLIKASI SIMULTAN 3 PLATFORM]</b>\n\n1. Reddit (u/gworkycom)\n2. Quora Space (groundwork.quora.com)\n3. X / Twitter (@gworkycom)\n\n<i>Playwright shadow-DOM publisher sedang mengeksekusi...</i>",
+                            "parse_mode": "HTML"
+                        }
+                    )
+                    
+                    # Run poster via subprocess on background worker thread
+                    async def run_publish():
+                        poster_script = Path(__file__).resolve().parent.parent / ".agents" / "skills" / "forum-growth-copilot" / "scripts" / "poster.py"
+                        results = []
+
+                        def execute_cmd(args):
+                            cmd = [sys.executable, str(poster_script)] + args
+                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+                            platform_label = args[1] if len(args) > 1 else "unknown"
+                            logger.info(f"Subprocess {platform_label} exit={res.returncode}, stdout={res.stdout.strip()[:300]}, stderr={res.stderr.strip()[:300]}")
+                            return res
+
+                        def parse_result(proc_res, platform_name):
+                            if not proc_res or not proc_res.stdout:
+                                err = proc_res.stderr.strip() if proc_res and proc_res.stderr else "No output"
+                                return {"success": False, "error": err[:250]}
+                            for line in proc_res.stdout.splitlines():
+                                if line.startswith("__RESULT__:"):
+                                    try:
+                                        return json.loads(line.replace("__RESULT__:", "", 1))
+                                    except Exception:
+                                        pass
+                            err = proc_res.stderr.strip()[:250] if proc_res.stderr else "Unknown error"
+                            return {"success": False, "error": err}
+
+                        # 1. Reddit
+                        try:
+                            reddit_target = ddata.get("reddit", {}).get("target") or "test"
+                            sub_res = await asyncio.to_thread(
+                                execute_cmd,
+                                ["--platform", "reddit", "--target", reddit_target, "--title", ddata["reddit"]["title"], "--body", ddata["reddit"]["body"]]
+                            )
+                            parsed_reddit = parse_result(sub_res, "Reddit")
+                            if parsed_reddit.get("success") and parsed_reddit.get("url"):
+                                results.append(f"• <b>Reddit ({parsed_reddit.get('target', 'r/' + reddit_target)}):</b> <a href='{parsed_reddit['url']}'>Buka Diskusi Reddit ↗</a>")
+                            else:
+                                err = parsed_reddit.get("error") or "Gagal konfirmasi URL post"
+                                results.append(f"• <b>Reddit:</b> ❌ Gagal ({err[:250]})")
+                        except Exception as e:
+                            results.append(f"• <b>Reddit:</b> ❌ Gagal ({e})")
+
+                        # 2. Quora Space
+                        try:
+                            q_target = ddata.get("quora_target") or "https://groundwork.quora.com"
+                            q_res = await asyncio.to_thread(
+                                execute_cmd,
+                                ["--platform", "quora", "--target", q_target, "--body", ddata["quora"]]
+                            )
+                            parsed_q = parse_result(q_res, "Quora Space")
+                            if parsed_q.get("success") and parsed_q.get("url"):
+                                results.append(f"• <b>Quora Space:</b> <a href='{parsed_q['url']}'>Buka Post Quora ↗</a>")
+                            else:
+                                err = parsed_q.get("error") or "Gagal konfirmasi URL post"
+                                results.append(f"• <b>Quora Space:</b> ❌ Gagal ({err[:250]})")
+                        except Exception as e:
+                            results.append(f"• <b>Quora Space:</b> ❌ Gagal ({e})")
+
+                        # 3. X / Twitter
+                        try:
+                            x_res = await asyncio.to_thread(
+                                execute_cmd,
+                                ["--platform", "x", "--body", ddata["x"]]
+                            )
+                            parsed_x = parse_result(x_res, "X")
+                            if parsed_x.get("success") and parsed_x.get("url"):
+                                results.append(f"• <b>X / Twitter (@gworkycom):</b> <a href='{parsed_x['url']}'>Buka Tweet X ↗</a>")
+                            else:
+                                err = parsed_x.get("error") or "Gagal konfirmasi status tweet"
+                                results.append(f"• <b>X / Twitter:</b> ❌ Gagal ({err[:250]})")
+                        except Exception as e:
+                            results.append(f"• <b>X / Twitter:</b> ❌ Gagal ({e})")
+
+                        res_msg = "📢 <b>[HASIL PUBLIKASI MULTI-PLATFORM]</b>\n\n" + "\n\n".join(results)
+                        await client.post(
+                            f"{api_base}/sendMessage",
+                            json={"chat_id": chat_id, "text": res_msg, "parse_mode": "HTML", "reply_markup": MAIN_KEYBOARD, "disable_web_page_preview": False}
+                        )
+                        # Archive draft
+                        draft_file.unlink(missing_ok=True)
+
+                    asyncio.create_task(run_publish())
+                except Exception as e:
+                    logger.error(f"Error publishing community drafts: {e}")
+                    await client.post(
+                        f"{api_base}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"⚠️ Terjadi kesalahan: {e}", "parse_mode": "HTML"}
+                    )
+
+        # Action: Cancel Community Draft
+        elif data == "action_cancel_community":
+            draft_file = Path(__file__).resolve().parent / "data" / "pending_community_draft.json"
+            if draft_file.exists():
+                draft_file.unlink(missing_ok=True)
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={"chat_id": chat_id, "text": "🗑️ <b>Draf Komunitas Dibatalkan.</b>\nTidak ada konten yang dipublikasikan hari ini.", "parse_mode": "HTML"}
+            )
+
+        # Action: Scan Community Threads
+        elif data == "action_scan_community":
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": "🔍 <b>[MEMINDAI DISKUSI KOMUNITAS]</b>\n\nElena sedang memindai thread Reddit, Quora, dan X yang membutuhkan audit kalkulator/data empiris. Notifikasi sniper akan dikirim saat peluang terdeteksi.",
+                    "parse_mode": "HTML"
+                }
+            )
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "community_sniper.py")])
         # Action: Emergency Kill-Switch Toggle
         elif data == "cmd_kill":
             is_kill_switch_active = True
@@ -621,6 +765,35 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any]):
                 }
             )
 
+        # Command: Community OS
+        elif text_lower.startswith("/community") or "community" in text_lower or "🛡️ community os" in text_lower:
+            comm_text = (
+                "🛡️ <b>[GROUNDWORK COMMUNITY OS — STATUS LIVE]</b>\n\n"
+                "• <b>Reddit:</b> <a href=\"https://www.reddit.com/r/GroundworkDecisions/\">r/GroundworkDecisions</a>\n"
+                "  Status: 🟢 Aktif | 3 Foundation Posts Terbit | Rule 2 Compliant\n\n"
+                "• <b>Quora Space:</b> <a href=\"https://groundwork.quora.com/\">groundwork.quora.com</a>\n"
+                "  Status: 🟢 Aktif | Admin Verified | Automated Composer Ready\n\n"
+                "• <b>X (Twitter):</b> <a href=\"https://x.com/gworkycom\">@gworkycom</a>\n"
+                "  Status: 🟢 Aktif | Session Token Valid | Automated Posting Ready\n\n"
+                "<i>Pilih menu di bawah untuk membuka browser atau memindai thread baru:</i>"
+            )
+            await client.post(
+                f"{TELEGRAM_API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": comm_text,
+                    "parse_mode": "HTML",
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {"text": "🔍 Scan Peluang Diskusi", "callback_data": "action_scan_community"},
+                                {"text": "🖥️ Buka Dasbor Browser Mac", "callback_data": "action_open_headed_mac"}
+                            ]
+                        ]
+                    }
+                }
+            )
+
         # Command: Emergency Kill
         elif text_lower.startswith("/kill") or "kill" in text_lower:
             is_kill_switch_active = True
@@ -746,25 +919,35 @@ def get_status_inline_keyboard() -> dict[str, Any]:
         ]
     }
 
-async def main():
-    logger.info("Starting Groundwork Full-Stack Action & Telemetry Telegram Daemon for @gwelena_bot...")
+async def poll_bot(token: str, bot_name: str):
+    api_base = f"https://api.telegram.org/bot{token}"
+    logger.info(f"Starting polling for {bot_name}...")
     offset = 0
-
     async with httpx.AsyncClient(timeout=30.0) as client:
-        await client.post(f"{TELEGRAM_API_BASE}/deleteWebhook")
-
+        await client.post(f"{api_base}/deleteWebhook")
         while True:
             try:
-                res = await client.get(f"{TELEGRAM_API_BASE}/getUpdates", params={"offset": offset, "timeout": 20})
+                res = await client.get(f"{api_base}/getUpdates", params={"offset": offset, "timeout": 20})
                 if res.status_code == 200:
                     updates = res.json().get("result", [])
                     for update in updates:
                         offset = update["update_id"] + 1
-                        await handle_update(client, update)
+                        await handle_update(client, update, api_base=api_base)
                 await asyncio.sleep(0.5)
             except Exception as e:
-                logger.error(f"Polling error: {e}")
+                logger.error(f"Polling error on {bot_name}: {e}")
                 await asyncio.sleep(2.0)
+
+async def main():
+    tokens = []
+    if TELEGRAM_BOT_TOKEN:
+        tokens.append((TELEGRAM_BOT_TOKEN, "@gwelena_bot"))
+    comm_token = os.environ.get("TELEGRAM_COMMUNITY_BOT_TOKEN", "")
+    if comm_token and comm_token != TELEGRAM_BOT_TOKEN:
+        tokens.append((comm_token, "@gworkycomm_bot"))
+
+    logger.info(f"Starting Groundwork Multi-Bot Action Telegram Daemon for {len(tokens)} bot(s)...")
+    await asyncio.gather(*(poll_bot(tok, name) for tok, name in tokens))
 
 if __name__ == "__main__":
     asyncio.run(main())

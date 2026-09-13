@@ -12,7 +12,7 @@ on:
       allow_ga4:
         description: "Allow GA4 & GTM network requests (AdSense remains 100% blocked)"
         required: false
-        default: "true"
+        default: "false"
       slug:
         description: "Target specific article slug (optional)"
         required: false
@@ -87,7 +87,7 @@ jobs:
         run: |
           echo "🚀 Executing Stage 2: Organic Browser Engagement Simulator"
           GA4_FLAG=""
-          if [ "${{ github.event.inputs.allow_ga4 || 'true' }}" = "true" ]; then
+          if [ "${{ github.event.inputs.allow_ga4 }}" = "true" ]; then
             GA4_FLAG="--allow-ga4"
           fi
 
