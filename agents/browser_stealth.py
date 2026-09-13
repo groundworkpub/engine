@@ -47,6 +47,9 @@ AD_BLOCK_DOMAINS: frozenset[str] = frozenset(
         "googlesyndication.com",
         "doubleclick.net",
         "googleadservices.com",
+        "adtrafficquality.google",
+        "fundingchoicesmessages.google.com",
+        "syndicatedsearch.goog",
         # Programmatic DSPs / SSPs
         "adnxs.com",
         "appnexus.com",  # Xandr / AppNexus
