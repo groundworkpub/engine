@@ -486,3 +486,18 @@ class SmartPolicySelector:
             error = f" ⚠ {info['error']}" if info.get("error") else ""
             print(f"  {icon} {name:<25}{latency}{ip_info}{error}")
         print("\n" + "=" * 60)
+
+
+# Backward-compatibility alias
+EgressSelector = SmartPolicySelector
+
+
+def get_playwright_proxy(
+    task_type: str = "youtube_watch",
+    geo: str = "us",
+    require_proxy: bool = False,
+    session_id: str | None = None,
+) -> dict[str, str] | None:
+    return SmartPolicySelector().get_playwright_proxy(task_type, geo, require_proxy, session_id)
+
+
