@@ -126,6 +126,84 @@ def submit_gsc_sitemap(site_url: str, sitemap_url: str) -> dict[str, Any]:
     }
 
 
+def delete_gsc_sitemap(site_url: str, sitemap_url: str) -> dict[str, Any]:
+    """Deletes an obsolete sitemap URL from Search Console for a verified site."""
+    token, email = get_gsc_access_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    encoded_site = urllib.parse.quote(site_url, safe="")
+    encoded_sitemap = urllib.parse.quote(sitemap_url, safe="")
+
+    resp = httpx.delete(
+        f"https://www.googleapis.com/webmasters/v3/sites/{encoded_site}/sitemaps/{encoded_sitemap}",
+        headers=headers,
+        timeout=15.0,
+    )
+
+    return {
+        "sitemap_url": sitemap_url,
+        "status_code": resp.status_code,
+        "response": resp.text if resp.text else "OK",
+    }
+
+
+def query_striking_distance(
+    site_url: str = "https://gworky.com/",
+    days: int = 28,
+    row_limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Extract striking-distance queries (positions 4–15, low CTR) for content_optimization_queue.
+
+    68c39063 Phase 3 — uses GSC Search Analytics API `searchAnalytics/query` with
+    dimensions [query, page], aggregated byProperty, last N days. Returns rows
+    where avg position 4–15 and CTR below pillar median — candidates for title/meta refresh.
+    """
+    token, _ = get_gsc_access_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    encoded_site = urllib.parse.quote(site_url, safe="")
+    end_date = time.strftime("%Y-%m-%d")
+    start_date = time.strftime("%Y-%m-%d", time.gmtime(time.time() - days * 86400))
+
+    body = {
+        "startDate": start_date,
+        "endDate": end_date,
+        "dimensions": ["query", "page"],
+        "rowLimit": row_limit,
+        "aggregationType": "byPage",
+    }
+    resp = httpx.post(
+        f"https://www.googleapis.com/webmasters/v3/sites/{encoded_site}/searchAnalytics/query",
+        headers=headers,
+        json=body,
+        timeout=20.0,
+    )
+    if resp.status_code != 200:
+        logger.warning("GSC striking-distance query failed %s %s", resp.status_code, resp.text[:300])
+        return []
+    rows = resp.json().get("rows", []) or []
+    striking: list[dict[str, Any]] = []
+    for r in rows:
+        keys = r.get("keys", [])
+        query = keys[0] if len(keys) > 0 else ""
+        page = keys[1] if len(keys) > 1 else ""
+        position = float(r.get("position", 99))
+        ctr = float(r.get("ctr", 0))
+        impressions = int(r.get("impressions", 0))
+        if 4 <= position <= 15 and impressions >= 50 and ctr < 0.05:
+            striking.append(
+                {
+                    "query": query,
+                    "page": page,
+                    "position": round(position, 2),
+                    "ctr": round(ctr, 4),
+                    "impressions": impressions,
+                    "clicks": int(r.get("clicks", 0)),
+                }
+            )
+    striking.sort(key=lambda x: (x["position"], -x["impressions"]))
+    logger.info("GSC striking-distance: %d candidates (4–15, CTR<5%%, imp>=50) from %d rows", len(striking), len(rows))
+    return striking
+
+
 if __name__ == "__main__":
     token, email = get_gsc_access_token()
     print(f"Service Account: {email}")
@@ -140,3 +218,12 @@ if __name__ == "__main__":
     print(f"\nTarget Registration ({target}):")
     print(f"  Status: {res['put_status']}")
     print(f"  Details: {json.dumps(res['info'], indent=2)}")
+
+    # Demo striking-distance (last 28d, gworky.com)
+    try:
+        sd = query_striking_distance("https://gworky.com/", days=28, row_limit=250)
+        print(f"\nStriking-distance sample ({len(sd)}):")
+        for row in sd[:5]:
+            print(f"  {row['position']:4.1f}  {row['ctr']*100:4.1f}%  {row['impressions']:4d} imp  {row['query'][:60]} → {row['page'][:50]}")
+    except Exception as e:
+        print(f"Striking-distance demo skipped: {e}")

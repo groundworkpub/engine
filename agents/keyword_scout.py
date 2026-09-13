@@ -344,7 +344,85 @@ def normalize_keyword(keyword: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()[:120]
 
 
-# ─── SearXNG search ───────────────────────────────────────────────────────────
+# ─── Search backends ──────────────────────────────────────────────────────────
+
+
+_AD_URL_MARKERS = ("duckduckgo.com/y.js", "google.com/aclk", "bing.com/aclick")
+
+
+def _normalize_results(
+    rows: list[dict[str, Any]], *, title_key: str, url_key: str
+) -> list[dict[str, Any]]:
+    """Normalize provider rows to the shared {"url","title","domain"} contract.
+    Skips ad-tracking URLs (DDG, Google, Bing click trackers)."""
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        url = str(row.get(url_key) or "")
+        title = str(row.get(title_key) or "")
+        if not url or not title:
+            continue
+        lower = url.lower()
+        if any(m in lower for m in _AD_URL_MARKERS):
+            continue
+        try:
+            domain = urllib.parse.urlparse(url).netloc.removeprefix("www.")
+        except Exception:
+            domain = ""
+        out.append({"url": url, "title": title, "domain": domain})
+    return out
+
+
+def search_openserp(
+    base_url: str,
+    query: str,
+    results_per_query: int = 10,
+    *,
+    engine: str = "google",
+    language: str = "en",
+    region: str = "US",
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> list[dict[str, Any]]:
+    """Query a self-hosted OpenSERP server (REST). Returns normalized rows."""
+    params: dict[str, Any] = {
+        "engines": engine,
+        "text": query,
+        "limit": results_per_query,
+        "lang": language.upper(),
+        "region": region,
+    }
+    url = f"{base_url.rstrip('/')}/mega/search?{urllib.parse.urlencode(params)}"
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    results = cast(list[dict[str, Any]], data.get("results") or [])
+    return _normalize_results(results, title_key="title", url_key="url")[:results_per_query]
+
+
+def search_ddgs(
+    query: str,
+    results_per_query: int = 10,
+    *,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> list[dict[str, Any]]:
+    """DuckDuckGo search via the ``ddgs`` package. Best-effort, never raises."""
+    try:
+        from ddgs import DDGS  # lazy import — optional dependency
+
+        rows: list[dict[str, Any]] = []
+        with DDGS() as ddgs:
+            iterator = ddgs.text(query, max_results=results_per_query)
+            if not hasattr(iterator, "__iter__"):
+                return []
+            for item in list(iterator or [])[:results_per_query]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        return _normalize_results(rows, title_key="title", url_key="href")
+    except Exception as e:
+        logger.warning(f"ddgs search failed for '{query}': {e}")
+        return []
 
 
 def search_searxng(
@@ -378,6 +456,98 @@ def search_searxng(
             logger.warning(f"SearXNG fetch failed for '{query}' (attempt {attempt + 1}/{attempts}): {e}")
             time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
     return []
+
+
+_BACKEND_URL_CACHE: dict[str, bool] = {}
+
+
+def _backend_reachable(base_url: str, timeout: int = 4) -> bool:
+    """Heal: avoid hammering a down OpenSERP server every query (cache result)."""
+    if base_url in _BACKEND_URL_CACHE:
+        return _BACKEND_URL_CACHE[base_url]
+    reachable = False
+    try:
+        request = urllib.request.Request(
+            f"{base_url.rstrip('/')}/health",
+            headers={"User-Agent": USER_AGENT},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            reachable = response.status == 200
+    except Exception as e:
+        logger.warning(f"OpenSERP backend unreachable at {base_url}: {e}")
+    _BACKEND_URL_CACHE[base_url] = reachable
+    return reachable
+
+
+def search_backend(
+    config: dict,
+    query: str,
+    results_per_query: int = 10,
+    *,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRIES,
+    language: str = "en",
+) -> tuple[list[dict[str, Any]], str]:
+    """Dispatch a query across enabled backends in priority order.
+
+    Returns ``(results, backend_name)``. Backends, in order:
+      1. self-hosted OpenSERP (when ``openserp_url`` set & reachable)
+      2. SearXNG public instance (default)
+      3. ddgs (DuckDuckGo) — free, reliable fallback
+
+    Any single backend failure is logged and the next backend is tried —
+    the agent never dies on one provider (resilient HTTP ingestion).
+    """
+    prefer = str(config.get("prefer", "openserp")).strip().lower()
+    enabled = [str(b).strip().lower() for b in (config.get("enabled_backends") or [])]
+    if not enabled:
+        enabled = ["openserp", "searxng", "ddgs"]
+
+    order: list[str] = []
+    if prefer in enabled:
+        order.append(prefer)
+    order += [b for b in enabled if b != prefer]
+
+    for backend in order:
+        if backend == "openserp":
+            # Env override lets CI disable OpenSERP cleanly without editing
+            # config.yml: KS_OPENSERP_URL="" (or unset) skips the local server.
+            base = str(config.get("openserp_url", "")).strip()
+            env_url = os.environ.get("KS_OPENSERP_URL", "").strip()
+            if env_url == "" and "KS_OPENSERP_URL" in os.environ:
+                base = ""
+            elif env_url:
+                base = env_url
+            if not base:
+                continue
+            if not _backend_reachable(base, timeout=4):
+                continue
+            engine = str(config.get("openserp_engine", "duckduckgo")).strip() or "duckduckgo"
+            try:
+                rows = search_openserp(
+                    base, query, results_per_query,
+                    engine=engine, timeout=timeout, language=language,
+                )
+                if rows:
+                    return rows, f"openserp({engine})"
+            except Exception as e:
+                logger.warning(f"OpenSERP query failed for '{query}': {e}")
+        elif backend == "searxng":
+            instance = str(config.get("searxng_instance", DEFAULT_SEARXNG_INSTANCE))
+            try:
+                rows = search_searxng(
+                    instance, query, results_per_query,
+                    timeout=timeout, retries=retries, language=language,
+                )
+                if rows:
+                    return rows, "searxng"
+            except Exception as e:
+                logger.warning(f"SearXNG query failed for '{query}': {e}")
+        elif backend == "ddgs":
+            rows = search_ddgs(query, results_per_query, timeout=timeout)
+            if rows:
+                return rows, "ddgs"
+    return [], "none"
 
 
 # ─── LLM enrichment (best-effort intent classification) ───────────────────────
@@ -513,6 +683,13 @@ def run_keyword_scout(config: dict, supabase: Any) -> dict[str, int]:
     max_candidates = int(ks_cfg.get("max_candidates_per_run", 60))
     llm_cfg = config.get("llm", {}) or {}
     fallback_chain = llm_cfg.get("fallback_chain", DEFAULT_FALLBACK_CHAIN)
+    search_cfg = {
+        "openserp_url": ks_cfg.get("openserp_url", ""),
+        "openserp_engine": ks_cfg.get("openserp_engine", "duckduckgo"),
+        "searxng_instance": instance,
+        "enabled_backends": ks_cfg.get("enabled_backends", []),
+        "prefer": ks_cfg.get("prefer", "openserp"),
+    }
 
     stats = {
         "queries_run": 0,
@@ -535,12 +712,15 @@ def run_keyword_scout(config: dict, supabase: Any) -> dict[str, int]:
                 if queries_cap_hit(stats["queries_run"], max_queries, len(raw_rows), max_candidates):
                     break
                 stats["queries_run"] += 1
-                logger.info(f"Keyword Scout querying SearXNG: '{seed}' (pillar={pillar})")
+                logger.info(f"Keyword Scout querying: '{seed}' (pillar={pillar})")
                 try:
-                    results = search_searxng(instance, seed, results_per_query, timeout=timeout, retries=retries)
+                    results, backend = search_backend(
+                        search_cfg, seed, results_per_query,
+                        timeout=timeout, retries=retries,
+                    )
                 except Exception as e:
                     stats["queries_failed"] += 1
-                    logger.warning(f"SearXNG query failed for seed '{seed}': {e}")
+                    logger.warning(f"All search backends failed for seed '{seed}': {e}")
                     continue
                 if not results:
                     logger.info(f"No results returned for seed '{seed}'")

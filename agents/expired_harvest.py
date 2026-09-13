@@ -12,15 +12,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
 import os
 import re
-import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -87,7 +85,7 @@ def extract_title_and_main_text(html: str) -> tuple[str, str]:
     return title[:200], text_content[:4000]
 
 
-def fetch_cdx_routes(domain: str, limit: int = 50) -> List[Dict[str, Any]]:
+def fetch_cdx_routes(domain: str, limit: int = 50) -> list[dict[str, Any]]:
     """Query Wayback CDX Server for historical 200 OK HTML pages."""
     clean_domain = domain.lower().replace("https://", "").replace("http://", "").rstrip("/")
     params = {
@@ -141,7 +139,7 @@ def fetch_cdx_routes(domain: str, limit: int = 50) -> List[Dict[str, Any]]:
         return []
 
 
-def harvest_and_enqueue_domain(domain: str, limit: int = 50, dry_run: bool = False) -> Dict[str, Any]:
+def harvest_and_enqueue_domain(domain: str, limit: int = 50, dry_run: bool = False) -> dict[str, Any]:
     """Harvests historical snapshots and enqueues into Supabase expired_routes."""
     supabase = get_supabase_client()
 

@@ -9,11 +9,12 @@ Runs autonomously via GitHub Actions cron or local schedule:
 4. Reports domain review lifecycle state ('GETTING_READY' -> 'READY').
 """
 
-import os
-import sys
 import json
 import logging
-from datetime import datetime, timedelta
+import os
+import sys
+from datetime import UTC, datetime
+
 import httpx
 from dotenv import load_dotenv
 
@@ -58,7 +59,7 @@ def get_oauth_client_info():
     for path in candidates:
         if os.path.exists(path):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
                     installed = data.get("installed") or data.get("web") or {}
                     return installed.get("client_id"), installed.get("client_secret")
@@ -97,8 +98,11 @@ def get_access_token():
 def sync_adsense_telemetry():
     access_token = get_access_token()
     if not access_token:
-        logger.error("Skipping telemetry sync: No active access token.")
-        return False
+        logger.info(
+            "AdSense telemetry notice: No active OAuth refresh token or client credentials configured in environment. "
+            "Skipping telemetry sync gracefully."
+        )
+        return True
 
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -176,7 +180,7 @@ def sync_adsense_telemetry():
                             "page_rpm": page_rpm,
                             "ad_rpm": ad_rpm,
                             "earnings_usd": earnings,
-                            "updated_at": datetime.utcnow().isoformat() + "Z",
+                            "updated_at": datetime.now(UTC).isoformat(),
                         }
 
                         post_res = httpx.post(

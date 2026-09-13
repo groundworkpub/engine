@@ -8,23 +8,34 @@ Synthesizes best practices from:
 Runs autonomously in the pipeline after Scribe or as a standalone CLI optimizer.
 """
 
-import html
-import json
 import logging
 import os
-import re
 import sys
-import urllib.request
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Ensure root and agents directory are in sys.path
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+load_dotenv(REPO_ROOT / ".env.local")
 load_dotenv(".env.local")
+
+try:
+    from agents.humanizer import EditorialSanitizer
+    from agents.llm_router import call_llm, call_llm_json
+except ImportError:
+    from humanizer import EditorialSanitizer
+    from llm_router import call_llm, call_llm_json
 
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client, create_client
-from agents.humanizer import EditorialSanitizer
-from agents.llm_router import call_llm, call_llm_json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,7 +51,7 @@ class OptimizedContentResult(BaseModel):
     content: str = Field(min_length=100)
     primary_intent: str = Field(default="informational")
     aeo_summary: str = Field(default="")
-    lsi_keywords_injected: List[str] = Field(default_factory=list)
+    lsi_keywords_injected: list[str] = Field(default_factory=list)
     seo_score: int = Field(ge=0, le=100, default=95)
     geo_benchmark_present: bool = True
 
@@ -91,7 +102,7 @@ Return ONLY valid JSON matching this schema:
 """
 
 
-def get_supabase_client() -> Optional[Client]:
+def get_supabase_client() -> Client | None:
     """Initialize Supabase client using env vars."""
     url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
@@ -109,8 +120,8 @@ def optimize_article_content(
     title: str,
     content: str,
     pillar: str,
-    target_keyword: Optional[str] = None,
-) -> Optional[OptimizedContentResult]:
+    target_keyword: str | None = None,
+) -> OptimizedContentResult | None:
     """Execute LLM-driven SEO, AEO, and GEO optimization pass with fail-closed schema validation."""
     user_prompt = f"""Optimize the following article for Groundwork's {pillar.upper()} pillar:
 
@@ -127,7 +138,7 @@ Current Content:
     ]
 
     logger.info("Executing Agentic SEO optimization via Universal LLM Router...")
-    
+
     # 1. First attempt: Structured JSON generator
     json_data = call_llm_json(messages, max_tokens=4096)
     if json_data and isinstance(json_data, dict):

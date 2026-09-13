@@ -29,6 +29,23 @@ _NEWS_PATTERNS = re.compile(
 )
 
 
+import ssl
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+}
+
+# Permissive SSL context for crawling third-party mention pages that might have misconfigured SSL
+_SSL_CONTEXT = ssl.create_default_context()
+_SSL_CONTEXT.check_hostname = False
+_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+
+
 def _supabase() -> Any:
     from supabase import create_client  # lazy: keeps module importable offline
 
@@ -41,29 +58,33 @@ def _supabase() -> Any:
 
 def _fetch_feed(feed_url: str) -> list[dict[str, Any]]:
     """Fetch and parse one RSS feed into normalized mention candidates."""
-    req = urllib.request.Request(
-        feed_url,
-        headers={"User-Agent": "Groundwork-LinkWatch/1.0 (+https://gworky.com)"},
-    )
-    with urllib.request.urlopen(req, timeout=DEFAULT_FEED_TIMEOUT_SECONDS) as response:
-        parsed = feedparser.parse(response.read())
-    if parsed.bozo and not parsed.entries:
-        logger.warning("feed %s failed to parse: %s", feed_url, parsed.bozo_exception)
-        return []
-    out: list[dict[str, Any]] = []
-    for entry in parsed.entries:
-        url = str(entry.get("link") or "").strip()
-        if not url:
-            continue
-        out.append(
-            {
-                "url": url,
-                "title": str(entry.get("title") or "").strip(),
-                "summary": str((entry.get("summary") or entry.get("description") or "").strip()),
-                "source": "google_alerts",
-            }
+    try:
+        req = urllib.request.Request(
+            feed_url,
+            headers=BROWSER_HEADERS,
         )
-    return out
+        with urllib.request.urlopen(req, timeout=DEFAULT_FEED_TIMEOUT_SECONDS, context=_SSL_CONTEXT) as response:
+            parsed = feedparser.parse(response.read())
+        if parsed.bozo and not parsed.entries:
+            logger.warning("feed %s failed to parse: %s", feed_url, parsed.bozo_exception)
+            return []
+        out: list[dict[str, Any]] = []
+        for entry in parsed.entries:
+            url = str(entry.get("link") or "").strip()
+            if not url:
+                continue
+            out.append(
+                {
+                    "url": url,
+                    "title": str(entry.get("title") or "").strip(),
+                    "summary": str((entry.get("summary") or entry.get("description") or "").strip()),
+                    "source": "google_alerts",
+                }
+            )
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("failed to fetch mention feed %s: %s", feed_url, exc)
+        return []
 
 
 def _page_links_to_brand(html: str) -> bool:
@@ -90,14 +111,24 @@ def _classify_priority(title: str, summary: str) -> str:
     return "other"
 
 
+def _suggest_reclamation_target(title: str, summary: str) -> str:
+    """Suggest contextual URL target for unlinked mention reclamation."""
+    haystack = f"{title} {summary}".lower()
+    if any(k in haystack for k in ["newsletter", "digest", "subscribe", "email", "updates"]):
+        return "https://gworky.com/subscribe"
+    if any(k in haystack for k in ["calculator", "tool", "benchmark", "estimator", "rate"]):
+        return "https://gworky.com/tools"
+    return "https://gworky.com"
+
+
 def _fetch_mention_html(url: str) -> str:
-    """Best-effort fetch of a mention page; empty string on any failure."""
+    """Best-effort fetch of a mention page with browser headers; empty string on failure."""
     try:
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "Groundwork-LinkWatch/1.0 (+https://gworky.com)"},
+            headers=BROWSER_HEADERS,
         )
-        with urllib.request.urlopen(req, timeout=DEFAULT_FEED_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(req, timeout=DEFAULT_FEED_TIMEOUT_SECONDS, context=_SSL_CONTEXT) as response:
             return response.read().decode("utf-8", errors="ignore")
     except Exception as exc:  # noqa: BLE001 — network/HTTP failures are non-fatal
         logger.info("could not fetch %s for link check: %s", url, exc)

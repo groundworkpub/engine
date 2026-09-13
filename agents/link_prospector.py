@@ -33,7 +33,7 @@ try:
         Opportunity,
         evaluate_page_opportunity,
     )
-    from agents.outreach_dispatcher import send_resend_email
+    from agents.outreach_dispatcher import send_via_resend
 except ImportError:
     from hunter_enricher import (
         HunterClient,
@@ -45,7 +45,7 @@ except ImportError:
         Opportunity,
         evaluate_page_opportunity,
     )
-    from outreach_dispatcher import send_resend_email
+    from outreach_dispatcher import send_via_resend
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,13 +79,13 @@ HUNTER_API_KEY = os.environ.get("HUNTER_API_KEY", "")
 TARGET_RESOURCE_HUBS = [
     # Money Pillar
     {
-        "url": "https://extension.harvard.edu/resources/",
+        "url": "https://extension.harvard.edu/paying-for-school/financial-wellness/",
         "domain": "harvard.edu",
         "pillar": "money",
-        "topic": "personal finance & career planning",
-        "suggested_tool": "https://gworky.com/tools/mortgage-refinance-calculator",
-        "tool_title": "Mortgage Refinance Break-Even Engine",
-        "curator_hint": "Harvard Division of Continuing Education Resource Desk",
+        "topic": "personal finance, budgeting & financial wellness",
+        "suggested_tool": "https://gworky.com/tools/emergency-fund-calculator",
+        "tool_title": "Evidence-Based Emergency Fund Sizer",
+        "curator_hint": "Harvard Division of Continuing Education Financial Wellness Team",
     },
     {
         "url": "https://financialaid.stanford.edu/resources/",
@@ -97,24 +97,33 @@ TARGET_RESOURCE_HUBS = [
         "curator_hint": "Stanford Financial Aid Resource Team",
     },
     {
-        "url": "https://www.consumerfinance.gov/consumer-tools/",
-        "domain": "consumerfinance.gov",
+        "url": "https://consumer.ftc.gov/topics/credit-and-loans/",
+        "domain": "ftc.gov",
         "pillar": "money",
-        "topic": "mortgage, credit & debt management",
+        "topic": "mortgage, credit, debt & loan management",
         "suggested_tool": "https://gworky.com/tools/compound-interest-calculator",
         "tool_title": "Compound Interest & Wealth Velocity Engine",
-        "curator_hint": "CFPB Consumer Tools Curator",
+        "curator_hint": "FTC Consumer Education Credit & Loans Desk",
     },
     {
-        "url": "https://extension.umn.edu/family-and-personal-finance",
-        "domain": "umn.edu",
+        "url": "https://www.mymoney.gov/",
+        "domain": "mymoney.gov",
         "pillar": "money",
         "topic": "family finance & household budgeting",
         "suggested_tool": "https://gworky.com/tools/emergency-fund-calculator",
         "tool_title": "Evidence-Based Emergency Fund Sizer",
-        "curator_hint": "University of Minnesota Extension Financial Team",
+        "curator_hint": "Financial Literacy and Education Commission",
     },
     # Body Pillar
+    {
+        "url": "https://www.health.harvard.edu/healthy-eating/",
+        "domain": "harvard.edu",
+        "pillar": "body",
+        "topic": "evidence-based nutrition & healthy eating",
+        "suggested_tool": "https://gworky.com/tools/calorie-macro-calculator",
+        "tool_title": "Precision Calorie & Macro Target Calculator",
+        "curator_hint": "Harvard Health Publishing Nutrition Editorial Team",
+    },
     {
         "url": "https://www.hsph.harvard.edu/nutritionsource/",
         "domain": "harvard.edu",
@@ -124,18 +133,9 @@ TARGET_RESOURCE_HUBS = [
         "tool_title": "Precision Calorie & Macro Target Calculator",
         "curator_hint": "Harvard T.H. Chan Nutrition Source Editorial Team",
     },
-    {
-        "url": "https://www.cdc.gov/healthy-weight-growth/food-activity/",
-        "domain": "cdc.gov",
-        "pillar": "body",
-        "topic": "healthy weight, metabolic rate & energy balance",
-        "suggested_tool": "https://gworky.com/tools/bmr-tdee-calculator",
-        "tool_title": "Metabolic Rate & BMR/TDEE Engine",
-        "curator_hint": "CDC Healthy Weight Resources Desk",
-    },
     # Home Pillar
     {
-        "url": "https://www.energy.gov/energysaver/energy-saver-calculators",
+        "url": "https://www.energy.gov/energysaver/",
         "domain": "energy.gov",
         "pillar": "home",
         "topic": "home energy efficiency & solar economics",
@@ -154,13 +154,13 @@ TARGET_RESOURCE_HUBS = [
     },
     # Life & Tech Pillar
     {
-        "url": "https://www.bls.gov/ooh/",
-        "domain": "bls.gov",
+        "url": "https://www.onetonline.org/",
+        "domain": "onetonline.org",
         "pillar": "life",
-        "topic": "occupational outlook & salary benchmarking",
+        "topic": "career exploration, occupational outlook & salary benchmarking",
         "suggested_tool": "https://gworky.com/tools/freelance-rate-calculator",
         "tool_title": "Freelance Rate & Salary Arbitrage Calculator",
-        "curator_hint": "Bureau of Labor Statistics OOH Desk",
+        "curator_hint": "O*NET Resource Center Editorial Team (U.S. DOL, ETA)",
     },
 ]
 
@@ -182,13 +182,11 @@ def _extract_contact_info(html: str, target_url: str, domain: str) -> dict[str, 
     domain_fallbacks = {
         "harvard.edu": "extension@harvard.edu",
         "stanford.edu": "financialaid@stanford.edu",
-        "consumerfinance.gov": "consumer-tools@consumerfinance.gov",
-        "umn.edu": "extension@umn.edu",
-        "nih.gov": "nhlbiinfo@nhlbi.nih.gov",
-        "cdc.gov": "cdcinfo@cdc.gov",
+        "ftc.gov": "consumerresponsecenter@ftc.gov",
+        "mymoney.gov": "my.money@mymoney.gov",
         "energy.gov": "energysaver@ee.doe.gov",
         "dsireusa.org": "info@dsireusa.org",
-        "bls.gov": "oohinfo@bls.gov",
+        "onetonline.org": "onet@onetonline.org",
     }
     fallback = domain_fallbacks.get(domain, f"editorial@{domain}")
     return {"email": fallback, "source": "institutional_alias"}
@@ -351,7 +349,7 @@ async def run_proactive_hunter(limit: int = 5, dry_run: bool = False) -> list[Op
                     opp.matching_asset = {"title": hub.get("tool_title", ""), "url": github_tool}
                 else:
                     opp.matching_asset["url"] = github_tool
-                dispatched = await send_resend_email(opp.target_email, subject, opp.pitch_draft)
+                dispatched = send_via_resend(opp.target_email, subject, opp.pitch_draft)
                 msg_id = f"res_{opp.id}" if dispatched else "failed"
                 await send_telegram_dispatch_report(opp, message_id=msg_id)
                 logger.info(f"🚀 [EDU→GITHUB.IO AUTO] dispatched to {opp.target_email} (Hunter bypass) + Telegram report.")
@@ -360,7 +358,7 @@ async def run_proactive_hunter(limit: int = 5, dry_run: bool = False) -> list[Op
                 # 3. Autonomous Outreach Dispatch (Auto-Deliver via Resend from elena@gworky.com)
                 if opp.target_email and opp.hunter_confidence >= 70:
                     subject = f"Research Resource Companion: {opp.matching_asset['title']}"
-                    dispatched = await send_resend_email(opp.target_email, subject, opp.pitch_draft)
+                    dispatched = send_via_resend(opp.target_email, subject, opp.pitch_draft)
                     msg_id = f"res_{opp.id}" if dispatched else "simulated_ok"
                     await send_telegram_dispatch_report(opp, message_id=msg_id)
                     logger.info(f"🚀 Autonomously dispatched outreach pitch to {opp.target_email} and sent Telegram report.")

@@ -130,9 +130,7 @@ def moderate_and_inject_cocitation(
 def publish_to_wordpress(title: str, html_content: str, pillar: str) -> tuple[int, str] | None:
     """Publishes formatted guest study to emailforums.biz."""
     wp_url = "https://emailforums.biz/wp-json/wp/v2"
-    auth = (os.getenv("WP_APP_USER", ""), os.getenv("WP_APP_PASSWORD", ""))
-    if not all(auth):
-        raise RuntimeError("WP_APP_USER and WP_APP_PASSWORD required")
+    auth = (os.getenv("WP_USERNAME", "gworky"), os.getenv("WP_APPLICATION_PASSWORD", ""))
 
     category_map = {"money": 2, "body": 3, "home": 4, "life": 5, "tech": 6}
     cat_id = category_map.get(pillar, 2)

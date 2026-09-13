@@ -205,7 +205,8 @@ Tone Guidelines:
 - High-authority, conversational, direct, and zero fluff.
 - Sentence-case. Active voice.
 - Speak in natural, spoken American English. No robotic jargon.
-- Elena opens with the decision problem and context (30-45s).
+- NEVER start with robotic boilerplate like "Welcome to Groundwork Deep Dives", "Welcome back", or repetitive greeting clichés.
+- ALWAYS open immediately with a sharp, punchy Hook highlighting the practical dilemma, financial tension, or surprising data point (30-45s).
 - {desk_lead_name} breaks down the hard numbers, methodology, and trade-offs (1.5 - 2 mins).
 - Elena synthesizes the bottom-line action and points to the interactive guide/calculator on Groundwork (30s).
 - Total duration must be ~3 minutes (6 to 10 alternating dialogue turns).
@@ -246,7 +247,7 @@ Return strict JSON matching schema:
         except Exception as e:
             logger.warning(f"LiteLLM scriptgen fallback used due to: {e}")
 
-        # Deterministic Fallback Script if LLM is unavailable
+        # Deterministic Hook-First Fallback Script if LLM is unavailable
         title = article.get("title", "Research Breakdown")
         excerpt = article.get("excerpt", "Here is the evidence-based analysis.")
         return PodcastScript(
@@ -255,11 +256,11 @@ Return strict JSON matching schema:
             turns=[
                 DialogueTurn(
                     speaker="Elena",
-                    text=f"Welcome to Groundwork Deep Dives. Today we're examining {title}. Let's get straight to the evidence.",
+                    text=f"When evaluating decisions around {title}, the biggest risk is relying on outdated rules of thumb. Let's examine what the hard data actually proves.",
                 ),
                 DialogueTurn(
                     speaker=desk_lead_name,
-                    text=f"Thanks Elena. Looking at the data, the core takeaway is straightforward: {excerpt}",
+                    text=f"Looking at the empirical benchmarks, the divergence is clear: {excerpt}",
                 ),
                 DialogueTurn(
                     speaker="Elena",
@@ -486,9 +487,19 @@ Return strict JSON matching schema:
         )
 
         os.makedirs(os.path.dirname(os.path.abspath(output_png_path)), exist_ok=True)
-        img.save(output_png_path, format="PNG", optimize=True)
-        logger.info(f"Generated 3000x3000px high-contrast cover art at: {output_png_path}")
-        return output_png_path
+        # Universal Image Optimizer Guard: 1200x1200px Lanczos resize
+        resized_img = img.resize((1200, 1200), Image.Resampling.LANCZOS)
+
+        # 1. High-efficiency WebP primary (~35-40 KB)
+        webp_path = os.path.splitext(output_png_path)[0] + ".webp"
+        resized_img.save(webp_path, format="WEBP", quality=80, method=6)
+        logger.info(f"Generated 1200x1200px compressed WebP cover art at: {webp_path}")
+
+        # 2. Optimized PNG fallback for ID3 tag compatibility (~100 KB)
+        png_path = os.path.splitext(output_png_path)[0] + ".png"
+        resized_img.save(png_path, format="PNG", optimize=True)
+
+        return webp_path
 
     # ── TTS Audio Generation ──────────────────────────────────────────────────
 
@@ -614,41 +625,52 @@ Return strict JSON matching schema:
         output_mp4_path: str,
         format_mode: str = "landscape",
         max_seconds: float | None = None,
+        bg_video_path: str | None = None,
     ) -> str | None:
-        """Render broadcast video audiogram with dynamic soundwave spectrum.
+        """Render broadcast video audiogram with dynamic soundwave spectrum & B-roll background.
 
         Supported formats:
           - 'landscape': 16:9 1920x1080 (YouTube Podcasts, Desktop Player)
           - 'shorts': 9:16 1080x1920 (YouTube Shorts, TikTok, Reels, Mobile)
 
-        ``max_seconds`` caps the rendered output duration (e.g. 58s keeps a
-        render inside YouTube Shorts length limits). ``None`` renders the
-        full audio.
+        ``max_seconds`` caps the rendered output duration (e.g. 70.0s for > 1 min
+        YouTube Shorts / Reels). ``None`` renders the full audio duration.
         """
         try:
             os.makedirs(os.path.dirname(os.path.abspath(output_mp4_path)), exist_ok=True)
             is_shorts = format_mode.lower() in ("shorts", "vertical", "reels", "tiktok")
 
+            has_bg_video = bool(bg_video_path and os.path.exists(bg_video_path))
+            video_input = bg_video_path if has_bg_video else cover_png_path
+
             if is_shorts:
                 filter_complex = (
                     "[1:a]compand,showwaves=s=880x280:mode=line:colors=0x10b981[wave];"
-                    "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg];"
-                    "[bg][wave]overlay=(W-w)/2:H-h-360:shortest=1[outv]"
+                    "[0:v]split=2[bg_src][fg_src];"
+                    "[bg_src]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[blurred_bg];"
+                    "[fg_src]scale=1080:1920:force_original_aspect_ratio=decrease[clean_fg];"
+                    "[blurred_bg][clean_fg]overlay=(W-w)/2:(H-h)/2[base];"
+                    "[base][wave]overlay=(W-w)/2:H-h-360:shortest=1[outv]"
                 )
             else:
                 filter_complex = (
                     "[1:a]compand,showwaves=s=1280x240:mode=line:colors=0x10b981[wave];"
-                    "[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080[bg];"
-                    "[bg][wave]overlay=(W-w)/2:H-h-120:shortest=1[outv]"
+                    "[0:v]split=2[bg_src][fg_src];"
+                    "[bg_src]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=25:5[blurred_bg];"
+                    "[fg_src]scale=1920:1080:force_original_aspect_ratio=decrease[clean_fg];"
+                    "[blurred_bg][clean_fg]overlay=(W-w)/2:(H-h)/2[base];"
+                    "[base][wave]overlay=(W-w)/2:H-h-120:shortest=1[outv]"
                 )
 
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-loop",
-                "1",
+            cmd = ["ffmpeg", "-y"]
+            if not has_bg_video:
+                cmd += ["-loop", "1"]
+            else:
+                cmd += ["-stream_loop", "-1"]
+
+            cmd += [
                 "-i",
-                cover_png_path,
+                video_input,
                 "-i",
                 mp3_path,
                 "-filter_complex",
@@ -741,7 +763,8 @@ Return strict JSON matching schema:
         # 2. Paths
         base_dir = Path("public/audio")
         mp3_path = str(base_dir / "episodes" / f"{slug}.mp3")
-        cover_path = str(base_dir / "covers" / f"{slug}.png")
+        cover_path = str(base_dir / "covers" / f"{slug}.webp")
+        png_cover_path = str(base_dir / "covers" / f"{slug}.png")
         video_path = str(base_dir / "videos" / f"{slug}.mp4")
 
         # 3. Dynamic Cover Art with Unsplash / Source Image Support
@@ -751,10 +774,9 @@ Return strict JSON matching schema:
         # 4. Render Audio Dialogue
         duration_sec, duration_formatted = await self.render_dialogue_audio(script, mp3_path)
 
-        # 5. Embed ID3 Tags (must run BEFORE measuring file_size — embedded
-        #    cover art changes the byte length reported in RSS enclosures;
-        #    a stale value makes YouTube/podcast importers fail the transfer)
-        self.embed_id3_tags(mp3_path, title, pillar, cover_path)
+        # 5. Embed ID3 Tags (using PNG fallback for MP3 standard)
+        id3_art = png_cover_path if os.path.exists(png_cover_path) else cover_path
+        self.embed_id3_tags(mp3_path, title, pillar, id3_art)
         file_size = os.path.getsize(mp3_path) if os.path.exists(mp3_path) else 0
 
         # 6. Render Video Audiogram (optional)
@@ -778,12 +800,15 @@ Return strict JSON matching schema:
                 s3_video_key = f"videos/{slug}.mp4"
                 video_url = self.upload_to_r2(video_path, s3_video_key, content_type="video/mp4")
 
-        # 7. Cloudflare R2 Upload for Audio & Cover
+        # 7. Cloudflare R2 Upload for Audio & Dual-Format Covers
         s3_audio_key = f"episodes/{slug}.mp3"
-        s3_cover_key = f"covers/{slug}.png"
+        s3_cover_key = f"covers/{slug}.webp"
+        s3_png_key = f"covers/{slug}.png"
 
         audio_url = self.upload_to_r2(mp3_path, s3_audio_key, content_type="audio/mpeg")
-        cover_url = self.upload_to_r2(cover_path, s3_cover_key, content_type="image/png")
+        cover_url = self.upload_to_r2(cover_path, s3_cover_key, content_type="image/webp")
+        if os.path.exists(png_cover_path):
+            self.upload_to_r2(png_cover_path, s3_png_key, content_type="image/png")
 
         # 8. Record to Supabase
         episode_payload = {

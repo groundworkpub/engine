@@ -40,7 +40,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-MEDIA_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "https://media.gworky.com")
+MEDIA_BASE_URL = (os.environ.get("R2_PUBLIC_BASE_URL") or "https://media.gworky.com").rstrip("/")
 R2_BUCKET = os.environ.get("R2_BUCKET", "gworky-media-us")
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT", "").rstrip("/")
 

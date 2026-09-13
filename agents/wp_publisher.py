@@ -69,10 +69,8 @@ def get_supabase():
 
 
 def get_wp_client() -> httpx.Client:
-    username = os.getenv("WP_APP_USER")
-    password = os.getenv("WP_APP_PASSWORD")
-    if not username or not password:
-        raise RuntimeError("WP_APP_USER and WP_APP_PASSWORD required")
+    username = os.getenv("WP_USERNAME", "gworky")
+    password = os.getenv("WP_APPLICATION_PASSWORD", "")
     return httpx.Client(
         base_url=WP_API,
         auth=(username, password),
@@ -147,10 +145,10 @@ def markdown_to_html(md: str, base_url: str = SITE_URL) -> str:
                     items.append(f"<li>{_format_inline(m.group(1).strip(), base)}</li>")
             html_blocks.append("<ol>\n" + "\n".join(items) + "\n</ol>")
         elif block.startswith("> "):
-            quote_text = "\n".join(ln.lstrip("> ").strip() for ln in block.split("\n"))
+            quote_text = "\n".join(l.lstrip("> ").strip() for l in block.split("\n"))
             html_blocks.append(f"<blockquote><p>{_format_inline(quote_text, base)}</p></blockquote>")
         else:
-            para_lines = [_format_inline(ln.strip(), base) for ln in block.split("\n") if ln.strip()]
+            para_lines = [_format_inline(l.strip(), base) for l in block.split("\n") if l.strip()]
             html_blocks.append(f"<p>{'<br />'.join(para_lines)}</p>")
 
     return "\n\n".join(html_blocks)
@@ -465,48 +463,44 @@ def add_internal_links(dry_run: bool = False, limit: int = 50) -> dict:
         if not siblings:
             continue
 
-        # Pick 2-3 random siblings (different from current post)
+        # Pick 1-2 random siblings (different from current post)
         import random
         random.seed(post["id"])  # Deterministic per post
-        link_targets = random.sample(siblings, min(3, len(siblings)))
+        link_targets = random.sample(siblings, min(2, len(siblings)))
 
         # Check if post already has internal links (avoid duplicates)
         content = post.get("content", {})
         if isinstance(content, dict):
             content = content.get("rendered", "")
         existing_links = content.count(f"{WP_URL}/")
-        if existing_links >= 3:
+        if existing_links >= 2:
             continue
 
-        # 4. Add contextual anchor links
-        h2_pattern = re.compile(r"</h2>", re.IGNORECASE)
-        matches = list(h2_pattern.finditer(content))
-
-        # Build related links HTML
-        related_html = '<div class="internal-links" style="margin:1.5em 0;padding:1em;background:#f8f9fa;border-left:3px solid #0073aa;border-radius:4px;">'
-        related_html += '<p style="font-weight:600;margin:0 0 0.5em;color:#333;">Related reads:</p><ul style="margin:0;padding-left:1.2em;">'
+        # 4. Add contextual inline anchors (NOT a visible box — zero template stacking)
+        anchors = []
         for target in link_targets:
             title = target.get("title", {})
             if isinstance(title, dict):
                 title = title.get("rendered", "Untitled")
             title = re.sub(r"<[^>]+>", "", str(title))
-            related_html += f'<li><a href="{target["link"]}" target="_blank" rel="noopener">{title}</a></li>'
-        related_html += "</ul></div>"
-
-        if matches:
-            # Insert after the second H2 or before the last H2
-            insert_pos = matches[min(1, len(matches) - 1)].end()
-            new_content = content[:insert_pos] + related_html + content[insert_pos:]
-        elif "</p>" in content:
-            # No H2 — insert after the last </p>
-            last_p = content.rfind("</p>")
-            if last_p > 0:
-                insert_pos = last_p + 4
-                new_content = content[:insert_pos] + related_html + content[insert_pos:]
-            else:
-                new_content = content + related_html
+            anchors.append(f'<a href="{target["link"]}" rel="noopener">{title}</a>')
+        if len(anchors) == 1:
+            related_html = f" For the full numbers and trade-offs, the related breakdown on {anchors[0]} walks through the methodology."
         else:
-            new_content = content + related_html
+            related_html = f" The same analysis extends to {anchors[0]} and {anchors[1]}, both of which show how these figures hold up in practice."
+
+        # Insert inline at the end of the first <p> that contains no existing link
+        p_pattern = re.compile(r"<p>(?:(?!</p>).)*?</p>", re.IGNORECASE | re.DOTALL)
+        inserted = False
+        for p_match in p_pattern.finditer(content):
+            para = p_match.group(0)
+            if "<a " not in para and len(para) > 120:
+                new_content = content[: p_match.end() - 4] + related_html + content[p_match.end() - 4 :]
+                inserted = True
+                break
+        if not inserted:
+            # Fallback: append at the end of the article content
+            new_content = content + f"<p>{related_html.strip()}</p>"
 
         updates.append({
             "id": post["id"],

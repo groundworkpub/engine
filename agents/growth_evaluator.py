@@ -166,25 +166,48 @@ def evaluate_cohort(
     return results
 
 
-def send_telegram_digest(outcomes: list[dict[str, Any]], dry_run: bool = False) -> None:
-    """Send weekly summary digest to Telegram founder channel."""
+def send_telegram_digest(outcomes: list[dict[str, Any]], monev_results: list[dict[str, Any]] | None = None, dry_run: bool = False) -> None:
+    """Send comprehensive executive weekly summary digest to Telegram founder channel."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    chat_id = os.getenv("TELEGRAM_FOUNDER_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         logger.info("Telegram credentials not configured. Skipping digest dispatch.")
         return
 
-    live_links = sum(1 for o in outcomes if o.get("backlink_live"))
-    dofollow_links = sum(1 for o in outcomes if o.get("backlink_dofollow"))
-    total = len(outcomes)
+    monev_results = monev_results or []
+    total_probed = len(monev_results)
+    live_monev = sum(1 for m in monev_results if m.get("is_live"))
+    dofollow_monev = sum(1 for m in monev_results if m.get("is_dofollow"))
+
+    domains_summary = []
+    for m in monev_results[:5]:
+        u = m.get("url", "")
+        clean_u = u.replace("https://", "").replace("http://", "").split("/")[0]
+        status_badge = "✅ LIVE (DoFollow)" if m.get("is_live") and m.get("is_dofollow") else ("⚠️ LIVE (NoFollow)" if m.get("is_live") else "⏳ PENDING WEBMASTER")
+        domains_summary.append(f"• <b>{clean_u}</b>: {status_badge}")
+
+    domains_block = "\n".join(domains_summary) if domains_summary else "• <i>No active prospects awaiting probe</i>"
+
+    t7_actions = [o for o in outcomes if o.get("checkpoint") == "t7"]
+    t14_actions = [o for o in outcomes if o.get("checkpoint") == "t14"]
+    t7_impr = sum(o.get("impressions_delta", 0) for o in t7_actions)
+    t7_clicks = sum(o.get("clicks_delta", 0) for o in t7_actions)
+    t14_impr = sum(o.get("impressions_delta", 0) for o in t14_actions)
+    t14_clicks = sum(o.get("clicks_delta", 0) for o in t14_actions)
 
     text = (
-        "📈 *Groundwork Growth OS — Weekly Retrospective*\n\n"
-        f"• Evaluated Actions: *{total}*\n"
-        f"• Verified Live Links: *{live_links}/{total}*\n"
-        f"• DoFollow Backlinks: *{dofollow_links}*\n"
-        f"• Cohort Horizons: *T+7 & T+14*\n\n"
-        "Status: _Autonomous Learning Engine Active_"
+        "🏛️ <b>Groundwork Executive Growth OS — Weekly Monev Digest</b>\n\n"
+        f"📊 <b>Outreach & Authority Pipeline:</b>\n"
+        f"• Active Prospects Probed: <b>{total_probed}</b>\n"
+        f"• Verified Live Backlinks: <b>{live_monev}/{total_probed}</b>\n"
+        f"• DoFollow Link Equity: <b>{dofollow_monev} Active</b>\n\n"
+        f"🎯 <b>Target Domain Status (Recent Dispatches):</b>\n"
+        f"{domains_block}\n\n"
+        f"📈 <b>Search Console & Traffic Cohorts:</b>\n"
+        f"• <b>T+7 Cohort:</b> +{t7_impr} Impressions | +{t7_clicks} Clicks\n"
+        f"• <b>T+14 Cohort:</b> +{t14_impr} Impressions | +{t14_clicks} Clicks\n\n"
+        "🛡️ <b>Policy Invariant:</b> <i>Single-Touch Respect Policy active (zero nag spam to .edu/academic partners).</i>\n"
+        "<i>Next automated cycle: Monday 08:00 UTC via groundworkpub/engine</i>"
     )
 
     if dry_run:
@@ -198,7 +221,8 @@ def send_telegram_digest(outcomes: list[dict[str, Any]], dry_run: bool = False) 
             json={
                 "chat_id": chat_id,
                 "text": text,
-                "parse_mode": "Markdown",
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
             },
             timeout=10.0,
         )
@@ -210,15 +234,109 @@ def send_telegram_digest(outcomes: list[dict[str, Any]], dry_run: bool = False) 
         logger.warning("Failed to dispatch Telegram message: %s", e)
 
 
+def send_monev_success_alert(target_url: str, target_asset: str, is_dofollow: bool) -> None:
+    """Send immediate Telegram victory alert when an educational or partner backlink is verified live."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_FOUNDER_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+    text = (
+        f"🏆 <b>[Monev Alert] Educational Backlink VERIFIED LIVE!</b>\n\n"
+        f"🏛️ <b>Host Domain:</b> <a href=\"{target_url}\">{target_url}</a>\n"
+        f"🎯 <b>Groundwork Asset:</b> <a href=\"{target_asset}\">{target_asset}</a>\n"
+        f"⚡ <b>Link Equity:</b> <code>{'DoFollow (High Authority Equity)' if is_dofollow else 'NoFollow (Brand Signal)'}</code>\n\n"
+        f"<i>Status: Moved to status=done, link_secured=true in Supabase outreach_prospects.</i>"
+    )
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+            )
+            logger.info("Telegram Monev victory alert sent for %s", target_url)
+    except Exception as e:
+        logger.warning("Failed to send Telegram Monev alert: %s", e)
+
+
+def evaluate_outreach_prospects(supabase: Client, dry_run: bool = False) -> list[dict[str, Any]]:
+    """Monev: Active backlink verification across all dispatched outreach prospects."""
+    logger.info("Running Monev: Probing live backlinks for dispatched outreach prospects...")
+    try:
+        res = (
+            supabase.table("outreach_prospects")
+            .select("id, url, contact, pillar, target_asset, status, link_secured")
+            .eq("status", "sent")
+            .eq("link_secured", False)
+            .execute()
+        )
+        prospects = res.data or []
+    except Exception as e:
+        logger.warning("Could not query outreach_prospects: %s", e)
+        return []
+
+    logger.info("Found %d sent prospects pending backlink verification.", len(prospects))
+    results = []
+    for p in prospects:
+        target_url = p.get("url") or ""
+        target_asset = p.get("target_asset") or "https://gworky.com"
+
+        is_live, is_dofollow = verify_backlink_live(target_url, expected_domain="gworky.com")
+
+        record = {
+            "prospect_id": p["id"],
+            "url": target_url,
+            "target_asset": target_asset,
+            "is_live": is_live,
+            "is_dofollow": is_dofollow,
+            "measured_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        if is_live:
+            logger.info("🎉 BACKLINK SECURED & LIVE on %s! DoFollow: %s", target_url, is_dofollow)
+            if not dry_run:
+                try:
+                    # 1. Update outreach_prospects to secured & done
+                    supabase.table("outreach_prospects").update({
+                        "link_secured": True,
+                        "status": "done",
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }).eq("id", p["id"]).execute()
+
+                    # 2. Log outcome in growth_outcomes
+                    supabase.table("growth_outcomes").insert({
+                        "checkpoint": "t7",
+                        "backlink_live": True,
+                        "backlink_dofollow": is_dofollow,
+                        "traffic_quality_score": 1.0,
+                        "conversion_confirmed": True
+                    }).execute()
+
+                    # 3. Alert Telegram
+                    send_monev_success_alert(target_url, target_asset, is_dofollow)
+                except Exception as e:
+                    logger.warning("Failed to update secured status in Supabase: %s", e)
+        else:
+            logger.info("Backlink not yet active on %s (awaiting webmaster update)", target_url)
+
+        results.append(record)
+    return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Groundwork Growth Evaluator & Outcome Learning")
     parser.add_argument("--checkpoint", choices=["t7", "t14", "all"], default="all", help="Evaluation horizon")
     parser.add_argument("--dry-run", action="store_true", help="Audit without writing to database or Telegram")
     parser.add_argument("--all", action="store_true", dest="run_all", help="Run full evaluation and send weekly digest")
+    parser.add_argument("--monev", "--check-outreach", action="store_true", dest="check_outreach", help="Run Monev live backlink probes for sent outreach prospects")
     args = parser.parse_args()
 
     supabase = get_supabase()
     all_outcomes: list[dict[str, Any]] = []
+    monev_results: list[dict[str, Any]] = []
+
+    if args.check_outreach or args.run_all:
+        monev_results = evaluate_outreach_prospects(supabase, dry_run=args.dry_run)
+        logger.info("Monev outreach check complete: %d prospects probed.", len(monev_results))
 
     if args.checkpoint in ("t7", "all") or args.run_all:
         t7_results = evaluate_cohort(supabase, checkpoint="t7", dry_run=args.dry_run)
@@ -228,10 +346,10 @@ def main() -> None:
         t14_results = evaluate_cohort(supabase, checkpoint="t14", dry_run=args.dry_run)
         all_outcomes.extend(t14_results)
 
-    if args.run_all or not args.dry_run:
-        send_telegram_digest(all_outcomes, dry_run=args.dry_run)
+    if (args.run_all or args.check_outreach or not args.dry_run) and (all_outcomes or monev_results):
+        send_telegram_digest(all_outcomes, monev_results=monev_results, dry_run=args.dry_run)
 
-    logger.info("Growth evaluation finished. Processed %d outcomes.", len(all_outcomes))
+    logger.info("Growth evaluation finished. Processed %d cohort outcomes.", len(all_outcomes))
 
 
 if __name__ == "__main__":

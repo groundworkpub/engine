@@ -43,9 +43,9 @@ def _load_env() -> None:
 
 _load_env()
 
-PODCASTINDEX_API_KEY = os.environ.get("PODCASTINDEX_API_KEY", "N7GNJGNVN6YCUS62RZ7D")
+PODCASTINDEX_API_KEY = os.environ.get("PODCASTINDEX_API_KEY", "")
 PODCASTINDEX_API_SECRET = os.environ.get(
-    "PODCASTINDEX_API_SECRET", "yc5eQnrS7gGWfrcCdYBn$uD5MHkgqrQAqyn$t$tg"
+    "PODCASTINDEX_API_SECRET", ""
 )
 DEFAULT_FEED_URL = "https://gworky.com/podcast/feed.xml"
 
@@ -53,6 +53,8 @@ DEFAULT_FEED_URL = "https://gworky.com/podcast/feed.xml"
 def get_podcastindex_headers(api_key: str = None, api_secret: str = None) -> dict[str, str]:
     k = api_key or PODCASTINDEX_API_KEY
     s = api_secret or PODCASTINDEX_API_SECRET
+    if not k or not s:
+        raise ValueError("PODCASTINDEX_API_KEY / _SECRET not configured")
     epoch_time = str(int(time.time()))
     data_to_hash = (k + s + epoch_time).encode("utf-8")
     sha_1 = hashlib.sha1(data_to_hash).hexdigest()

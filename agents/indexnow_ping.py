@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """IndexNow pinger — submit fresh article URLs so crawlers skip re-discovery."""
 from __future__ import annotations
-import logging, os, httpx
+
+import logging
+import os
+
+import httpx
 
 logger = logging.getLogger("indexnow")
 KEY = os.environ.get("INDEXNOW_KEY", "")

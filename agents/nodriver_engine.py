@@ -152,7 +152,8 @@ class SerpRecon:
         try:
             from egress_selector import SmartPolicySelector
 
-            return SmartPolicySelector().get_proxy(task_type="browse", geo="us")
+            # serp_recon task forces geo-coherent residential egress (never VPN/None).
+            return SmartPolicySelector().get_proxy(task_type="serp_recon", geo="us")
         except Exception as exc:  # pragma: no cover - only on edge env
             logger.debug("Egress resolve failed: %s", exc)
             return None

@@ -479,6 +479,26 @@ def synthesize_pitch_from_opportunity(opp: Opportunity, contact_name: str | None
 
 # ── Full Page Evaluation ──────────────────────────────────────────────────────
 
+def _select_egress_proxy() -> str | None:
+    """Returns a CONNECT-style residential proxy for WAF-heavy targets (.edu/.gov), or None.
+
+    DataImpulse and the public pool both yield `http://` CONNECT proxy URLs suitable
+    for `httpx proxy=`. The cloudflare_workers egress returns an HTTPS URL-parameter
+    web proxy that httpx cannot use as a CONNECT tunnel, so it is excluded here.
+    """
+    try:
+        from egress_selector import SmartPolicySelector
+    except ImportError:  # standalone run via agents/*.py
+        from agents.egress_selector import SmartPolicySelector  # type: ignore[import-not-found]
+    try:
+        proxy = SmartPolicySelector().get_proxy(task_type="browse", geo="us")
+    except Exception:
+        return None
+    if proxy and proxy.startswith("http://"):
+        return proxy
+    return None
+
+
 async def evaluate_page_opportunity(
     url: str,
     domain: str,
@@ -503,12 +523,26 @@ async def evaluate_page_opportunity(
         try:
             async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=headers) as client:
                 res = await client.get(url)
-                if res.status_code != 200:
-                    return None
-                html = res.text
+                if res.status_code == 200:
+                    html = res.text
         except Exception as e:
             logger.warning(f"Failed to fetch {url}: {e}")
-            return None
+        if not html:
+            # .edu/.gov often drops direct crawler egress (403/redirect). Retry via residential proxy.
+            proxy = _select_egress_proxy()
+            if proxy:
+                logger.info(f"Retrying {url} via residential egress proxy ...")
+                try:
+                    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers, proxy=proxy) as client:
+                        res = await client.get(url)
+                        if res.status_code == 200:
+                            html = res.text
+                        else:
+                            logger.warning(f"Egress retry returned HTTP {res.status_code} for {url}")
+                except Exception as e2:
+                    logger.warning(f"Egress retry failed for {url}: {e2}")
+            if not html:
+                return None
 
     # Clean text
     text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.DOTALL | re.IGNORECASE)

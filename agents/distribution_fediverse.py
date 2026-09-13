@@ -123,8 +123,7 @@ class FediversePublisher:
                 "content_preview": toot[:100],
             }
 
-        if not self.is_available():
-            return {"error": "MASTODON_INSTANCE_URL or MASTODON_ACCESS_TOKEN not configured"}
+        return {"error": "Mastodon syndication temporarily quarantined (account suspended on mastodon.social)"}
 
         try:
             resp = httpx.post(

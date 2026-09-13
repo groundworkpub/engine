@@ -469,9 +469,28 @@ class EditorialSanitizer:
 
             filtered_lines.append(line)
 
-        cleaned = "\n".join(filtered_lines).strip()
+        cleaned = "\n".join(filtered_lines)
 
-        # 5. Clean AI clichés via EditorialHumanizer
+        # 5. Strip trailing FAQ/Q&A sections from markdown content body
+        cleaned = re.sub(
+            r"\n#{2,3}\s+(?:Frequently Asked Questions|FAQ|Common Questions|Frequently Asked|Takeaways?|Key Takeaways?)[\s\S]*$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\n#{2,4}\s+Q[:.\s][\s\S]*$", "", cleaned, flags=re.IGNORECASE)
+
+        # 6. Naturalize rigid academic abstract headers into engaging narrative headings
+        cleaned = re.sub(r"^##\s+Objective\s*$", "## Research Context and Objectives", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^##\s+Methods\s*$", "## Methodology and Study Design", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^##\s+Results\s*$", "## Key Findings and Data Analysis", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^##\s+Discussion\s*$", "## Practical and Clinical Implications", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^###\s+Objective\s*$", "### Research Context and Objectives", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^###\s+Methods\s*$", "### Methodology and Study Design", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^###\s+Results\s*$", "### Key Findings and Data Analysis", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"^###\s+Discussion\s*$", "### Practical and Clinical Implications", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+
+        # 7. Clean AI clichés via EditorialHumanizer
         cleaned = EditorialHumanizer.sanitize_text(cleaned)
 
         return cleaned

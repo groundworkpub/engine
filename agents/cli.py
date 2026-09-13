@@ -589,6 +589,27 @@ def main() -> None:
 
     exp_sub.add_parser("status", help="Display overall Expired Domain & Satellite network status")
 
+    # 15. WordPress Authority Hunter & Injector Subcommand
+    wp_p = subparsers.add_parser("wp", help="WordPress Authority Link Hunting & Injection Engine")
+    wp_sub = wp_p.add_subparsers(dest="action", help="WordPress actions")
+
+    wp_hunt = wp_sub.add_parser("hunt", help="Hunt and probe high-DA WordPress targets")
+    wp_hunt.add_argument("--pillar", choices=["money", "body", "home", "life", "tech", "all"], default="all")
+    wp_hunt.add_argument("--probe", action="store_true", help="Probe endpoints for capability flags")
+    wp_hunt.add_argument("--discover", action="store_true", help="Run dynamic Google Dork discovery")
+    wp_hunt.add_argument("--limit", type=int, default=10, help="Max sites to probe or discover")
+    wp_hunt.add_argument("--proxy", action="store_true", help="Route traffic via DataImpulse residential proxy")
+
+    wp_inj = wp_sub.add_parser("inject", help="Inject contextual comment or pingback into WordPress target")
+    wp_inj.add_argument("--target-url", type=str, default=None, help="Target WordPress article URL")
+    wp_inj.add_argument("--pillar", choices=["money", "body", "home", "life", "tech"], default="money")
+    wp_inj.add_argument("--method", choices=["comment", "pingback", "auto"], default="auto")
+    wp_inj.add_argument("--limit", type=int, default=1, help="Number of targets to process")
+    wp_inj.add_argument("--proxy", action="store_true", help="Route requests via DataImpulse residential proxy")
+    wp_inj.add_argument("--dry-run", action="store_true", help="Synthesize without sending network request")
+
+    wp_sub.add_parser("stats", help="Display WordPress target registry statistics")
+
     parser.add_argument("-i", "--interactive", "--menu", action="store_true", help="Open interactive Master Control Center TUI")
     args = parser.parse_args()
 
@@ -1169,7 +1190,12 @@ def main() -> None:
     elif args.subcommand == "satellite":
         if args.action == "sync":
             try:
-                from agents.wp_publisher import fetch_unsynced_articles, get_wp_client, publish_article, publish_expired_routes
+                from agents.wp_publisher import (
+                    fetch_unsynced_articles,
+                    get_wp_client,
+                    publish_article,
+                    publish_expired_routes,
+                )
             except ImportError:
                 from wp_publisher import fetch_unsynced_articles, get_wp_client, publish_article, publish_expired_routes
 
@@ -1230,7 +1256,7 @@ def main() -> None:
                 from indexer_dispatcher import dispatch_pending_indexes, submit_indexnow
 
             if args.url:
-                indexnow_key = os.getenv("INDEXNOW_KEY", "381df70d54a94794abf07c14c4584a2a")
+                indexnow_key = os.getenv("INDEXNOW_KEY", "")
                 submit_indexnow([args.url], key=indexnow_key)
                 print(f"Submitted single URL: {args.url}")
             else:
@@ -1270,6 +1296,91 @@ def main() -> None:
                 print(f"  • {st:<22}: {count}")
             print("=" * 60)
 
+    elif args.subcommand == "wp":
+        if args.action == "hunt":
+            try:
+                from agents.wordpress_hunter import (
+                    discover_dynamic_articles,
+                    get_db_connection,
+                    probe_site_capabilities,
+                    seed_database_targets,
+                    update_probed_capabilities,
+                )
+            except ImportError:
+                from wordpress_hunter import (
+                    discover_dynamic_articles,
+                    get_db_connection,
+                    probe_site_capabilities,
+                    seed_database_targets,
+                    update_probed_capabilities,
+                )
+            seed_database_targets()
+            if args.probe:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                pillar_clause = "" if args.pillar == "all" else f"AND pillar = '{args.pillar}'"
+                cur.execute(
+                    f"SELECT domain FROM public.wp_target_sites WHERE last_probed_at IS NULL {pillar_clause} ORDER BY dr_rating DESC LIMIT %s",
+                    (args.limit,),
+                )
+                rows = cur.fetchall()
+                cur.close()
+                conn.close()
+                for (domain,) in rows:
+                    cap = probe_site_capabilities(domain, use_proxy=args.proxy)
+                    update_probed_capabilities(cap)
+                    time.sleep(1.0)
+            if args.discover:
+                pillar = "money" if args.pillar == "all" else args.pillar
+                urls = discover_dynamic_articles(pillar, limit=args.limit, use_proxy=args.proxy)
+                print(f"Discovered {len(urls)} live URLs for {pillar}")
+        elif args.action == "inject":
+            try:
+                from agents.wordpress_injector import execute_wordpress_injection
+            except ImportError:
+                from wordpress_injector import execute_wordpress_injection
+            if args.target_url:
+                res = execute_wordpress_injection(
+                    args.target_url,
+                    pillar=args.pillar,
+                    preferred_method=args.method,
+                    dry_run=args.dry_run,
+                    use_proxy=args.proxy,
+                )
+                print(json.dumps(res, indent=2))
+            else:
+                try:
+                    from agents.wordpress_injector import get_db_connection
+                except ImportError:
+                    from wordpress_injector import get_db_connection
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT domain, pillar FROM public.wp_target_sites ORDER BY dr_rating DESC LIMIT %s",
+                    (args.limit,),
+                )
+                rows = cur.fetchall()
+                cur.close()
+                conn.close()
+                for domain, pillar in rows:
+                    res = execute_wordpress_injection(
+                        f"https://{domain}/",
+                        pillar=pillar,
+                        preferred_method=args.method,
+                        dry_run=args.dry_run,
+                        use_proxy=args.proxy,
+                    )
+                    print(json.dumps(res, indent=2))
+        elif args.action == "stats":
+            try:
+                from agents.wordpress_hunter import print_stats
+            except ImportError:
+                from wordpress_hunter import print_stats
+            print_stats()
+        else:
+            wp_p.print_help()
+
 
 if __name__ == "__main__":
     main()
+

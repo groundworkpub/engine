@@ -65,15 +65,7 @@ def get_supabase_client() -> Any:
 def fast_paraphrase_article(
     title: str, excerpt: str, takeaway: str, content: str, target_keyword: str
 ) -> dict[str, str]:
-    """Fast paraphraser with multi-provider fallback chain (Groq / Gemini / Deterministic)."""
-    providers = []
-    if os.getenv("GROQ_API_KEY"):
-        providers.append(("groq/llama-3.3-70b-versatile", os.getenv("GROQ_API_KEY")))
-    if os.getenv("OPENAI_API_KEY"):
-        providers.append(("openai/gpt-4o-mini", os.getenv("OPENAI_API_KEY")))
-    if os.getenv("GEMINI_API_KEY"):
-        providers.append(("gemini/gemini-2.0-flash", os.getenv("GEMINI_API_KEY")))
-
+    """Fast paraphraser with unified multi-provider fallback (Cloudflare AI Gateway / OpenRouter / Groq / Gemini)."""
     prompt = f"""You are an elite research editor at Groundwork.
 Rewrite and paraphrase this article excerpt into a compelling 350-word executive summary for syndication.
 
@@ -90,28 +82,19 @@ Rules:
 Output valid JSON strictly in this format:
 {{"title": "Spun Title", "body": "Spun Markdown Body", "anchor_text": "Contextual 3-5 word anchor phrase"}}
 """
+    try:
+        from agents.llm_router import call_llm_json
+    except ImportError:
+        from llm_router import call_llm_json
 
-    for model_name, _key in providers:
-        try:
-            from litellm import completion
-
-            response = completion(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.3,
-                max_tokens=800,
-            )
-            raw_json = response.choices[0].message.content or "{}"  # type: ignore[reportAttributeAccessIssue]
-            parsed = json.loads(raw_json)
-            return {
-                "title": parsed.get("title", f"Analysis: {title}"),
-                "body": parsed.get("body", f"{excerpt}\n\n{takeaway}"),
-                "anchor_text": parsed.get("anchor_text", target_keyword or "read the full research"),
-            }
-        except Exception as exc:
-            logger.debug(f"Provider {model_name} failed: {exc}")
-            continue
+    messages = [{"role": "user", "content": prompt}]
+    parsed = call_llm_json(messages, max_tokens=800)
+    if parsed and isinstance(parsed, dict) and "title" in parsed:
+        return {
+            "title": parsed.get("title", f"Analysis: {title}"),
+            "body": parsed.get("body", f"{excerpt}\n\n{takeaway}"),
+            "anchor_text": parsed.get("anchor_text", target_keyword or "read the full research"),
+        }
 
     # Clean deterministic fallback (zero LLM dependency)
     logger.info("Using deterministic executive brief for syndication.")
@@ -258,8 +241,9 @@ def publish_to_medium(article: dict[str, Any], spun: dict[str, str], live: bool 
 
 
 def publish_to_blogger_satellite(spun: dict[str, str], tier1_urls: list[str]) -> str | None:
-    """Publishes to Blogger Web 2.0 Satellites linking to Tier 1 buffers (via Resend Email or REST API)."""
-    blogger_email = os.getenv("BLOGGER_EMAIL", "groundworkpub.gworky@blogger.com")
+    """Publishes to Blogger Web 2.0 Satellites linking to Tier 1 buffers (via REST API or Email-to-Blog)."""
+    blog_id = os.getenv("BLOGGER_BLOG_ID", "8619484910889369200").strip()
+    blogger_email = os.getenv("BLOGGER_EMAIL", "groundworkpub.gworky@blogger.com").strip()
     resend_key = os.getenv("RESEND_API_KEY")
 
     if not tier1_urls:
@@ -274,7 +258,28 @@ def publish_to_blogger_satellite(spun: dict[str, str], tier1_urls: list[str]) ->
         f"<p><small>Published by Groundwork Research Syndicate • <a href='{SITE_URL}'>{SITE_URL}</a></small></p>"
     )
 
-    # Method 1: Instant Email-to-Blog via Resend (No OAuth expiration)
+    # Method 1: Google Blogger REST API (Direct & Zero-Bounce)
+    access_token = os.getenv("BLOGGER_ACCESS_TOKEN")
+    if blog_id and access_token:
+        try:
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            url = f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts/"
+            post_payload = {
+                "kind": "blogger#post",
+                "title": spun["title"],
+                "content": html_content,
+            }
+            with httpx.Client(timeout=TIMEOUT, headers=headers) as client:
+                resp = client.post(url, json=post_payload)
+                if resp.status_code in (200, 201):
+                    post_url = resp.json().get("url")
+                    logger.info(f"[Tier 2] Blogger Satellite published via REST API: {post_url}")
+                    return post_url
+                logger.warning(f"[Tier 2] Blogger API responded: {resp.status_code} - {resp.text}")
+        except Exception as exc:
+            logger.warning(f"[Tier 2] Blogger REST API error: {exc}")
+
+    # Method 2: Email-to-Blog via Resend (Blogger Secret Post Address)
     if blogger_email and resend_key:
         try:
             payload = {
@@ -287,30 +292,11 @@ def publish_to_blogger_satellite(spun: dict[str, str], tier1_urls: list[str]) ->
             with httpx.Client(timeout=TIMEOUT, headers=headers) as client:
                 resp = client.post("https://api.resend.com/emails", json=payload)
                 if resp.status_code in (200, 201):
-                    logger.info(f"[Tier 2] Blogger Satellite post sent via email-to-blog ({blogger_email})")
+                    logger.info(f"[Tier 2] Blogger Satellite dispatched via Email-to-Blog ({blogger_email})")
                     return f"https://gworky.blogspot.com/search?q={spun['title'][:30]}"
                 logger.warning(f"[Tier 2] Resend error for Blogger: {resp.status_code} - {resp.text}")
         except Exception as exc:
             logger.warning(f"[Tier 2] Email-to-blog failed: {exc}")
-
-    # Method 2: REST API fallback
-    blog_id = os.getenv("BLOGGER_BLOG_ID")
-    access_token = os.getenv("BLOGGER_ACCESS_TOKEN")
-    if blog_id and access_token:
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-        url = f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts/"
-        post_payload = {
-            "kind": "blogger#post",
-            "title": spun["title"],
-            "content": html_content,
-        }
-        with httpx.Client(timeout=TIMEOUT, headers=headers) as client:
-            resp = client.post(url, json=post_payload)
-            if resp.status_code in (200, 201):
-                post_url = resp.json().get("url")
-                logger.info(f"[Tier 2] Blogger Satellite published via API: {post_url}")
-                return post_url
-            logger.error(f"[Tier 2] Blogger API error: {resp.status_code} - {resp.text}")
 
     return None
 
@@ -453,13 +439,103 @@ def run_syndication_for_article(supabase: Any, article: dict[str, Any], live: bo
     }
 
 
+# ============================================================
+# HIGH-AUTHORITY INGRESS & EVIDENCE PACK GENERATOR
+# ============================================================
+
+
+def get_tier2_buffer_urls(slug: str, tool_slug: str | None = None) -> dict[str, str]:
+    """Resolves active Tier-2 Authority Rotator URLs for safe multi-tier linking."""
+    target_tool = tool_slug or "mortgage-refinance-calculator"
+    return {
+        "devto": f"https://dev.to/groundworkpub/{slug}",
+        "github_pages": "https://groundworkpub.github.io/",
+        "zenodo_doi": "https://doi.org/10.5281/zenodo.22011566",
+        "youtube": "https://www.youtube.com/@gworky",
+        "pinterest": f"{SITE_URL}/feed/pinterest",
+        "direct_tool": f"{SITE_URL}/tools/{target_tool}",
+        "direct_article": f"{SITE_URL}/article/{slug}",
+    }
+
+
+def generate_high_authority_evidence_pack(
+    target_topic: str,
+    target_domain: str,
+    pillar: str,
+    tool_title: str,
+    tool_url: str,
+    tier2_url: str | None = None,
+) -> dict[str, str]:
+    """
+    Synthesizes an E-E-A-T Substantive Evidence Pack for high-authority ingress (.edu, .gov, top media):
+    - Completely eliminates spam tone.
+    - Provides direct, factual, mathematical breakdown with methodology.
+    - Contextually cites the Tier-2 Buffer (e.g. GitHub calculation code / Dev.to benchmark) or direct Groundwork calculator.
+    """
+    citation_target = tier2_url or tool_url
+    prompt = f"""You are an elite research fellow at Groundwork and Open Science contributor.
+Write a substantive, academic-grade research contribution (2 short paragraphs, ~150-200 words) for a resource desk or discussion at {target_domain}.
+
+Topic: {target_topic}
+Pillar: {pillar.capitalize()}
+Referenced Utility / Dataset: {tool_title} ({citation_target})
+
+Rules:
+1. Zero marketing fluff. Zero promotion. Speak with pure empirical rigor.
+2. Provide a practical rule of thumb or formula (e.g. break-even threshold, metabolic coefficient, or IRA 25C tax rebate calculation).
+3. Naturally cite the reference dataset or interactive decision utility ({citation_target}) as an open methodology reference.
+4. Output valid JSON strictly in this format:
+{{"subject": "Short descriptive subject line", "comment_body": "Substantive 150-200 word commentary", "anchor_phrase": "Descriptive 3-5 word anchor"}}
+"""
+    try:
+        from agents.llm_router import call_llm_json
+    except ImportError:
+        from llm_router import call_llm_json
+
+    messages = [{"role": "user", "content": prompt}]
+    parsed = call_llm_json(messages, max_tokens=600)
+    if parsed and isinstance(parsed, dict) and "comment_body" in parsed:
+        return {
+            "subject": parsed.get("subject", f"Empirical benchmark on {target_topic}"),
+            "body": parsed.get("comment_body", f"Based on recent open datasets for {target_topic}, scenario models indicate significant sensitivity to underlying interest and efficiency parameters. Complete decision formulas are documented in the {tool_title} open model at {citation_target}."),
+            "anchor": parsed.get("anchor_phrase", f"{tool_title} reference model"),
+            "target_url": citation_target,
+        }
+
+    # Deterministic fallback
+    return {
+        "subject": f"Empirical research reference: {target_topic}",
+        "body": f"Regarding {target_topic}, empirical sensitivity models demonstrate that break-even thresholds and payback periods depend strictly on localized baseline rates. For verifiable calculation formulas and open datasets, see the {tool_title} model ({citation_target}).",
+        "anchor": f"open {tool_title} model",
+        "target_url": citation_target,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Groundwork 3-Tier Authority & Link Injection Engine")
     parser.add_argument("--slug", help="Syndicate single article by slug")
     parser.add_argument("--batch-all", action="store_true", help="Batch syndicate all published articles")
     parser.add_argument("--limit", type=int, default=5, help="Max articles to process in batch mode")
     parser.add_argument("--draft", action="store_true", help="Create as draft instead of live publish")
+    parser.add_argument("--evidence-pack", action="store_true", help="Generate high-authority evidence packs for .edu/.gov hubs")
+    parser.add_argument("--interactive", action="store_true", help="Interactive terminal menu mode")
     args = parser.parse_args()
+
+    if args.evidence_pack:
+        print("🔍 Generating High-Authority Evidence Packs for Curated Resource Hubs...")
+        hubs = [
+            ("personal finance & mortgage refinance", "harvard.edu", "money", "Mortgage Refinance Break-Even Engine", f"{SITE_URL}/tools/mortgage-refinance-calculator"),
+            ("home solar & heat pump electrification", "energy.gov", "home", "Heat Pump & Solar ROI Sizer", f"{SITE_URL}/tools/heat-pump-roi-calculator"),
+            ("metabolic rate & energy expenditure", "cdc.gov", "body", "BMR & TDEE Metabolic Engine", f"{SITE_URL}/tools/bmr-tdee-calculator"),
+        ]
+        for topic, dom, pillar, title, tool_url in hubs:
+            pack = generate_high_authority_evidence_pack(topic, dom, pillar, title, tool_url)
+            print(f"\n=======================================================")
+            print(f"🎯 Target: {dom} | Topic: {topic}")
+            print(f"📌 Subject: {pack['subject']}")
+            print(f"📝 Body:\n{pack['body']}")
+            print(f"🔗 Citation: {pack['target_url']}")
+        return
 
     supabase = get_supabase_client()
 

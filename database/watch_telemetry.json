@@ -1,12 +1,52 @@
 {
   "goal_hours": 4000.0,
-  "total_watch_seconds": 7049.0,
-  "total_watch_hours": 1.958,
-  "completion_percentage": 0.049,
-  "total_sessions": 24,
-  "bandwidth_saved_mb": 1315.82,
-  "last_updated": "2026-09-13T05:36:31Z",
+  "total_watch_seconds": 8148.0,
+  "total_watch_hours": 2.263,
+  "completion_percentage": 0.057,
+  "total_sessions": 28,
+  "bandwidth_saved_mb": 1520.97,
+  "last_updated": "2026-09-13T06:13:15Z",
   "sessions_history": [
+    {
+      "session_id": "yt_554550df53",
+      "video_url": "https://youtu.be/-yh59eacYJM",
+      "duration_sec": 420,
+      "funnel_mode": "auto",
+      "quality": "144p",
+      "saved_mb": 78.4,
+      "status": "completed",
+      "timestamp": "2026-09-13T06:13:15Z"
+    },
+    {
+      "session_id": "yt_a035c8dcc4",
+      "video_url": "https://youtu.be/-yh59eacYJM",
+      "duration_sec": 421,
+      "funnel_mode": "auto",
+      "quality": "144p",
+      "saved_mb": 78.59,
+      "status": "completed",
+      "timestamp": "2026-09-13T06:13:15Z"
+    },
+    {
+      "session_id": "short_e14b11b582",
+      "video_url": "https://youtu.be/_0CGS0MXnGc",
+      "duration_sec": 119,
+      "funnel_mode": "shorts_loop",
+      "quality": "mobile",
+      "saved_mb": 22.21,
+      "status": "completed",
+      "timestamp": "2026-09-13T06:06:12Z"
+    },
+    {
+      "session_id": "short_f0a97793a6",
+      "video_url": "https://youtu.be/_0CGS0MXnGc",
+      "duration_sec": 139,
+      "funnel_mode": "shorts_loop",
+      "quality": "mobile",
+      "saved_mb": 25.95,
+      "status": "completed",
+      "timestamp": "2026-09-13T06:06:12Z"
+    },
     {
       "session_id": "yt_d6875ec2f8",
       "video_url": "https://youtu.be/-yh59eacYJM",

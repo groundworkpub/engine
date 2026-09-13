@@ -13,14 +13,25 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
+
+# Ensure root and agents directory are in sys.path
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+load_dotenv(REPO_ROOT / ".env.local")
 load_dotenv(".env.local")
 
 from supabase import Client, create_client
-from agents.llm_router import router, call_llm, call_llm_json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +40,7 @@ logging.basicConfig(
 logger = logging.getLogger("workflow_engine")
 
 
-def get_supabase_client() -> Optional[Client]:
+def get_supabase_client() -> Client | None:
     url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
     if not url or not key:
@@ -42,11 +53,11 @@ def get_supabase_client() -> Optional[Client]:
 
 
 class WorkflowNode:
-    def __init__(self, name: str, execute_fn: Callable[[Dict[str, Any]], Dict[str, Any]]):
+    def __init__(self, name: str, execute_fn: Callable[[dict[str, Any]], dict[str, Any]]):
         self.name = name
         self.execute_fn = execute_fn
 
-    def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def run(self, state: dict[str, Any]) -> dict[str, Any]:
         logger.info(f"Executing DAG Node: [{self.name}]")
         start = time.time()
         try:
@@ -70,18 +81,18 @@ class DifyWorkflowPipeline:
 
     def __init__(self, pipeline_name: str = "groundwork_full_pipeline"):
         self.pipeline_name = pipeline_name
-        self.nodes: List[WorkflowNode] = []
+        self.nodes: list[WorkflowNode] = []
         self.supabase = get_supabase_client()
 
-    def add_node(self, name: str, execute_fn: Callable[[Dict[str, Any]], Dict[str, Any]]) -> "DifyWorkflowPipeline":
+    def add_node(self, name: str, execute_fn: Callable[[dict[str, Any]], dict[str, Any]]) -> "DifyWorkflowPipeline":
         self.nodes.append(WorkflowNode(name, execute_fn))
         return self
 
-    def execute(self, initial_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def execute(self, initial_state: dict[str, Any] | None = None) -> dict[str, Any]:
         state = initial_state or {}
         state["pipeline_id"] = f"{self.pipeline_name}_{int(time.time())}"
         state["started_at"] = datetime.now(UTC).isoformat()
-        
+
         logger.info(f"Starting DAG Pipeline Execution: {self.pipeline_name}")
 
         overall_status = "success"
@@ -115,12 +126,15 @@ class DifyWorkflowPipeline:
 
 # ─── Default Production Pipeline ───────────────────────────────────────────
 
-def run_production_dag(limit: int = 1) -> Dict[str, Any]:
+def run_production_dag(limit: int = 1) -> dict[str, Any]:
     """Build and execute the end-to-end production DAG."""
     pipeline = DifyWorkflowPipeline("groundwork_production_dag")
 
-    def node_seo_optimization(state: Dict[str, Any]) -> Dict[str, Any]:
-        from agents.seo_optimizer import run_batch_seo_optimization
+    def node_seo_optimization(state: dict[str, Any]) -> dict[str, Any]:
+        try:
+            from agents.seo_optimizer import run_batch_seo_optimization
+        except ImportError:
+            from seo_optimizer import run_batch_seo_optimization
         run_batch_seo_optimization(limit=limit)
         state["items_processed"] = limit
         return state

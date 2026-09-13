@@ -10,10 +10,15 @@ from typing import Any
 
 import litellm
 from agents.density import audit_density
+from agents.edge_purge import purge_urls
 from agents.eval_tracer import OpikTracer
 from agents.headroom_compressor import HeadroomCompressor
 from agents.humanizer import HUMAN_SCORE_THRESHOLD, EditorialHumanizer
-from agents.critic import grade_faithfulness_and_grounding
+from agents.critic import (
+    grade_decision_utility,
+    grade_faithfulness_and_grounding,
+    grade_title_completeness,
+)
 from agents.prompts.catalog import get_full_system_prompt
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -1157,9 +1162,30 @@ Return the improved JSON matching the same schema."""
             # structural quality gate is published directly with zero human gating.
             now = datetime.now(UTC).isoformat()
             effective_min = min_words
+
+            # Hard decision gate (§2.12 / Decision-or-Die): a published article must
+            # (a) clear word minimum, (b) have a grammatically complete title, and
+            # (c) carry a substantive decision framework. Failing any check sends the
+            # draft to `review` instead of `published` — never auto-publish a
+            # headline-truncated or decision-empty draft.
+            title_ok, title_issue = grade_title_completeness(validated.title)
+            utility_ok, utility_issue = grade_decision_utility(validated.content, pillar)
+
             if word_count < effective_min or len(validated.title) < 10:
                 logger.warning(
                     f"Output below minimum ({word_count} < {effective_min} words) for {url[:60]} — saved as 'review'"
+                )
+                status = "review"
+                published_at = None
+            elif not title_ok:
+                logger.warning(
+                    f"Title incomplete ({title_issue}) for {url[:60]} — saved as 'review'"
+                )
+                status = "review"
+                published_at = None
+            elif not utility_ok:
+                logger.warning(
+                    f"Decision utility failed ({utility_issue}) for {url[:60]} — saved as 'review'"
                 )
                 status = "review"
                 published_at = None
@@ -1297,6 +1323,14 @@ Return the improved JSON matching the same schema."""
     # Trigger ISR revalidation if anything was written
     if published_count > 0:
         trigger_revalidation(revalidate_url, revalidate_secret)
+        # Purge Cloudflare edge cache for changed article URLs + llms.txt (§2.9)
+        try:
+            purge_targets = list(published_urls) + [
+                f"{site_url.rstrip('/')}/llms.txt",
+            ]
+            purge_urls(purge_targets)
+        except Exception as e:
+            logger.warning(f"Cloudflare edge purge skipped: {e}")
 
     # Ping IndexNow for newly published URLs (best-effort, non-blocking)
     ping_indexnow(site_url, published_urls)

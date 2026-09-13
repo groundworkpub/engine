@@ -26,7 +26,7 @@ import httpx
 logger = logging.getLogger("image_warmup")
 
 MEDIA_PREFIX = "https://media.gworky.com/"
-WIDTHS = (640, 750, 1200)
+WIDTHS = (360, 480, 750, 1200)
 UA = "GroundworkWarmBot/1.0 (+https://gworky.com)"
 
 
@@ -39,7 +39,7 @@ def warm_variants(image_url: str, client: httpx.Client) -> int:
     ).split("/", 2)[-1] if "/cdn-cgi/" in image_url else image_url.split("?")[0].replace(MEDIA_PREFIX, "")
     warmed = 0
     for width in WIDTHS:
-        url = f"{MEDIA_PREFIX}cdn-cgi/image/width={width},quality=80,format=auto/{path}"
+        url = f"{MEDIA_PREFIX}cdn-cgi/image/width={width},quality=75,format=auto/{path}"
         try:
             resp = client.head(url, timeout=15.0)
             ok = resp.status_code == 200

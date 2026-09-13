@@ -12,10 +12,10 @@ Transforms unstructured research text into a formal Entity Knowledge Graph:
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)

@@ -140,10 +140,10 @@ class VideoBroadcaster:
             if not audio_downloaded:
                 # Fallback: Synthesize clean narration using edge-tts
                 logger.info(f"Synthesizing narration via edge-tts for {local_audio}...")
-                text_to_speak = narration_text or "Welcome to Groundwork research. In this breakdown, we examine the practical implications and financial models for modern living decisions. Read the full evidence-backed guide at gworky dot com."
+                text_to_speak = narration_text or "Looking closely at the empirical numbers, conventional assumptions often diverge significantly from real-world outcomes. Here is the verified research breakdown. Explore the complete models and calculators at gworky dot com."
                 try:
                     subprocess.run(
-                        ["edge-tts", "--voice", "en-US-JennyNeural", "--text", text_to_speak, "--write-media", local_audio],
+                        ["edge-tts", "--voice", "en-US-AriaNeural", "--text", text_to_speak, "--write-media", local_audio],
                         check=True,
                         capture_output=True,
                         timeout=30,
@@ -171,19 +171,25 @@ class VideoBroadcaster:
         is_shorts = format_mode.lower() in ("shorts", "9:16", "vertical", "tiktok")
 
         if is_shorts:
-            # 9:16 Vertical Video (1080x1920) with dynamic slow camera push & green/emerald glow waveform
+            # 9:16 Vertical Video (1080x1920) with dual-layer blur pad & emerald waveform
             filter_complex = (
                 "[1:a]compand,showwaves=s=880x320:mode=line:colors=0x10b981[wave];"
-                "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                "zoompan=z='min(zoom+0.0003,1.04)':d=125:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920[bg];"
+                "[0:v]split=2[bg_src][fg_src];"
+                "[bg_src]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[blurred_bg];"
+                "[fg_src]scale=1080:1920:force_original_aspect_ratio=decrease[clean_fg];"
+                "[blurred_bg][clean_fg]overlay=(W-w)/2:(H-h)/2,"
+                "zoompan=z='min(zoom+0.0003,1.03)':d=125:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920[bg];"
                 "[bg][wave]overlay=(W-w)/2:H-h-400:shortest=1[outv]"
             )
         else:
-            # 16:9 Landscape Video (1920x1080) with slow cinematic push
+            # 16:9 Landscape Video (1920x1080) with dual-layer blur pad & slow cinematic push
             filter_complex = (
                 "[1:a]compand,showwaves=s=1400x260:mode=line:colors=0x10b981[wave];"
-                "[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"
-                "zoompan=z='min(zoom+0.0002,1.03)':d=125:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080[bg];"
+                "[0:v]split=2[bg_src][fg_src];"
+                "[bg_src]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=25:5[blurred_bg];"
+                "[fg_src]scale=1920:1080:force_original_aspect_ratio=decrease[clean_fg];"
+                "[blurred_bg][clean_fg]overlay=(W-w)/2:(H-h)/2,"
+                "zoompan=z='min(zoom+0.0002,1.02)':d=125:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080[bg];"
                 "[bg][wave]overlay=(W-w)/2:H-h-140:shortest=1[outv]"
             )
 

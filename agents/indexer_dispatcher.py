@@ -17,10 +17,9 @@ import base64
 import json
 import logging
 import os
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -57,7 +56,7 @@ def get_supabase_client() -> Any:
     return create_client(url, key)
 
 
-def submit_indexnow(urls: List[str], key: str, host: str = "emailforums.biz") -> bool:
+def submit_indexnow(urls: list[str], key: str, host: str = "emailforums.biz") -> bool:
     """Submit batch URLs to the IndexNow protocol API."""
     if not urls or not key:
         return False
@@ -82,10 +81,11 @@ def submit_indexnow(urls: List[str], key: str, host: str = "emailforums.biz") ->
         return False
 
 
-def get_google_access_token(service_account_json_b64: str) -> Optional[str]:
+def get_google_access_token(service_account_json_b64: str) -> str | None:
     """Retrieves Google OAuth2 Bearer Token using Service Account credentials."""
     try:
         import time
+
         import jwt  # pyjwt
         raw_json = base64.b64decode(service_account_json_b64).decode("utf-8")
         creds = json.loads(raw_json)
@@ -143,10 +143,10 @@ def submit_google_indexing(url: str, access_token: str) -> bool:
         return False
 
 
-def dispatch_pending_indexes(limit: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+def dispatch_pending_indexes(limit: int = 30, dry_run: bool = False) -> dict[str, Any]:
     """Polls routes and guest studies requiring index notifications."""
     supabase = get_supabase_client()
-    indexnow_key = os.getenv("INDEXNOW_KEY", "381df70d54a94794abf07c14c4584a2a")
+    indexnow_key = os.getenv("INDEXNOW_KEY", "")
     gsc_b64 = os.getenv("GSC_SERVICE_ACCOUNT_JSON_B64", "")
 
     # 1. Fetch routes in WP_PUBLISHED or EDGE_ROUTED status
@@ -188,7 +188,7 @@ def dispatch_pending_indexes(limit: int = 30, dry_run: bool = False) -> Dict[str
             submit_google_indexing(u, google_token)
 
     # Update status in DB
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     if route_ids:
         supabase.table("expired_routes").update({
             "status": "INDEX_SUBMITTED",
@@ -207,7 +207,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.url:
-        indexnow_key = os.getenv("INDEXNOW_KEY", "381df70d54a94794abf07c14c4584a2a")
+        indexnow_key = os.getenv("INDEXNOW_KEY", "")
         submit_indexnow([args.url], key=indexnow_key)
         print(f"Submitted single URL: {args.url}")
     else:

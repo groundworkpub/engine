@@ -46,45 +46,55 @@ class MoneyPrinterEngine:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def decompose_article_to_scenes(self, title: str, takeaway: str, content: str) -> list[VideoScene]:
-        """Break down article takeaway and content into 4-6 concise video scenes."""
+        """Break down article into 5 structured scenes totaling 65-75 seconds (> 1 minute)."""
         scenes: list[VideoScene] = []
 
-        # Scene 1: Hook / Title
+        # Scene 1: Hook / Core Question (8.0s)
         clean_title = re.sub(r"[#*]", "", title).strip()
         scenes.append(
             VideoScene(
                 index=0,
                 text=clean_title,
                 keyword=self._extract_keyword(clean_title),
-                duration_seconds=4.0,
+                duration_seconds=8.0,
             )
         )
 
-        # Scene 2: Core Takeaway / Problem
+        # Scene 2: Problem & Research Context (14.0s)
         clean_takeaway = re.sub(r"[#*]", "", takeaway).strip()
         scenes.append(
             VideoScene(
                 index=1,
                 text=clean_takeaway[:160],
                 keyword=self._extract_keyword(clean_takeaway),
-                duration_seconds=6.0,
+                duration_seconds=14.0,
             )
         )
 
-        # Scene 3 & 4: Key Insights from Body
+        # Scene 3 & 4: Deep-Dive Data Insights (16.0s each)
         paragraphs = [p.strip() for p in content.split("\n\n") if len(p.strip()) > 60 and not p.strip().startswith("#")]
-        for idx, p in enumerate(paragraphs[:3], start=2):
+        for idx, p in enumerate(paragraphs[:2], start=2):
             sentences = re.split(r"[.!?]", p)
-            clean_s = sentences[0].strip() if sentences else p[:120]
+            clean_s = sentences[0].strip() if sentences else p[:140]
             if len(clean_s) > 20:
                 scenes.append(
                     VideoScene(
                         index=idx,
-                        text=clean_s[:140],
+                        text=clean_s[:160],
                         keyword=self._extract_keyword(clean_s),
-                        duration_seconds=5.0,
+                        duration_seconds=16.0,
                     )
                 )
+
+        # Scene 5: Actionable Takeaway & Groundwork CTA (11.0s)
+        scenes.append(
+            VideoScene(
+                index=len(scenes),
+                text="Read the complete research breakdown and interactive tools on Groundwork at gworky.com.",
+                keyword="research decision tools",
+                duration_seconds=11.0,
+            )
+        )
 
         return scenes
 

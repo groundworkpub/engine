@@ -17,16 +17,15 @@ import logging
 import os
 import random
 import re
-import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 _ROOT = Path(__file__).resolve().parent.parent
 
 try:
     from agents.llm_router import call_llm, call_llm_json
 except ImportError:
-    from llm_router import call_llm, call_llm_json
+    from llm_router import call_llm
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("expired_scribe")
@@ -154,7 +153,7 @@ def rewrite_article_agentic(
     return new_title, rewritten
 
 
-def process_pending_rewrites(limit: int = 10, domain: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
+def process_pending_rewrites(limit: int = 10, domain: str | None = None, dry_run: bool = False) -> dict[str, Any]:
     """Processes routes in ARCHIVED status and produces modernized content."""
     supabase = get_supabase_client()
 

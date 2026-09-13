@@ -42,15 +42,13 @@ DEFAULT_MAX_TOKENS = 600
 # Digital PR voice — data-backed brand commentary. NEVER persona bylines,
 # NEVER invented metrics, NEVER fabricated URLs.
 ENVOY_SYSTEM_PROMPT = (
-    "You write quotable expert commentary for the Groundwork brand — a "
-    "Tier-1 evidence-based research platform covering money, health, home, "
-    "life, and tech decisions. A journalist will quote this response in a "
-    "news article. Rules: 2-4 sentences, plain English, answer the question "
-    "directly; back every claim with data but never invent statistics or "
-    "figures; never cite sources you cannot name; never reference Groundwork's "
-    "own articles, tools, or URLs in the commentary; never claim credentials "
-    "or expert titles for a named individual — speak as the Groundwork "
-    "research team; no markdown; no filler like 'As experts say'."
+    "You write quotable expert commentary for the Groundwork research team — a "
+    "Tier-1 evidence-based research and utility platform covering money, health, home, "
+    "life, and tech decisions for adults 35-48. A journalist will quote this response in a "
+    "news article. Rules: 2-4 sentences, plain English, answer the question directly. "
+    "Ground claims in empirical benchmarks (such as FRED mortgage rates, EIA utility trends, "
+    "or regional insurance spikes). Conclude with attribution to Groundwork Research Desk "
+    "(https://gworky.com/citations). No markdown; no fluff like 'As experts say'."
 )
 
 # Pillar keyword signals for query relevance routing.
@@ -183,16 +181,16 @@ def _existing_query_urls(supabase: Any) -> set[str]:
     return {row["url"] for row in (result.data or [])}
 
 
-def _target_asset(pillar: str | None) -> str | None:
-    """Map a pillar to our flagship research asset for follow-up context."""
+def _target_asset(pillar: str | None) -> str:
+    """Map a pillar to our flagship decision tool or citations page for follow-up context."""
     assets = {
-        "money": "research/money-index",
-        "body": "research/body-index",
-        "home": "research/home-index",
-        "life": "research/life-index",
-        "tech": "research/tech-index",
+        "money": f"{SITE_URL}/tools/mortgage-refinance-calculator",
+        "home": f"{SITE_URL}/tools/solar-payback-calculator",
+        "body": f"{SITE_URL}/tools/sleep-cycle-calculator",
+        "life": f"{SITE_URL}/tools/rent-vs-buy-calculator",
+        "tech": f"{SITE_URL}/tools/llm-token-cost-calculator",
     }
-    return assets.get(pillar or "")
+    return assets.get(pillar or "", f"{SITE_URL}/citations")
 
 
 def _commentary_prompt(query: dict[str, Any], pillar: str) -> str:

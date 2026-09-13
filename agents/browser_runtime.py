@@ -19,6 +19,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
+from browser_stealth import build_stealth_script
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,7 @@ class BrowserPersona:
     sec_ch_ua: str = ""
     webgl_vendor: str = ""
     platform: str = "macOS"
+    is_mobile: bool = False
 
     @staticmethod
     def random_desktop() -> BrowserPersona:
@@ -157,6 +160,17 @@ class BrowserRuntime:
                 timezone_id=persona.timezone_id,
                 color_scheme=persona.color_scheme,
             )
+            # Inject persona-aware CDP stealth script (fingerprint matrix sync:
+            # WebGL vendor/renderer, navigator.platform, hardware, canvas noise)
+            await context.add_init_script(
+                build_stealth_script(
+                    platform=persona.platform,
+                    is_mobile=persona.is_mobile,
+                    is_firefox=False,
+                    session_seed=persona.user_agent[-24:],
+                )
+            )
+
             page = await context.new_page()
 
             # Inject sec-ch-ua and other client hints

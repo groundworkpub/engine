@@ -136,9 +136,7 @@ def publish_roundup(pillar: str, dry_run: bool = False) -> dict[str, Any]:
         return {"title": title, "status": "dry_run", "pillar": pillar}
 
     wp_url = "https://emailforums.biz/wp-json/wp/v2"
-    auth = (os.getenv("WP_APP_USER", ""), os.getenv("WP_APP_PASSWORD", ""))
-    if not all(auth):
-        raise RuntimeError("WP_APP_USER and WP_APP_PASSWORD required")
+    auth = (os.getenv("WP_USERNAME", "gworky"), os.getenv("WP_APPLICATION_PASSWORD", ""))
 
     payload = {
         "title": title,

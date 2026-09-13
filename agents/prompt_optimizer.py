@@ -12,6 +12,7 @@ import json
 import logging
 from typing import Any
 
+from agents.critic import grade_evidence_density, grade_keyword_stuffing
 from agents.humanizer import EditorialHumanizer
 from agents.prompts.catalog import get_full_system_prompt
 
@@ -23,12 +24,12 @@ class PromptOptimizer:
 
     @staticmethod
     def evaluate_output_quality(payload: dict[str, Any]) -> dict[str, Any]:
-        """Score payload against 4 quantitative quality vectors."""
+        """Score payload against quantitative quality and GEO vectors."""
         score = 0
         critiques: list[str] = []
 
         content = payload.get("content", "")
-        payload.get("title", "")
+        title = payload.get("title", "")
         takeaway = payload.get("takeaway", "")
         faqs = payload.get("faq", [])
 
@@ -59,19 +60,34 @@ class PromptOptimizer:
             score += max(0, 25 - (len(slop_words) * 5))
             critiques.append(f"Contains AI slop phrases: {', '.join(slop_words)}.")
 
-        # 3. Burstiness & Flow (25 pts)
+        # 3. Burstiness & Flow (20 pts)
         burst_stats = EditorialHumanizer.calculate_burstiness(content)
         if burst_stats["is_natural"]:
-            score += 25
+            score += 20
         else:
-            score += 15
+            score += 10
             critiques.append(f"Sentence rhythm is monotonous (burstiness score: {burst_stats['burstiness_score']}).")
 
-        # 4. Takeaway & FAQ completeness (20 pts)
+        # 4. Takeaway & FAQ completeness (15 pts)
         if takeaway and len(takeaway.split()) >= 30:
-            score += 10
+            score += 7
         if faqs and len(faqs) >= 3:
+            score += 8
+
+        # 5. GEO Evidence Density & Anti-Keyword Stuffing (15 pts)
+        ev_score, ev_signals = grade_evidence_density(content)
+        if ev_score >= 0.60:
             score += 10
+        elif ev_score >= 0.30:
+            score += 5
+        else:
+            critiques.append(f"Low empirical evidence density (score: {ev_score:.2f}, {ev_signals} signals).")
+
+        stuffing_passed, density_pct, stuffing_issue = grade_keyword_stuffing(content, title)
+        if stuffing_passed:
+            score += 5
+        else:
+            critiques.append(stuffing_issue or f"Keyword stuffing detected ({density_pct}%).")
 
         final_score = min(100, score)
         return {
@@ -79,6 +95,9 @@ class PromptOptimizer:
             "passed": final_score >= 85,
             "word_count": words,
             "slop_count": len(slop_words),
+            "evidence_density_score": ev_score,
+            "keyword_density_pct": density_pct,
+            "keyword_stuffing_passed": stuffing_passed,
             "burstiness": burst_stats,
             "critiques": critiques,
         }

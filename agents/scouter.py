@@ -1,5 +1,6 @@
 import logging
 import time
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -188,6 +189,38 @@ def _is_english_text(text: str) -> bool:
     return cjk <= 5
 
 
+_NON_DECISION_PATTERNS = [
+    r"\b(?:things to do in|must-see|tourist|sightseeing|bucket list)\b",
+    r"\b(?:itinerary for maximizing|travel itinerary|food crawl|vacation spots)\b",
+    r"\b(?:celebrity|red carpet|dating rumors|fashion week|paparazzi)\b",
+    r"\b(?:inspirational quotes|quotes that will change|horoscope)\b",
+    r"\b(?:holiday gift guide|black friday deals roundup)\b",
+]
+
+
+def qualify_decision_intent(title: str, text: str, pillar: str) -> tuple[bool, str]:
+    """Pre-Scribe 'Decision-or-Die' Gate (§1 Platform Identity & Rule §2.1).
+
+    Rejects superficial tourist listicles, entertainment newsjacks, or
+    non-decision content before token budget is spent on drafting.
+    """
+    combined = f"{title} {text[:600]}".lower()
+
+    # 1. Reject explicit non-decision patterns
+    for pattern in _NON_DECISION_PATTERNS:
+        if re.search(pattern, combined, re.IGNORECASE):
+            return False, f"Rejected non-decision pattern match: {pattern}"
+
+    # 2. For Life pillar, reject purely generic vacation/sightseeing titles
+    if pillar == "life":
+        if re.search(r"\b(?:itinerary|travel tips|visit \w+|weekend getaway)\b", title, re.IGNORECASE):
+            # Must contain a decision anchor: cost, budget, transit, comparison, tax, visa, relocation
+            if not re.search(r"\b(?:cost|budget|transit|omny|subway|ev|vs|tradeoff|compare|save|dollars|fare|tax|relocat|moving)\b", combined):
+                return False, "Life/travel topic lacks quantitative decision model or cost anchor"
+
+    return True, "Qualified decision intent"
+
+
 def run_scouter(config: dict, supabase: Any) -> list[dict[str, Any]]:
     """Agent 1: Harvest raw content from RSS feeds."""
     existing_urls = get_existing_urls(supabase)
@@ -236,6 +269,13 @@ def run_scouter(config: dict, supabase: Any) -> list[dict[str, Any]]:
 
                 if not _is_english_text(f"{getattr(entry, 'title', '')} {raw_text}"):
                     logger.info("EN-only filter: dropped non-English item (%s)", url)
+                    continue
+
+                is_decision, decision_reason = qualify_decision_intent(
+                    getattr(entry, "title", ""), raw_text, source.get("pillar", "general")
+                )
+                if not is_decision:
+                    logger.info("Decision-or-Die Gate: dropped %s (%s)", url, decision_reason)
                     continue
 
                 raw_payload.append(
