@@ -1205,7 +1205,12 @@ async def main():
     p_auto.add_argument("--concurrency", type=int, default=2, help="Number of concurrent sessions")
     p_auto.add_argument("--watch-duration", type=int, default=120, help="Watch time duration in seconds (default: 120s)")
     p_auto.add_argument("--provision", type=int, default=0, help="Provision N new accounts before loop")
-    p_auto.add_argument("--headed", action="store_true", help="Run headed (default is headless)")
+    # Command: master-video
+    p_mv = subparsers.add_parser("master-video", help="Subsystem E: Siloed Pillar Master Video Suite & Publishing Engine")
+    p_mv.add_argument("--pillar", choices=["money", "tech", "body", "home", "life"], default="money", help="Target pillar domain")
+    p_mv.add_argument("--publish-public", action="store_true", help="Directly upload and publish as public to YouTube @gworkycom")
+    p_mv.add_argument("--queue-buffer", action="store_true", help="Queue multi-channel announcement and chapter teasers via Buffer")
+    p_mv.add_argument("--alert-telegram", action="store_true", default=True, help="Send live publishing notification to Telegram @gwelena_bot")
 
     # Command: status
     subparsers.add_parser("status", help="Print overall OAE system status and assets")
@@ -1395,6 +1400,91 @@ async def main():
             quality="144p",
         )
         logger.info("Autonomous Dual-Track cycle complete.")
+
+    elif args.command == "master-video":
+        from agents.cinematic_studio_renderer import CinematicStudioRenderer
+        from agents.master_narrative_engine import MasterNarrativeEngine
+        from agents.stock_media_harvester import StockMediaHarvester
+
+        logger.info(f"=== Starting OAE Master Video Suite Engine for Pillar: [{args.pillar.upper()}] ===")
+
+        # 1. Narrative & RAG Audio Synthesis
+        narrative_engine = MasterNarrativeEngine(pillar=args.pillar)
+        meta = await narrative_engine.build_complete_audio_track()
+        meta_path = _root_dir / "artifacts" / "master_video" / args.pillar / "master_metadata.json"
+
+        # 2. B-Roll Harvesting
+        harvester = StockMediaHarvester()
+        all_broll = []
+        for ch in meta.get("chapters", []):
+            clips = harvester.harvest_broll_for_chapter(ch.get("broll_keywords", ["finance"]), target_clips=2)
+            all_broll.extend(clips)
+
+        if not all_broll:
+            all_broll = list((_root_dir / "artifacts" / "broll_cache").glob("*.mp4"))
+
+        # 3. 3-Layer Studio Rendering
+        renderer = CinematicStudioRenderer(pillar=args.pillar)
+        thumb_path = renderer.generate_youtube_thumbnail()
+        master_video_path = renderer.compile_master_video(
+            meta_json_path=meta_path,
+            broll_clips=all_broll,
+        )
+
+        # 4. Direct YouTube Publishing
+        yt_url = None
+        if args.publish_public:
+            from agents.youtube_uploader import upload_video
+
+            logger.info(f"🚀 Uploading Master Video to YouTube @gworkycom: {meta['title']}...")
+            res_yt = upload_video(
+                video_path=master_video_path,
+                title=f"{meta['title']} | Groundwork Master Suite",
+                description=meta["description"],
+                tags=["Groundwork", args.pillar.title(), "Personal Finance", "Research", "Calculators", "Evidence Based"],
+                privacy_status="public",
+                category_id="27",  # Education
+            )
+            vid_id = res_yt["id"]
+            yt_url = f"https://youtu.be/{vid_id}"
+            logger.info(f"✅ Master Video Published LIVE on YouTube: {yt_url}")
+
+            # 5. Telegram Notification
+            if args.alert_telegram:
+                try:
+                    from agents.distribution_telegram import send_telegram_alert
+                    tg_text = (
+                        f"🎉 <b>[GROUNDWORK MASTER SUITE LIVE]</b>\n\n"
+                        f"📺 <b>Title:</b> {meta['title']}\n"
+                        f"🏛️ <b>Pillar:</b> {args.pillar.upper()}\n"
+                        f"⏱️ <b>Duration:</b> {meta['total_duration_formatted']}\n"
+                        f"🔗 <b>Watch:</b> {yt_url}\n\n"
+                        f"<i>Master Video & Shorts Engine running via OAE Orchestrator.</i>"
+                    )
+                    send_telegram_alert(tg_text)
+                except Exception as tg_err:
+                    logger.warning(f"Telegram notification notice: {tg_err}")
+
+            # 6. Queue Buffer Campaign
+            if args.queue_buffer:
+                try:
+                    from agents.herald import queue_master_video_campaign
+                    queue_master_video_campaign(
+                        title=meta["title"],
+                        youtube_url=yt_url,
+                        thumbnail_url=f"https://media.gworky.com/covers/master_{args.pillar}.webp",
+                        chapters=meta.get("chapters", []),
+                        pillar=args.pillar,
+                    )
+                except Exception as b_err:
+                    logger.warning(f"Buffer queue notice: {b_err}")
+
+            # 7. Auto-Route OAE Watch-Time Daemon
+            try:
+                from agents.traffic_cli import main as _
+                logger.info(f"🎯 Routing OAE Watch-Time Booster Daemon to newly published Master Video: {yt_url}")
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

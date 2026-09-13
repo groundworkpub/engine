@@ -20,6 +20,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -98,18 +99,74 @@ def build_video_metadata(
     category_id: str = DEFAULT_CATEGORY,
 ) -> dict[str, Any]:
     """Pure function so callers/tests can inspect exactly what gets sent."""
+    clean_title = title[:100]
+    clean_description = description[:5000]
     return {
         "snippet": {
-            "title": title[:100],
-            "description": description[:5000],
+            "title": clean_title,
+            "description": clean_description,
             "tags": (tags or [])[:30],
             "categoryId": category_id,
+            "defaultLanguage": "en",
+            "defaultAudioLanguage": "en-US",
         },
         "status": {
             "privacyStatus": privacy_status,
             "selfDeclaredMadeForKids": False,
         },
     }
+
+
+def validate_video_format(video_path: Path, title: str) -> tuple[bool, str]:
+    """Strict Pre-Upload Gate: Validates orientation and duration against Shorts vs Longform."""
+    import subprocess
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "stream=width,height,duration",
+            "-of", "json", str(video_path)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+        streams = data.get("streams", [])
+        if not streams:
+            return True, title
+        s = streams[0]
+        w = int(s.get("width") or 0)
+        h = int(s.get("height") or 0)
+        dur = float(s.get("duration") or 0.0)
+
+        is_shorts_claim = "#shorts" in title.lower() or "short" in str(video_path).lower()
+        is_vertical = h > w
+
+        if is_shorts_claim or is_vertical:
+            # Shorts Invariant: MUST be vertical and <= 60s
+            if not is_vertical:
+                raise YouTubeUploadError(
+                    f"Orientation Mismatch: Cannot upload horizontal video ({w}x{h}) as YouTube Shorts! Must be 9:16 (1080x1920)."
+                )
+            if dur > 65.0:
+                raise YouTubeUploadError(
+                    f"Duration Violation: Shorts duration is {dur:.1f}s (exceeds 60s limit). Cannot enter Shorts feed."
+                )
+            # Ensure #Shorts tag is in title
+            if "#Shorts" not in title and "#shorts" not in title:
+                clean_title = f"{title[:80]} #Shorts"
+            else:
+                clean_title = title
+            return True, clean_title
+        else:
+            # Master / Longform Invariant: MUST be horizontal
+            if is_vertical:
+                raise YouTubeUploadError(
+                    f"Orientation Mismatch: Cannot upload vertical video ({w}x{h}) as standard landscape video!"
+                )
+            # Clean accidental #Shorts from longform
+            clean_title = re.sub(r"#shorts", "", title, flags=re.IGNORECASE).strip()
+            return False, clean_title
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"ffprobe validation warning: {e}")
+        return False, title
 
 
 def upload_video(
@@ -125,6 +182,9 @@ def upload_video(
     path = Path(video_path)
     if not path.exists():
         raise YouTubeUploadError(f"Video file not found: {path}")
+
+    # Run Strict Pre-Upload Format Gate
+    is_shorts, title = validate_video_format(path, title)
 
     token = access_token or get_access_token()
     expected = os.getenv("YOUTUBE_CHANNEL_ID")

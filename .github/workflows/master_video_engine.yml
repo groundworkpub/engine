@@ -1,0 +1,90 @@
+name: Master Video & Shorts Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      pillar:
+        description: 'Target Content Pillar'
+        required: true
+        default: 'money'
+        type: choice
+        options:
+          - money
+          - tech
+          - body
+          - home
+          - life
+      publish:
+        description: 'Publish directly as Public to YouTube @gworkycom'
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    # Bi-Weekly: Every Wednesday & Sunday at 14:00 UTC (21:00 WIB)
+    - cron: '0 14 * * 0,3'
+
+jobs:
+  produce_master_video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx edge-tts litellm pillow pydantic boto3 google-api-python-client google-auth-oauthlib mutagen
+
+      - name: Determine Content Pillar
+        id: pillar_selector
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "pillar=${{ github.event.inputs.pillar }}" >> $GITHUB_OUTPUT
+            echo "publish=${{ github.event.inputs.publish }}" >> $GITHUB_OUTPUT
+          else
+            DAY_OF_WEEK=$(date +%u)
+            if [ "$DAY_OF_WEEK" -eq 7 ]; then
+              echo "pillar=money" >> $GITHUB_OUTPUT
+            else
+              echo "pillar=tech" >> $GITHUB_OUTPUT
+            fi
+            echo "publish=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Execute Master Video Engine & Publish
+        env:
+          YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          BUFFER_ORG_ID: ${{ secrets.BUFFER_ORG_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          PUBLISH_FLAG=""
+          if [ "${{ steps.pillar_selector.outputs.publish }}" = "true" ]; then
+            PUBLISH_FLAG="--publish-public"
+          fi
+
+          python3 master_orchestrator.py master-video \
+            --pillar "${{ steps.pillar_selector.outputs.pillar }}" \
+            $PUBLISH_FLAG \
+            --queue-buffer \
+            --alert-telegram

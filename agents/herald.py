@@ -992,6 +992,59 @@ def publish_to_buffer(
     return {"ok": False, "status": status, "error": str(err) if err else f"HTTP {status}"}
 
 
+def queue_master_video_campaign(
+    title: str,
+    youtube_url: str,
+    thumbnail_url: str,
+    chapters: list[dict[str, Any]],
+    pillar: str = "money",
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Queue tiered multi-channel campaign in Buffer for a Master Video release."""
+    logger.info("Scheduling Buffer Master Video launch campaign for: %s", title)
+
+    # 1. Master Launch Announcement Post
+    hashtags = " ".join(PILLAR_HASHTAGS.get(pillar.lower(), ["#Groundwork", "#Research", "#Finance"]))
+    launch_text = (
+        f"🎙️ NEW MASTER SUITE RELEASE: {title}\n\n"
+        f"A comprehensive 40-minute research deep dive breaking down empirical benchmarks, "
+        f"amortization formulas, and asset protection models.\n\n"
+        f"Watch the full master analysis:\n{youtube_url}\n\n"
+        f"{hashtags} #GroundworkDeepDive #EvidenceBased"
+    )
+
+    results = []
+    r_main = publish_to_buffer(
+        title=f"[MASTER SUITE] {title}",
+        text=launch_text,
+        image_url=thumbnail_url,
+        env=env,
+    )
+    results.append({"step": "launch_announcement", "result": r_main})
+
+    # 2. Queue chapter teaser snippets
+    for idx, ch in enumerate(chapters[:3], start=1):
+        ch_title = ch.get("title", f"Chapter {idx}")
+        ch_stat = ch.get("key_stat", "")
+        time_mark = ch.get("timestamp_formatted", "00:00")
+        ch_text = (
+            f"💡 In Chapter {idx} of our {pillar.title()} Master Suite ({time_mark}): '{ch_title}'\n\n"
+            f"Key benchmark finding: {ch_stat or 'Calculations reveal clear divergent outcomes between assumptions and empirical math.'}\n\n"
+            f"Full breakdown on YouTube: {youtube_url}\n"
+            f"Interactive models at: https://gworky.com/{pillar}\n\n"
+            f"{hashtags}"
+        )
+        r_ch = publish_to_buffer(
+            title=f"Chapter {idx} Teaser: {ch_title}",
+            text=ch_text,
+            image_url=thumbnail_url,
+            env=env,
+        )
+        results.append({"step": f"chapter_{idx}_teaser", "result": r_ch})
+
+    return {"ok": True, "campaign_steps": results}
+
+
 
 # --------------------------------------------------------------------------
 # Unified Master Bundles Synthesizers
@@ -1251,10 +1304,32 @@ def dispatch(article: dict[str, Any], platform: str, env: dict[str, str] | None 
     if platform == "buffer":
         title = article.get("title", "Groundwork Research")
         caption = build_standard_social_caption(article)
-        img = article.get("image_url") or f"https://media.gworky.com/covers/{article.get('slug')}.webp"
-        video_url = article.get("video_url")
-        if not video_url and article.get("youtube_video_id"):
-            video_url = f"https://media.gworky.com/videos/{article.get('slug')}-shorts.mp4"
+        slug = article.get("slug", "")
+        img = article.get("image_url") or f"https://media.gworky.com/covers/{slug}.webp"
+        
+        # 1. Lookup verified video from podcast_episodes table
+        video_url = None
+        try:
+            sb = _supabase()
+            if sb and slug:
+                pod_res = (
+                    sb.table("podcast_episodes")
+                    .select("video_url, youtube_video_id")
+                    .eq("slug", slug)
+                    .maybe_single()
+                    .execute()
+                )
+                if pod_res and getattr(pod_res, "data", None):
+                    video_url = pod_res.data.get("video_url")
+                    if not video_url and pod_res.data.get("youtube_video_id"):
+                        candidate = f"https://media.gworky.com/videos/{slug}.mp4"
+                        video_url = candidate
+        except Exception as lk_err:
+            logger.warning("Video lookup from podcast_episodes failed for %s: %s", slug, lk_err)
+
+        if not video_url:
+            video_url = article.get("video_url")
+
         return publish_to_buffer(title, caption, image_url=img, video_url=video_url, env=env)
 
     if platform == "pinterest":
