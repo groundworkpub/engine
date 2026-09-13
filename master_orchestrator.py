@@ -568,6 +568,37 @@ class TelemetryManager:
             f"   📈 Warming Pipeline: S0 (Pending): {s0} | S1: {s1} | S2: {s2} | S3: {s3} | Converted: {subs}"
         )
 
+    def send_daily_digest(self) -> bool:
+        """Send daily progress digest to Telegram founder chat via @gwelena_bot."""
+        import urllib.request
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_FOUNDER_CHAT_ID")
+        if not bot_token or not chat_id:
+            logger.info("Telegram credentials not configured; skipping daily digest.")
+            return False
+
+        progress_text = self.render_progress_bar()
+        msg = (
+            "📊 *GROUNDWORK YOUTUBE DAILY PROGRESS DIGEST*\n\n"
+            f"```text\n{progress_text}\n```\n"
+            "⚡ *Status*: Hybrid Cloud & Local Engine Active ($0 USD)"
+        )
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = json.dumps({
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "Markdown",
+        }).encode("utf-8")
+        try:
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    logger.info("✅ Daily progress digest dispatched to Telegram.")
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to dispatch Telegram daily digest: {e}")
+        return False
+
 
 # ==============================================================================
 # 1C. ACCOUNT WARMING & 1,000-SUBSCRIBER ACQUISITION CONDUCTOR
@@ -1254,6 +1285,72 @@ async def execute_pyramid_funnel(
     logger.info("✅ Autonomous Pyramid Funnel cycle complete.")
 
 
+async def execute_weighted_portfolio_cycle(
+    concurrency: int = 1,
+    base_watch_duration: int = 300,
+    headed: bool = False,
+    egress: str = "auto",
+) -> dict[str, Any]:
+    """
+    Executes a single cycle of the 60/30/10 Weighted YouTube Portfolio Strategy:
+    - 60% Weight: 1-Hour Mega Briefing (-yh59eacYJM, max watch-time accumulation, 5 chapter seeks)
+    - 30% Weight: Longform Deep-Dive (C4d4fMeA_Yc, Household Capital Allocation)
+    - 10% Weight: Shorts Retention Loop (Ygr-u9OZZWY, ryvLLcVg4qQ, QjXztZt8kbQ)
+    """
+    gov = WatchTimeGovernor()
+    roll = random.random()
+
+    if roll < 0.60:
+        # 60% 1-Hour Mega Briefing
+        target_url = "https://youtu.be/-yh59eacYJM"
+        target_dwell = max(240, min(900, int(random.gauss(base_watch_duration * 1.5, 60))))
+        logger.info(f"🏛️ [Portfolio 60%] Dispatching 1-Hour Mega Briefing session -> {target_url} ({target_dwell}s, egress: {egress})")
+        await gov.run_batch_watch(
+            video_url=target_url,
+            concurrency=concurrency,
+            duration=target_dwell,
+            headed=headed,
+            search_keyword=None,
+            funnel_mode="auto",
+            quality="144p",
+            egress=egress,
+        )
+        return {"type": "mega_briefing", "url": target_url, "duration": target_dwell}
+
+    elif roll < 0.90:
+        # 30% Longform Deep-Dive
+        target_url = "https://youtu.be/C4d4fMeA_Yc"
+        target_dwell = max(120, min(480, int(random.gauss(base_watch_duration, 45))))
+        logger.info(f"🎬 [Portfolio 30%] Dispatching Longform Deep-Dive session -> {target_url} ({target_dwell}s, egress: {egress})")
+        await gov.run_batch_watch(
+            video_url=target_url,
+            concurrency=concurrency,
+            duration=target_dwell,
+            headed=headed,
+            search_keyword=None,
+            funnel_mode="auto",
+            quality="144p",
+            egress=egress,
+        )
+        return {"type": "longform", "url": target_url, "duration": target_dwell}
+
+    else:
+        # 10% Shorts Retention Looping
+        shorts_pool = [
+            "https://youtu.be/_0CGS0MXnGc",
+            "https://youtu.be/QjXztZt8kbQ",
+            "https://youtu.be/ryvLLcVg4qQ",
+        ]
+        picked_short = random.choice(shorts_pool)
+        logger.info(f"📱 [Portfolio 10%] Dispatching Shorts retention loop -> {picked_short}")
+        await gov.run_batch_shorts(
+            short_url=picked_short,
+            concurrency=concurrency,
+            headed=headed,
+        )
+        return {"type": "short", "url": picked_short, "duration": 70}
+
+
 # ==============================================================================
 # 4. MASTER CLI DISPATCHER
 # ==============================================================================
@@ -1331,6 +1428,18 @@ async def main():
     p_auto.add_argument("--watch-duration", type=int, default=120, help="Watch time duration in seconds (default: 120s)")
     p_auto.add_argument("--headed", action="store_true", help="Visible browser window")
     p_auto.add_argument("--provision", type=int, default=0, help="Provision N new accounts before loop")
+    p_auto.add_argument(
+        "--strategy",
+        choices=["weighted", "pyramid"],
+        default="weighted",
+        help="Portfolio rotation strategy (default: weighted 60/30/10)",
+    )
+    p_auto.add_argument(
+        "--egress",
+        choices=["auto", "direct", "proxy"],
+        default="auto",
+        help="Egress connection mode (default: auto)",
+    )
     # Command: master-video
     p_mv = subparsers.add_parser("master-video", help="Subsystem E: Siloed Pillar Master Video Suite & Publishing Engine")
     p_mv.add_argument("--pillar", choices=["money", "tech", "body", "home", "life"], default="money", help="Target pillar domain")
@@ -1500,11 +1609,21 @@ async def main():
 
     elif args.command == "auto":
         base_dwell = getattr(args, "watch_duration", 330)
-        await execute_pyramid_funnel(
-            concurrency=args.concurrency,
-            base_watch_duration=base_dwell,
-            headed=getattr(args, "headed", False),
-        )
+        strategy = getattr(args, "strategy", "weighted")
+        egress = getattr(args, "egress", "auto")
+        if strategy == "weighted":
+            await execute_weighted_portfolio_cycle(
+                concurrency=args.concurrency,
+                base_watch_duration=base_dwell,
+                headed=getattr(args, "headed", False),
+                egress=egress,
+            )
+        else:
+            await execute_pyramid_funnel(
+                concurrency=args.concurrency,
+                base_watch_duration=base_dwell,
+                headed=getattr(args, "headed", False),
+            )
 
     elif args.command == "yt-stats":
         from googleapiclient.discovery import build

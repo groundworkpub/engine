@@ -66,6 +66,8 @@ CALCULATOR_CATALOG = [
         "pillar": "money",
         "title": "Mortgage Refinance Break-Even & True Cost Calculator",
         "url": "https://gworky.com/tools/mortgage-refinance",
+        "youtube_video_url": "https://youtu.be/-yh59eacYJM",
+        "youtube_title": "Groundwork 1-Hour Master Evidence Briefing",
         "keywords": ["refinance", "refi", "mortgage rate", "closing costs", "break-even", "points", "30-year fixed", "rate cut", "heloc", "equity loan"],
         "subreddits": ["personalfinance", "realestate", "MiddleClassFinance"],
     },
