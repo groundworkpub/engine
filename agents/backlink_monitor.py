@@ -20,6 +20,7 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -46,8 +47,15 @@ TIMEOUT = httpx.Timeout(15.0, connect=8.0)
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
 
+LOCAL_DB_ENV_KEYS = ("SUPABASE_DB_HOST", "SUPABASE_DB_USER", "SUPABASE_DB_PASSWORD")
+
+
 def get_db_connection():
     import psycopg2
+    missing = [k for k in LOCAL_DB_ENV_KEYS if not os.getenv(k)]
+    if missing:
+        logger.warning("SKIPPED_NO_CREDS: missing %s — no Supabase DB credentials in this environment", ", ".join(missing))
+        raise SystemExit(0)
     return psycopg2.connect(
         host=os.getenv("SUPABASE_DB_HOST"),
         port=os.getenv("SUPABASE_DB_PORT", "6543"),
@@ -155,6 +163,7 @@ def export_backlink_registry_markdown(output_path: str, limit_per_platform: int 
     conn.close()
 
     full_md = "\n".join(markdown)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(full_md)
 
