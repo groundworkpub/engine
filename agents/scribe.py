@@ -1022,9 +1022,8 @@ def run_scribe(
     learning_guidance = fetch_learning_signals(supabase)
     llm_cfg = config.get("llm", {})
     quality_cfg = config.get("quality", {})
-    base_min_words = quality_cfg.get("min_output_words", 800)
-    # Dynamic per-pillar threshold: short-format pillars (tech/life news) use a
-    # lower bar so content actually reaches `published` (Bug 2).
+    base_min_words = quality_cfg.get("min_output_words", 900)
+    # Dynamic per-pillar threshold: short-format pillars use 900w minimum during AdSense remediation
     per_pillar_words = quality_cfg.get("min_output_words_by_pillar", {})
     fallback_chain = llm_cfg.get("fallback_chain", DEFAULT_FALLBACK_CHAIN)
     temperature = llm_cfg.get("temperature", DEFAULT_TEMPERATURE)
@@ -1210,8 +1209,11 @@ Return the improved JSON matching the same schema."""
                     status = "review"
                     published_at = None
                 else:
-                    status = "published"
-                    published_at = now
+                    # During AdSense review cooldown (implementation_plan.md §2 Component 1),
+                    # hold newly generated articles as 'draft' so they undergo manual editorial verification.
+                    status = "draft"
+                    published_at = None
+                    logger.info("AdSense review cooldown: article held as 'draft' for human review.")
 
             author_id = resolve_author_id(supabase, pillar, author_slugs, site_url)
             reviewer_id = resolve_reviewer_id(supabase, pillar, reviewer_slugs)

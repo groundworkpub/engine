@@ -584,6 +584,12 @@ class VectorEngine:
         ``referrer_url`` a genuine cross-site referrer (e.g. a google.com/search
         click) so GA4 does NOT classify the hit as self-referral/direct.
         """
+        # AD-SENSE QUARANTINE / FREEZE GUARD:
+        # Zero synthetic telemetry during AdSense re-application and cooling-off window.
+        if os.getenv("FREEZE_SYNTHETIC_TRAFFIC", "true").lower() in ("true", "1", "yes"):
+            logger.info("Vector 03: Synthetic telemetry is FROZEN (AdSense Cooldown Safeguard). Skipping %d hits.", count)
+            return 0
+
         self.gate.check_execution_permission(count, "Vector 03: Synthetic Telemetry")
         endpoint = f"https://www.google-analytics.com/mp/collect?measurement_id={measurement_id}&api_secret={api_secret}"
         dispatched = 0
