@@ -555,7 +555,10 @@ async def run_youtube_watch_session(
                     if (player) {
                         player.setPlaybackQualityRange('tiny', 'tiny');
                         player.setPlaybackQuality('tiny');
+                        if (player.playVideo) player.playVideo();
                     }
+                    const btn = document.querySelector('.ytp-large-play-button, button.ytp-play-button');
+                    if (btn) btn.click();
                     const v = document.querySelector('video');
                     if (v) {
                         v.muted = true;
@@ -565,16 +568,31 @@ async def run_youtube_watch_session(
             }""")
             actions.append("played_video_144p")
 
-            # ── HARD STRICT PLAYBACK GATE & SAMPLING LOOP ─────────────────────
-            sample_interval = 15.0
+            # ── HARD STRICT PLAYBACK GATE, SMART SEEKING & AUTO-LOOPING ───────
+            sample_interval = 10.0
             elapsed = 0.0
             last_t = -1.0
             stalled_streak = 0
             accumulated_playback = 0.0
             speeds = [1.0, 1.25, 1.0]
 
+            # Smart Seeking & Looping State Machine (Mandatory Default)
+            loops_completed = 0
+            total_v_duration = 0.0
+            curr_t = 0.0
+            checkpoint_dwell_timer = 0.0
+            current_checkpoint_idx = 0
+            # Define 5 progressive checkpoints across video timeline
+            base_checkpoints = [0.03, 0.25, 0.50, 0.75, 0.95]
+            active_checkpoints = [min(0.98, max(0.01, cp + random.uniform(-0.02, 0.03))) for cp in base_checkpoints]
+            # Dynamic checkpoint dwell so video reaches 100% completion and loops within duration_sec
+            remaining_time = max(10.0, duration_sec - (time.time() - start_time))
+            remaining_steps = max(1, len(active_checkpoints) - 1)
+            target_checkpoint_dwell = max(8.0, min(30.0, (remaining_time * 0.48) / remaining_steps))
+
             while elapsed < duration_sec:
-                await asyncio.sleep(min(sample_interval, max(1.0, duration_sec - elapsed)))
+                sleep_dur = min(sample_interval, max(1.0, duration_sec - elapsed))
+                await asyncio.sleep(sleep_dur)
                 elapsed = time.time() - start_time
 
                 # Sample DOM playback state
@@ -587,6 +605,7 @@ async def run_youtube_watch_session(
                         currentTime: v.currentTime,
                         paused: v.paused,
                         duration: v.duration,
+                        ended: v.ended,
                         playerState: player && player.getPlayerState ? player.getPlayerState() : null
                     };
                 }""")
@@ -598,24 +617,105 @@ async def run_youtube_watch_session(
                     curr_t = float(state.get("currentTime", 0.0))
                     paused = state.get("paused", True)
                     p_state = state.get("playerState")
+                    total_v_duration = float(state.get("duration", 0.0) or 0.0)
+                    is_ended = bool(state.get("ended", False)) or (p_state == 0)
 
                     # Advance confirmed when currentTime increases while playing
                     if curr_t > last_t and not paused and p_state == 1:
-                        delta = curr_t - (last_t if last_t >= 0 else 0)
-                        accumulated_playback += delta
+                        # Protect against timeline jumps inflating real streamed time
+                        delta_t = curr_t - (last_t if last_t >= 0 else 0)
+                        if delta_t > sample_interval * 2.0:
+                            # A seek occurred; credit actual real-time streaming interval
+                            real_streamed = min(sample_interval, sleep_dur)
+                        else:
+                            real_streamed = min(delta_t, sample_interval * 1.5)
+                        accumulated_playback += real_streamed
+                        checkpoint_dwell_timer += real_streamed
                         last_t = curr_t
                         stalled_streak = 0
                     else:
-                        stalled_streak += 1
-                        logger.warning(f"⚠️ [Worker #{worker_id}] Playback stalled at {curr_t:.1f}s (paused={paused}, state={p_state}, streak={stalled_streak})")
-                        # Auto-recovery: trigger video.play()
+                        # If buffering (state 3), don't penalize as stalled streak immediately
+                        if p_state == 3:
+                            logger.info(f"⏳ [Worker #{worker_id}] Video buffering at {curr_t:.1f}s (playerState=3)...")
+                        else:
+                            stalled_streak += 1
+                            logger.warning(f"⚠️ [Worker #{worker_id}] Playback stalled at {curr_t:.1f}s (paused={paused}, state={p_state}, streak={stalled_streak})")
+
+                        # Auto-recovery: trigger movie_player.playVideo() and idempotent play
                         try:
                             await page.evaluate("""() => {
+                                const player = document.getElementById('movie_player');
+                                if (player && player.playVideo) player.playVideo();
+                                const btn = document.querySelector('.ytp-large-play-button, button.ytp-play-button');
+                                if (btn) {
+                                    const v = document.querySelector('video');
+                                    if (v && v.paused) btn.click();
+                                }
                                 const v = document.querySelector('video');
-                                if (v) { v.muted = true; v.play().catch(() => {}); }
+                                if (v) {
+                                    v.muted = true;
+                                    if (v.paused) v.play().catch(() => {});
+                                }
                             }""")
                         except Exception:
                             pass
+
+                    # Smart Seeking & 100% Completion Replay Engine
+                    if total_v_duration >= 60.0:
+                        # 1. Video finished check (100% Completion)
+                        if is_ended or (curr_t >= total_v_duration - 3.0 and total_v_duration > 0):
+                            loops_completed += 1
+                            logger.info(
+                                f"🔁 [Worker #{worker_id}] Video reached 100% completion! "
+                                f"Full View Loop #{loops_completed} completed. Triggering Replay..."
+                            )
+                            actions.append(f"full_loop_{loops_completed}_100pct")
+                            try:
+                                await page.evaluate("""() => {
+                                    const p = document.getElementById('movie_player');
+                                    const v = document.querySelector('video');
+                                    if (p && p.seekTo) { p.seekTo(0, true); p.playVideo(); }
+                                    else if (v) { v.currentTime = 0; if (v.paused) v.play().catch(() => {}); }
+                                }""")
+                            except Exception:
+                                pass
+                            # Reset loop state with new random variations
+                            active_checkpoints = [min(0.98, max(0.01, cp + random.uniform(-0.02, 0.03))) for cp in base_checkpoints]
+                            current_checkpoint_idx = 0
+                            checkpoint_dwell_timer = 0.0
+                            rem_time = max(10.0, duration_sec - elapsed)
+                            rem_steps = max(1, len(active_checkpoints) - 1)
+                            target_checkpoint_dwell = max(8.0, min(30.0, (rem_time * 0.48) / rem_steps))
+                            last_t = 0.0
+                        # 2. Checkpoint Seeking progression
+                        elif checkpoint_dwell_timer >= target_checkpoint_dwell:
+                            if current_checkpoint_idx < len(active_checkpoints) - 1:
+                                current_checkpoint_idx += 1
+                                target_pct = active_checkpoints[current_checkpoint_idx]
+                                target_sec = round(total_v_duration * target_pct, 1)
+                                logger.info(
+                                    f"⏩ [Worker #{worker_id}] Smart seeking to chapter {current_checkpoint_idx+1}/{len(active_checkpoints)} "
+                                    f"({int(target_pct*100)}% -> {int(target_sec)}s / {int(total_v_duration)}s)..."
+                                )
+                                actions.append(f"seek_ch_{current_checkpoint_idx}_{int(target_pct*100)}pct")
+                                try:
+                                    await page.evaluate(f"""() => {{
+                                        const p = document.getElementById('movie_player');
+                                        const v = document.querySelector('video');
+                                        if (p && p.seekTo) {{ p.seekTo({target_sec}, true); p.playVideo(); }}
+                                        else if (v) {{ v.currentTime = {target_sec}; if (v.paused) v.play().catch(() => {{}}); }}
+                                    }}""")
+                                except Exception:
+                                    pass
+                                checkpoint_dwell_timer = 0.0
+                                rem_time = max(10.0, duration_sec - elapsed)
+                                rem_steps = (len(active_checkpoints) - 1) - current_checkpoint_idx
+                                if rem_steps <= 0:
+                                    # Final chapter before 100% completion; dwell remainder
+                                    target_checkpoint_dwell = max(8.0, rem_time)
+                                else:
+                                    target_checkpoint_dwell = max(8.0, min(30.0, (rem_time * 0.48) / rem_steps))
+                                last_t = target_sec
 
                 # Circuit breaker: if stalled for 4 consecutive samples (60s), abort
                 if stalled_streak >= 4:
@@ -623,7 +723,7 @@ async def run_youtube_watch_session(
                     break
 
                 # Natural human micro-actions
-                if random.random() < 0.25:
+                if random.random() < 0.20:
                     new_speed = random.choice(speeds)
                     await page.evaluate(f"() => {{ const v = document.querySelector('video'); if (v) v.playbackRate = {new_speed}; }}")
                     scroll_y = random.randint(150, 350)
@@ -636,7 +736,10 @@ async def run_youtube_watch_session(
             if accumulated_playback >= min_qualifying_sec:
                 actions.append(f"verified_watch_{int(accumulated_playback)}s")
                 status = "completed"
-                logger.info(f"✅ [Worker #{worker_id}] Verified YouTube Watch Session complete ({int(accumulated_playback)}s streamed)")
+                logger.info(
+                    f"✅ [Worker #{worker_id}] Verified YouTube Watch Session complete "
+                    f"({int(accumulated_playback)}s streamed, {loops_completed} full loops)"
+                )
             else:
                 actions.append(f"failed_insufficient_watch_{int(accumulated_playback)}s")
                 status = "failed_stalled"
@@ -651,10 +754,15 @@ async def run_youtube_watch_session(
 
     total_time = int(time.time() - start_time)
     verified_duration = int(accumulated_playback) if status == "completed" else 0
+    final_completion = "100%" if loops_completed > 0 else (
+        f"{int(min(100.0, (curr_t / max(1.0, total_v_duration)) * 100))}%" if total_v_duration > 0 else "0%"
+    )
     return {
         "status": status,
         "session_id": session_id,
         "duration": verified_duration,
+        "loops_completed": loops_completed,
+        "completion_rate": final_completion,
         "raw_elapsed": total_time,
         "actions": actions,
     }

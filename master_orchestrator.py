@@ -464,12 +464,15 @@ class TelemetryManager:
         funnel_mode: str = "auto",
         quality: str = "144p",
         status: str = "completed",
+        loops_completed: int = 0,
+        completion_rate: str = "100%",
     ) -> dict[str, Any]:
         data = self.load_data()
         data["total_sessions"] += 1
         data["total_watch_seconds"] += duration_sec
         data["total_watch_hours"] = round(data["total_watch_seconds"] / 3600.0, 3)
         data["completion_percentage"] = round((data["total_watch_hours"] / data["goal_hours"]) * 100.0, 3)
+        data["total_loops_completed"] = data.get("total_loops_completed", 0) + loops_completed
 
         # 1080p consumes ~12 MB/min, 144p consumes ~0.8 MB/min -> ~11.2 MB saved per min
         saved_mb = round((duration_sec / 60.0) * 11.2, 2)
@@ -480,6 +483,8 @@ class TelemetryManager:
             "session_id": session_id,
             "video_url": video_url,
             "duration_sec": int(duration_sec),
+            "loops_completed": loops_completed,
+            "completion_rate": completion_rate,
             "funnel_mode": funnel_mode,
             "quality": quality,
             "saved_mb": saved_mb,
@@ -548,6 +553,7 @@ class TelemetryManager:
             f"🎯 4,000 Watch-Hours Goal Progress:\n"
             f"   [{bar}] {pct:.2f}% ({data.get('total_watch_hours', 0.0):,.1f} / {data.get('goal_hours', 4000):,.1f} Hours)\n"
             f"   📊 Total Completed Sessions: {data.get('total_sessions', 0)} sessions\n"
+            f"   🔁 Full Video 100% Loops: {data.get('total_loops_completed', 0)} completed loops\n"
             f"   💾 Bandwidth Saved (144p vs 1080p): {data.get('bandwidth_saved_mb', 0.0) / 1024.0:.2f} GB (92% reduction)\n\n"
             f"👥 1,000 Subscribers Goal Progress:\n"
             f"   [{sub_bar}] {sub_pct:.2f}% ({subs:,} / {sub_goal:,} Subscribers)\n"
@@ -1119,6 +1125,8 @@ class WatchTimeGovernor:
                     funnel_mode=funnel_mode,
                     quality=quality,
                     status="completed",
+                    loops_completed=int(r.get("loops_completed", 0)),
+                    completion_rate=str(r.get("completion_rate", "100%")),
                 )
         return results
 
@@ -1154,6 +1162,8 @@ class WatchTimeGovernor:
                     funnel_mode="shorts_loop",
                     quality="mobile",
                     status="completed",
+                    loops_completed=1,
+                    completion_rate="100%",
                 )
         return results
 
