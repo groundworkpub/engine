@@ -602,14 +602,14 @@ class AccountWarmingConductor:
 
         logger.info(f"🔐 [Stage 0] Attempting initial login for [{account.account_id}] ({account.email})...")
         persona = next((p for p in PERSONAS if p.name == account.persona_name), PERSONAS[0])
-        proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, f"login_{account.account_id}")
+        proxy_config = DataImpulseProxyRouter.get_playwright_proxy_config(persona.geo_region, f"login_{account.account_id}")
 
         async with async_playwright() as p:
             launch_kwargs = {"headless": not headed, "args": stealth_launch_args()}
             if headed:
                 launch_kwargs["slow_mo"] = 80
-            if proxy_url:
-                launch_kwargs["proxy"] = {"server": proxy_url}
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
 
             browser = await p.chromium.launch(**launch_kwargs)
             context = await browser.new_context(
@@ -687,12 +687,12 @@ class AccountWarmingConductor:
 
         logger.info(f"🌐 [Stage 1] Executing general search browsing for [{account.account_id}]...")
         persona = next((p for p in PERSONAS if p.name == account.persona_name), PERSONAS[0])
-        proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, f"s1_{account.account_id}")
+        proxy_config = DataImpulseProxyRouter.get_playwright_proxy_config(persona.geo_region, f"s1_{account.account_id}")
 
         async with async_playwright() as p:
             launch_kwargs = {"headless": not headed, "args": stealth_launch_args()}
-            if proxy_url:
-                launch_kwargs["proxy"] = {"server": proxy_url}
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
 
             browser = await p.chromium.launch(**launch_kwargs)
             context_kwargs = {
@@ -732,12 +732,12 @@ class AccountWarmingConductor:
 
         logger.info(f"📺 [Stage 2] Executing Trending YouTube & Cross-Subscription for [{account.account_id}]...")
         persona = next((p for p in PERSONAS if p.name == account.persona_name), PERSONAS[0])
-        proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, f"s2_{account.account_id}")
+        proxy_config = DataImpulseProxyRouter.get_playwright_proxy_config(persona.geo_region, f"s2_{account.account_id}")
 
         async with async_playwright() as p:
             launch_kwargs = {"headless": not headed, "args": stealth_launch_args()}
-            if proxy_url:
-                launch_kwargs["proxy"] = {"server": proxy_url}
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
 
             browser = await p.chromium.launch(**launch_kwargs)
             context_kwargs = {
@@ -783,12 +783,12 @@ class AccountWarmingConductor:
 
         logger.info(f"🔍 [Stage 3] Executing Niche Discovery Exploration for [{account.account_id}]...")
         persona = next((p for p in PERSONAS if p.name == account.persona_name), PERSONAS[0])
-        proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, f"s3_{account.account_id}")
+        proxy_config = DataImpulseProxyRouter.get_playwright_proxy_config(persona.geo_region, f"s3_{account.account_id}")
 
         async with async_playwright() as p:
             launch_kwargs = {"headless": not headed, "args": stealth_launch_args()}
-            if proxy_url:
-                launch_kwargs["proxy"] = {"server": proxy_url}
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
 
             browser = await p.chromium.launch(**launch_kwargs)
             context_kwargs = {
@@ -823,12 +823,12 @@ class AccountWarmingConductor:
 
         logger.info(f"🎯 [Stage 4] Executing Qualified Groundwork Subscription for [{account.account_id}]...")
         persona = next((p for p in PERSONAS if p.name == account.persona_name), PERSONAS[0])
-        proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, f"s4_{account.account_id}")
+        proxy_config = DataImpulseProxyRouter.get_playwright_proxy_config(persona.geo_region, f"s4_{account.account_id}")
 
         async with async_playwright() as p:
             launch_kwargs = {"headless": not headed, "args": stealth_launch_args()}
-            if proxy_url:
-                launch_kwargs["proxy"] = {"server": proxy_url}
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
 
             browser = await p.chromium.launch(**launch_kwargs)
             context_kwargs = {

@@ -778,7 +778,13 @@ async def run_popunder_arbitrage_session(
     from playwright.async_api import async_playwright, Page
 
     session_id = f"pop_{uuid.uuid4().hex[:10]}"
-    proxy_url = DataImpulseProxyRouter.get_proxy_url(persona.geo_region, session_id)
+    egress_mgr = EgressSelector()
+    proxy_config = egress_mgr.get_playwright_proxy(
+        task_type="arbitrage",
+        geo=persona.geo_region,
+        require_proxy=True,
+        session_id=session_id,
+    )
     logger.info(f"⚡ [Worker #{worker_id}] Secondary Arbitrage Session [{session_id}] on: {target_url}")
 
     start_time = time.time()
@@ -789,8 +795,8 @@ async def run_popunder_arbitrage_session(
             "headless": not headed,
             "args": stealth_launch_args(),
         }
-        if proxy_url:
-            launch_kwargs["proxy"] = {"server": proxy_url}
+        if proxy_config:
+            launch_kwargs["proxy"] = proxy_config
 
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
