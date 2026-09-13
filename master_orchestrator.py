@@ -1279,6 +1279,7 @@ async def main():
     p_auto = subparsers.add_parser("auto", help="Execute Autonomous Watch-Time & Shorts Loop")
     p_auto.add_argument("--concurrency", type=int, default=2, help="Number of concurrent sessions")
     p_auto.add_argument("--watch-duration", type=int, default=120, help="Watch time duration in seconds (default: 120s)")
+    p_auto.add_argument("--headed", action="store_true", help="Visible browser window")
     p_auto.add_argument("--provision", type=int, default=0, help="Provision N new accounts before loop")
     # Command: master-video
     p_mv = subparsers.add_parser("master-video", help="Subsystem E: Siloed Pillar Master Video Suite & Publishing Engine")
@@ -1451,7 +1452,7 @@ async def main():
         await execute_pyramid_funnel(
             concurrency=args.concurrency,
             base_watch_duration=base_dwell,
-            headed=args.headed,
+            headed=getattr(args, "headed", False),
         )
 
     elif args.command == "yt-stats":
