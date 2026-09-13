@@ -1220,22 +1220,40 @@ async def execute_batch_concurrency(
     return await asyncio.gather(*tasks)
 
 
-def fetch_targets(supabase: Any, limit: int = 5, specific_slug: str | None = None) -> list[SessionTarget]:
+def fetch_targets(supabase: Any = None, limit: int = 5, specific_slug: str | None = None) -> list[SessionTarget]:
     site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
-    query = supabase.table("articles").select("id, slug, title, pillar, word_count").eq("status", "published")
-    if specific_slug:
-        query = query.eq("slug", specific_slug)
-    else:
-        query = query.order("published_at", desc=True).limit(limit * 2)
+    articles: list[dict[str, Any]] = []
+    pod_map: dict[str, str] = {}
 
-    res = query.execute()
-    articles = cast(list[dict[str, Any]], res.data or [])
+    if supabase is not None:
+        try:
+            query = supabase.table("articles").select("id, slug, title, pillar, word_count").eq("status", "published")
+            if specific_slug:
+                query = query.eq("slug", specific_slug)
+            else:
+                query = query.order("published_at", desc=True).limit(limit * 2)
+            res = query.execute()
+            articles = cast(list[dict[str, Any]], res.data or [])
+        except Exception as e:
+            logger.warning(f"Supabase target fetch warning ({e}), engaging resilient fallback targets.")
 
-    try:
-        pod_res = supabase.table("podcast_episodes").select("article_id, youtube_video_id").limit(50).execute()
-        pod_map = {row["article_id"]: row.get("youtube_video_id") for row in (pod_res.data or [])}
-    except Exception:
-        pod_map = {}
+        try:
+            pod_res = supabase.table("podcast_episodes").select("article_id, youtube_video_id").limit(50).execute()
+            pod_map = {row["article_id"]: row.get("youtube_video_id") for row in (pod_res.data or [])}
+        except Exception:
+            pod_map = {}
+
+    if not articles:
+        # Resilient offline/standalone fallback targets
+        fallback_data = [
+            {"id": "fb_01", "slug": "atmos-summit-card-international-travel", "title": "Atmos Summit Card: The Real Math Behind Airline Rewards in 2026", "pillar": "money", "word_count": 1420},
+            {"id": "fb_02", "slug": "2027-mini-1998-gt-review", "title": "2027 Mini Cooper 1998 GT: Nostalgia Meets Modern Performance", "pillar": "life", "word_count": 1250},
+            {"id": "fb_03", "slug": "ai-detects-distributed-blood-metabolomic-systemotype-associated-with-early-stage-ovarian-cancer", "title": "AI Detects Distributed Blood Metabolomic Systemotype for Early Cancer", "pillar": "body", "word_count": 1800},
+            {"id": "fb_04", "slug": "solar-battery-storage-guide-nem-3", "title": "NEM 3.0 Solar and Battery Storage Payback Analysis", "pillar": "home", "word_count": 1650},
+        ]
+        if specific_slug:
+            fallback_data = [a for a in fallback_data if a["slug"] == specific_slug] or fallback_data[:1]
+        articles = fallback_data
 
     targets = []
     for art in articles[:limit]:
@@ -1253,6 +1271,10 @@ def fetch_targets(supabase: Any, limit: int = 5, specific_slug: str | None = Non
             )
         )
     return targets
+
+
+# Backward compatibility alias
+resolve_simulation_targets = fetch_targets
 
 
 def display_tui_menu() -> None:
