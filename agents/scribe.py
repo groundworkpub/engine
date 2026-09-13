@@ -15,6 +15,7 @@ from agents.eval_tracer import OpikTracer
 from agents.headroom_compressor import HeadroomCompressor
 from agents.humanizer import HUMAN_SCORE_THRESHOLD, EditorialHumanizer
 from agents.critic import (
+    _DANGLING_TITLE_RE,
     grade_decision_utility,
     grade_faithfulness_and_grounding,
     grade_title_completeness,
@@ -143,7 +144,7 @@ def _sanitize_internal_links(content: str) -> str:
 
 class ScribeOutput(BaseModel):
     slug: str = Field(min_length=1, max_length=200)
-    title: str = Field(min_length=10, max_length=58)
+    title: str = Field(min_length=10, max_length=95)
     content: str = Field(min_length=500)
     excerpt: str = Field(max_length=160)  # Reverted C: 160 is SEO ideal (150-160), 115 too short for SERP — keep Intent-Adaptive takeaway 115, excerpt 160
     schema_type: str = Field(default="Article")
@@ -202,7 +203,16 @@ class ScribeOutput(BaseModel):
                 if t.lower().startswith(prefix.lower()):
                     t = t[len(prefix):].capitalize()
                     break
-            data["title"] = _truncate(t, 55)
+            clean_t = _truncate(t, 90)
+            # Prevent title terminating on a dangling preposition, pronoun, or conjunction
+            while clean_t and _DANGLING_TITLE_RE.search(clean_t):
+                words = clean_t.split()
+                if len(words) > 3:
+                    words.pop()
+                    clean_t = " ".join(words).rstrip(":,;-")
+                else:
+                    break
+            data["title"] = clean_t
         if isinstance(data.get("takeaway"), str) and len(data["takeaway"].strip()) >= 20:
             data["takeaway"] = _truncate(data["takeaway"], 500)
         else:
