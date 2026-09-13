@@ -228,10 +228,10 @@ jobs:
         run: PYTHONPATH=. python agents/organic_simulator.py --limit=4
 
   proactive-hunter-outreach:
-    name: Autonomous Opportunity Hunter & Outreach (Agent 7)
+    name: Autonomous Opportunity Hunter & Outreach (Agent 7) — [PAUSED 2026-09-13, manual only]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
