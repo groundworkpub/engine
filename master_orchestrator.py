@@ -175,6 +175,93 @@ class IdentityManager:
                     a.session_file, a.notes
                 ])
 
+    def append_account(self, account: AccountRecord):
+        """Appends a single verified or created AccountRecord to database/accounts.csv."""
+        accounts = self.list_accounts()
+        if any(a.email.lower() == account.email.lower() for a in accounts):
+            logger.warning(f"Account with email {account.email} already exists. Skipping duplicate append.")
+            return
+        accounts.append(account)
+        self._save_accounts(accounts)
+        logger.info(f"Appended new account [{account.account_id}] ({account.email}) to ledger.")
+
+    def import_accounts_from_file(self, file_path: Path, format_type: str = "auto") -> list[AccountRecord]:
+        """Imports bulk PVA accounts from text or CSV file into database/accounts.csv."""
+        if not file_path.exists():
+            raise FileNotFoundError(f"Import file not found: {file_path}")
+
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+        existing = {a.email.lower() for a in self.list_accounts()}
+        from traffic_cli import PERSONAS
+
+        imported: list[AccountRecord] = []
+        now_str = time.strftime("%Y-%m-%d")
+
+        for idx, raw_line in enumerate(lines, 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            email, password, recovery = "", "", ""
+            notes = "imported_pva"
+
+            # Parse line by delimiters: colon or comma or tab
+            if ":" in line:
+                parts = [p.strip() for p in line.split(":")]
+                if len(parts) >= 2:
+                    email = parts[0]
+                    password = parts[1]
+                    recovery = parts[2] if len(parts) >= 3 else "recovery@gworky.com"
+                    if len(parts) >= 4:
+                        notes += f"_phone:{parts[3]}"
+            elif "," in line:
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 2:
+                    email = parts[0]
+                    password = parts[1]
+                    recovery = parts[2] if len(parts) >= 3 else "recovery@gworky.com"
+            else:
+                parts = line.split()
+                if len(parts) >= 2:
+                    email = parts[0]
+                    password = parts[1]
+                    recovery = parts[2] if len(parts) >= 3 else "recovery@gworky.com"
+
+            if not email or "@" not in email:
+                continue
+
+            if email.lower() in existing:
+                logger.info(f"Skipping existing account in ledger: {email}")
+                continue
+
+            persona = PERSONAS[(len(existing) + len(imported)) % len(PERSONAS)]
+            acc_id = f"pva_{int(time.time())}_{idx:03d}"
+            record = AccountRecord(
+                account_id=acc_id,
+                email=email,
+                password=password,
+                recovery_email=recovery,
+                assigned_proxy=f"residential_{persona.geo_region.lower()}",
+                persona_name=persona.name,
+                status="active",
+                last_active=now_str,
+                created_at=now_str,
+                warmup_stage=0,
+                subscribed_to_groundwork=False,
+                session_file="",
+                notes=notes,
+            )
+            imported.append(record)
+            existing.add(email.lower())
+
+        if imported:
+            all_accounts = self.list_accounts() + imported
+            self._save_accounts(all_accounts)
+            logger.info(f"🎉 Successfully imported {len(imported)} new PVA accounts into ledger!")
+
+        return imported
+
+
     def poll_textbee_otp_with_timeout(self, timeout_sec: int = 45, interval_sec: int = 3) -> str | None:
         """Polls TextBee Android Gateway every interval_sec up to timeout_sec for incoming Google OTP."""
         start = time.time()
@@ -1070,6 +1157,11 @@ async def main():
     p_acc.add_argument("--account-id", type=str, default=None, help="Target specific account ID for warming")
     p_acc.add_argument("--dry-run", action="store_true", help="Simulate state progression without launching browser")
     p_acc.add_argument("--headed", action="store_true", help="Run browser in visible (headed) mode")
+    p_acc.add_argument("--create", action="store_true", help="Automate registration of 1 new Gmail account via YouTube flow")
+    p_acc.add_argument("--phone-number", type=str, default=None, help="Cellular phone number for SMS verification fallback")
+    p_acc.add_argument("--ghost-only", action="store_true", help="Abort if Google requires phone verification (Skip button not present)")
+    p_acc.add_argument("--import", dest="import_file", type=str, default=None, help="Bulk import PVA accounts from text/CSV file")
+    p_acc.add_argument("--format", type=str, default="auto", choices=["auto", "colon", "csv"], help="Format of import file")
 
     # Command: ai-synthesize
     p_ai = subparsers.add_parser("ai-synthesize", help="Subsystem AI: Cognitive Persona & Query Synthesis")
@@ -1187,7 +1279,30 @@ async def main():
             print("Warming cycle complete.\n")
             return
 
-        if args.list or (not args.set_status and args.provision == 0 and not args.check_sms and not args.warmup):
+        if args.import_file:
+            target_path = Path(args.import_file)
+            imported = id_mgr.import_accounts_from_file(target_path, format_type=args.format)
+            print(f"\n📥 Imported {len(imported)} new PVA accounts into database/accounts.csv:")
+            for a in imported[:10]:
+                print(f"   - [{a.account_id}] {a.email} | Proxy: {a.assigned_proxy} | Persona: {a.persona_name}")
+            if len(imported) > 10:
+                print(f"   ... and {len(imported) - 10} more accounts ready for warming.\n")
+            return
+
+        if args.create:
+            from agents.gmail_creator import AutomatedGmailCreator
+            creator = AutomatedGmailCreator()
+            print(f"\n🚀 Launching Automated Gmail Creation (Ghost-Only: {args.ghost_only}, Headed: {args.headed})...")
+            res = await creator.create_account(
+                phone_number=args.phone_number,
+                ghost_only=args.ghost_only,
+                headed=args.headed,
+            )
+            print("\nCreation Result:")
+            print(json.dumps(res, indent=2) + "\n")
+            return
+
+        if args.list or (not args.set_status and args.provision == 0 and not args.check_sms and not args.warmup and not args.import_file and not args.create):
             print(f"\n📋 Tracked Identity Accounts ({len(id_mgr.list_accounts())} total):")
             for a in id_mgr.list_accounts():
                 sub_mark = "✅ SUBBED" if a.subscribed_to_groundwork else "❌ NOT_SUBBED"

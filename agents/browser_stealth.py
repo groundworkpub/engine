@@ -242,13 +242,20 @@ def build_stealth_script(
     // 3. Mock plugins / mimeTypes
 {plugins_mock}
 
-    // 4. Sync WebGL renderer + vendor to persona OS matrix
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {{
-        if (parameter === 37445) return '{gl['webgl_vendor']}';
-        if (parameter === 37446) return '{gl['webgl_renderer']}';
-        return getParameter.apply(this, arguments);
+    // 4. Sync WebGL and WebGL2 renderer + vendor to persona OS matrix
+    const spoofWebGL = function(proto) {{
+        if (!proto) return;
+        const origGetParam = proto.getParameter;
+        proto.getParameter = function(parameter) {{
+            if (parameter === 37445) return '{gl['webgl_vendor']}';
+            if (parameter === 37446) return '{gl['webgl_renderer']}';
+            return origGetParam.apply(this, arguments);
+        }};
     }};
+    spoofWebGL(WebGLRenderingContext.prototype);
+    if (typeof WebGL2RenderingContext !== 'undefined') {{
+        spoofWebGL(WebGL2RenderingContext.prototype);
+    }}
 
     // 5. Sync navigator.platform
     Object.defineProperty(navigator, 'platform', {{ get: () => '{platform_val}' }});
@@ -259,18 +266,77 @@ def build_stealth_script(
         Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {mem} }});
     }} catch (e) {{}}
 
-    // 7. Canvas noise: add sparse per-session pixel variance (invisible to eye,
-    //    unique hash per session — defeats uniform headless canvas fingerprints)
+    // 7. Poltergeist Seeded PRNG: Subtle Canvas, WebGL & AudioContext noise
+    //    Inspired by Gmail-Infinity (cyrb128 + sfc32) for unique, authentic hardware entropy
+    const prngSeedStr = '{session_seed or "gworky_entropy"}_' + Math.floor(Date.now() / 86400000);
+    function cyrb128(str) {{
+        let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
+        for (let i = 0, k; i < str.length; i++) {{
+            k = str.charCodeAt(i);
+            h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+            h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+            h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+            h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+        }}
+        h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+        h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+        h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+        h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+        return [(h1^h2^h3^h4)>>>0, (h2^h1)>>>0, (h3^h1)>>>0, (h4^h1)>>>0];
+    }}
+    function sfc32(a, b, c, d) {{
+        return function() {{
+            a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+            var t = (a + b) | 0;
+            a = b ^ b >>> 9;
+            b = c + (c << 3) | 0;
+            c = (c << 21 | c >>> 11);
+            d = d + 1 | 0;
+            t = t + d | 0;
+            c = c + t | 0;
+            return (t >>> 0) / 4294967296;
+        }};
+    }}
+    const seedVals = cyrb128(prngSeedStr);
+    const rng = sfc32(seedVals[0], seedVals[1], seedVals[2], seedVals[3]);
+
+    // Canvas 2D subtle noise
     const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
     CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {{
         const data = origGetImageData.call(this, x, y, w, h);
         const px = data.data;
-        const seed = Date.now() & 0xff;
-        for (let i = 0; i < px.length; i += 211) {{
-            px[i] = (px[i] + ((seed + i) % 7)) & 255;
+        for (let i = 0; i < px.length; i += 181) {{
+            const noise = (rng() * 4 - 2) | 0;
+            px[i] = Math.max(0, Math.min(255, px[i] + noise));
         }}
         return data;
     }};
+
+    // AudioContext subtle noise
+    if (typeof AudioBuffer !== 'undefined') {{
+        const origGetChannelData = AudioBuffer.prototype.getChannelData;
+        AudioBuffer.prototype.getChannelData = function(channel) {{
+            const buffer = origGetChannelData.call(this, channel);
+            for (let i = 0; i < buffer.length; i += 257) {{
+                buffer[i] = buffer[i] + (rng() * 0.0000002 - 0.0000001);
+            }}
+            return buffer;
+        }};
+    }}
+
+    // WebRTC Local IP Leak Protection
+    if (typeof RTCPeerConnection !== 'undefined') {{
+        const origCreateOffer = RTCPeerConnection.prototype.createOffer;
+        RTCPeerConnection.prototype.createOffer = function(options) {{
+            return origCreateOffer.call(this, options).then(offer => {{
+                // Strip host candidate IP addresses to prevent local IP leakage
+                if (offer && offer.sdp) {{
+                    offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*\r\n/g, '');
+                }}
+                return offer;
+            }});
+        }};
+    }}
 
     // 8. Spoof Battery & Permissions API
     if (navigator.getBattery) {{
@@ -326,6 +392,7 @@ def build_stealth_script(
     }}
 }})();
 """
+
 
 
 def check_subnet_diversity(ip_list: list[str], max_same_subnet: int = 3) -> bool:
