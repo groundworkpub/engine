@@ -355,64 +355,46 @@ class IdentityManager:
             return {"status": "error", "error": str(e)}
 
     def request_phone_otp_hook(self, country: str = "us") -> dict[str, str]:
-        """Pluggable hook for SMS API activation gateway (5sim/SMS-Activate)."""
-        sms_key = os.environ.get("SMS_ACTIVATE_API_KEY") or os.environ.get("FIVESIM_API_KEY")
-        if not sms_key:
-            return {"status": "skipped", "message": "No SMS activation key configured in .env.local"}
-        logger.info(f"Querying virtual phone number for country: {country}...")
-        return {"status": "ready", "phone": "+12025550199", "activation_id": "sim_mock_001"}
+        """Real SMS API activation gateway hook (SMS-Activate / 5sim). Live ground-truth only (§2.5)."""
+        sms_act_key = os.environ.get("SMS_ACTIVATE_API_KEY")
+        fivesim_key = os.environ.get("FIVESIM_API_KEY")
+
+        if sms_act_key:
+            url = f"https://api.sms-activate.org/stubs/handler_api.php?api_key={sms_act_key}&action=getNumber&service=go&country={country}"
+            try:
+                with urllib.request.urlopen(url, timeout=12) as resp:
+                    raw = resp.read().decode("utf-8").strip()
+                    if raw.startswith("ACCESS_NUMBER"):
+                        parts = raw.split(":")
+                        logger.info(f"✅ Acquired live phone number from SMS-Activate: +{parts[2]}")
+                        return {"status": "ready", "activation_id": parts[1], "phone": f"+{parts[2]}"}
+                    return {"status": "error", "error": f"SMS-Activate response: {raw}"}
+            except Exception as e:
+                return {"status": "error", "error": f"SMS-Activate request failed: {e}"}
+
+        if fivesim_key:
+            url = f"https://5sim.net/v1/user/buy/activation/{country}/any/google"
+            try:
+                req = urllib.request.Request(url, headers={"Authorization": f"Bearer {fivesim_key}", "Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    logger.info(f"✅ Acquired live phone number from 5sim: {data.get('phone')}")
+                    return {"status": "ready", "activation_id": str(data.get("id")), "phone": data.get("phone")}
+            except Exception as e:
+                return {"status": "error", "error": f"5sim request failed: {e}"}
+
+        return {
+            "status": "unconfigured",
+            "message": "No live SMS gateway key configured. Set SMS_ACTIVATE_API_KEY or FIVESIM_API_KEY in .env.local, or use TextBee Android SMS Gateway.",
+        }
 
     def provision_account_batch(self, count: int = 5, base_prefix: str = "elena.sub") -> list[AccountRecord]:
-        """Provisions a batch of structured identity ledger profiles with distinct personas and proxies."""
-        personas_pool = [
-            "US_NYC_Chrome_Desktop",
-            "US_Austin_Windows_Chrome",
-            "UK_London_Safari_Mac",
-            "AU_Sydney_Windows_Firefox",
-            "US_LA_iPhone_Safari"
-        ]
-        proxies_pool = [
-            "residential_us_nyc",
-            "residential_us_austin",
-            "residential_uk_london",
-            "residential_au_sydney",
-            "residential_us_la"
-        ]
-        current_accounts = self.list_accounts()
-        existing_ids = {a.account_id for a in current_accounts}
-        new_records = []
-        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-        for i in range(1, count + 1):
-            next_idx = len(current_accounts) + i
-            acc_id = f"acc_{next_idx:03d}"
-            while acc_id in existing_ids:
-                next_idx += 1
-                acc_id = f"acc_{next_idx:03d}"
-            
-            p_name = personas_pool[(next_idx - 1) % len(personas_pool)]
-            proxy_tag = proxies_pool[(next_idx - 1) % len(proxies_pool)]
-            email = f"{base_prefix}.{next_idx:02d}@gmail.com"
-            recovery = f"{base_prefix}.rec.{next_idx:02d}@gmail.com"
-            
-            rec = AccountRecord(
-                account_id=acc_id,
-                email=email,
-                password="SecureVault2026!",
-                recovery_email=recovery,
-                assigned_proxy=proxy_tag,
-                persona_name=p_name,
-                status="active",
-                last_active=now_str,
-                created_at=now_str
-            )
-            new_records.append(rec)
-            current_accounts.append(rec)
-            existing_ids.add(acc_id)
-
-        self._save_accounts(current_accounts)
-        logger.info(f"Provisioned {len(new_records)} new accounts into ledger ({self.csv_path})")
-        return new_records
+        """Deprecated: Synthetic dummy account generation is permanently disabled per Rule §2.5."""
+        logger.error(
+            "Synthetic dummy account provisioning is strictly disabled per Rule §2.5 live ground-truth invariant. "
+            "To add accounts, import genuine PVA records via 'accounts --import <file>' or register genuinely via 'accounts --create'."
+        )
+        return []
 
 
 # ==============================================================================
@@ -1498,7 +1480,10 @@ async def main():
             print(json.dumps(res, indent=2) + "\n")
             return
         if args.provision > 0:
-            id_mgr.provision_account_batch(count=args.provision)
+            print("❌ Synthetic dummy account provisioning is permanently disabled per Rule §2.5.")
+            print("   Use 'master_orchestrator.py accounts --import <file>' for verified PVA accounts,")
+            print("   or 'master_orchestrator.py accounts --create' for automated registration.\n")
+            return
         if args.set_status:
             id_mgr.update_account_status(args.set_status[0], args.set_status[1])
         if args.warmup:

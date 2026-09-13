@@ -205,7 +205,7 @@ def build_referral(target: SessionTarget, preferred_channel: str | None = None) 
         return channel, ref, headers
 
     elif channel == "youtube_gworky":
-        v_id = target.youtube_video_id or "dQw4w9WgXcQ"
+        v_id = target.youtube_video_id or "-yh59eacYJM"
         ref = f"https://www.youtube.com/watch?v={v_id}"
         headers = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
         return channel, ref, headers
@@ -547,9 +547,9 @@ async def run_youtube_watch_session(
                     logger.warning(f"Search navigation notice: {e}")
 
             elif active_funnel == "channel":
-                logger.info(f"📺 [Worker #{worker_id}] Executing Channel Browse: @GroundworkMedia/videos")
+                logger.info(f"📺 [Worker #{worker_id}] Executing Channel Browse: @gworkycom/videos (UC566b5USRdeZdErzEVUuOzQ)")
                 try:
-                    await page.goto("https://www.youtube.com/@GroundworkMedia/videos", wait_until="commit", timeout=22000)
+                    await page.goto("https://www.youtube.com/@gworkycom/videos", wait_until="commit", timeout=22000)
                     await asyncio.sleep(random.uniform(2.0, 3.5))
                     for btn_text in ["Accept all", "I agree", "Reject all", "Before you continue"]:
                         try:
@@ -613,7 +613,7 @@ async def run_youtube_watch_session(
             else:
                 ref_map = {
                     "search": f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(search_keyword)}",
-                    "channel": "https://www.youtube.com/@GroundworkMedia/videos",
+                    "channel": "https://www.youtube.com/@gworkycom/videos",
                     "google_search": "https://www.google.com/",
                     "embed": "https://gworky.com/wire",
                     "suggested": "https://www.youtube.com/shorts/Ygr-u9OZZWY",
@@ -1230,7 +1230,7 @@ async def main() -> None:
 
     # Subsystem D: YouTube Watch Mode
     if args.mode == "youtube_watch":
-        target_video = args.url or "https://youtu.be/_0CGS0MXnGc"
+        target_video = args.url or "https://youtu.be/-yh59eacYJM"
         persona = random.choice(PERSONAS)
         logger.info(f"🚀 Launching YouTube Watch-Time Booster (Mode D) on {target_video}...")
         res = await run_youtube_watch_session(
