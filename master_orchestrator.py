@@ -510,7 +510,7 @@ class TelemetryManager:
                 logger.info(f"🎉 [MILESTONE REACHED] YouTube Watch-Time crossed {m:.0f} Hours! ({data['completion_percentage']:.2f}% of goal)")
                 try:
                     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-                    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+                    chat_id = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_FOUNDER_CHAT_ID")
                     if bot_token and chat_id:
                         import urllib.request, urllib.parse
                         tg_msg = (

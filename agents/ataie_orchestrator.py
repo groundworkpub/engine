@@ -333,7 +333,7 @@ class HybridSafetyGate:
         self.live_mode = live_mode
         self.threshold_approval = threshold_approval
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip() or os.getenv("TELEGRAM_FOUNDER_CHAT_ID", "").strip()
 
     def check_execution_permission(self, batch_size: int, vector_name: str) -> bool:
         """Checks if a batch execution is permitted. Prompts or alerts via Telegram."""
