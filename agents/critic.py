@@ -770,5 +770,17 @@ def run_critic(
         filtered.append(item)
 
     logger.info(f"Critic: {len(filtered)}/{len(raw_payload)} items passed dual-hash quality gates.")
+
+    # Soft-Gate Economic Value Prioritization (Dynamic Economic Selection)
+    if filtered and supabase:
+        try:
+            from agents.economic_engine import EconomicIntelligenceEngine
+            econ_engine = EconomicIntelligenceEngine(supabase)
+            filtered = econ_engine.rank_candidates(filtered)
+            logger.info(f"Critic: Prioritized {len(filtered)} items by economic intelligence value.")
+        except Exception as e:
+            logger.warning(f"Critic: Economic ranking skipped due to error: {e}")
+
     return filtered
+
 
