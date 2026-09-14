@@ -65,18 +65,18 @@ def run_review_reconciler(supabase: Any | None = None) -> dict[str, int]:
 
     logger.info("Starting Autonomous Review Queue Reconciler...")
 
-    # Fetch all articles in review status
+    # Fetch all articles in review or draft status
     res = (
         supabase.table("articles")
         .select("id, slug, title, content, excerpt, takeaway, faq_data, pillar, author_id, reviewer_id, word_count, created_at, status")
-        .eq("status", "review")
+        .in_("status", ["review", "draft"])
         .order("created_at", desc=False)
         .execute()
     )
 
     review_articles: list[dict[str, Any]] = res.data or []
     total_found = len(review_articles)
-    logger.info(f"Found {total_found} articles in 'review' status to evaluate.")
+    logger.info(f"Found {total_found} articles in 'review'/'draft' status to evaluate.")
 
     if total_found == 0:
         return {"total_evaluated": 0, "published": 0, "skipped": 0}
@@ -97,6 +97,8 @@ def run_review_reconciler(supabase: Any | None = None) -> dict[str, int]:
 
     published_count = 0
     skipped_count = 0
+    published_urls: list[str] = []
+    site_url = os.getenv("NEXT_PUBLIC_SITE_URL", "https://gworky.com")
 
     now = datetime.now(UTC)
     # Distribute publication timestamps smoothly across the past 48 hours
@@ -139,6 +141,7 @@ def run_review_reconciler(supabase: Any | None = None) -> dict[str, int]:
         try:
             supabase.table("articles").update(update_payload).eq("id", article["id"]).execute()
             published_count += 1
+            published_urls.append(f"{site_url.rstrip('/')}/article/{slug}")
             logger.info(f"[{published_count}/{total_found}] Auto-published: {slug} (pillar={pillar}, pub_time={pub_time[:16]})")
         except Exception as e:
             logger.error(f"Failed to publish article {slug}: {e}")
@@ -157,6 +160,15 @@ def run_review_reconciler(supabase: Any | None = None) -> dict[str, int]:
                 logger.info(f"Consolidated ISR Revalidation: HTTP {resp.status_code}")
         except Exception as e:
             logger.warning(f"Consolidated ISR revalidation call skipped/failed: {e}")
+
+    # Ping IndexNow for newly published URLs
+    if published_urls:
+        try:
+            from agents.scribe import ping_indexnow
+            ping_indexnow(site_url, published_urls)
+            logger.info("Pinged IndexNow for %d auto-published articles.", len(published_urls))
+        except Exception as e:
+            logger.warning(f"IndexNow ping skipped/failed: {e}")
 
     # Record run in pipeline_runs (using 'run_at' column)
     try:

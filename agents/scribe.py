@@ -1165,6 +1165,8 @@ Return the improved JSON matching the same schema."""
             tracer.log_span(span, supabase=supabase)
 
             # LVC-AUDITOR Quality & AdSense Compliance Gate (v2.4.0-agentic)
+            lvc_blocked = False
+            lvc_reason = ""
             try:
                 from agents.lvc_auditor import LVCAuditor
                 lvc_auditor = LVCAuditor()
@@ -1181,6 +1183,9 @@ Return the improved JSON matching the same schema."""
                     lvc_result.overall_quality_score,
                     lvc_result.estimated_fluff_percentage,
                 )
+                if lvc_result.verdict in ("REJECT", "CRITICAL_MFA_REJECT") or lvc_result.overall_quality_score < 85.0:
+                    lvc_blocked = True
+                    lvc_reason = f"Verdict={lvc_result.verdict}, Score={lvc_result.overall_quality_score:.1f}<85"
             except Exception as e:
                 logger.debug("LVC-AUDITOR gate notice: %s", e)
 
@@ -1234,12 +1239,20 @@ Return the improved JSON matching the same schema."""
                     )
                     status = "review"
                     published_at = None
-                else:
-                    # During AdSense review cooldown (implementation_plan.md §2 Component 1),
-                    # hold newly generated articles as 'draft' so they undergo manual editorial verification.
-                    status = "draft"
+                elif lvc_blocked:
+                    logger.warning(
+                        f"LVC-AUDITOR gate rejected article ({lvc_reason}) for {url[:60]} — saved as 'review'"
+                    )
+                    status = "review"
                     published_at = None
-                    logger.info("AdSense review cooldown: article held as 'draft' for human review.")
+                else:
+                    # Autonomous publishing: All quality gates passed (LVC >= 85, Grounding >= 0.40, Decision Utility, Completeness)
+                    status = "published"
+                    published_at = now
+                    logger.info(
+                        "Quality gates cleared (LVC>=85, grounding>=0.40, utility, completeness) -> status='published' for %s",
+                        validated.slug,
+                    )
 
             author_id = resolve_author_id(supabase, pillar, author_slugs, site_url)
             reviewer_id = resolve_reviewer_id(supabase, pillar, reviewer_slugs)

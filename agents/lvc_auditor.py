@@ -367,31 +367,127 @@ ARTICLE CONTENT:
 
         raw_result = call_llm_json(messages, max_tokens=4096)
         if not raw_result or not isinstance(raw_result, dict):
-            logger.warning("LLM router returned invalid json, building fallback AuditResult from heuristics.")
-            overall = 85.0 if (heuristics["has_markdown_table"] and heuristics["fid"] <= 0.65 and ig >= 0.20) else 68.0
-            verdict = "PASS" if overall >= 85.0 else "CONDITIONAL_PASS"
-            return AuditResult(
-                target_url=url,
-                target_slug=slug,
-                overall_quality_score=overall,
-                verdict=verdict,
-                estimated_fluff_percentage=round(heuristics["fid"] * 100, 1),
-                information_gain_classification="HIGH_NOVELTY" if ig >= 0.25 else "MODERATE",
-                dimension_breakdown=[
-                    DimensionScore(dimension="Information Gain & Novelty", weight=0.30, score=85.0 if ig >= 0.20 else 65.0, observation=f"Computed IG: {ig}"),
-                    DimensionScore(dimension="Fluff Density & AI Artifacts", weight=0.25, score=round((1.0 - heuristics["fid"]) * 100, 1), observation=f"FID: {heuristics['fid']}"),
-                    DimensionScore(dimension="E-E-A-T Entity Anchoring", weight=0.20, score=80.0, observation="Primary entity signals verified"),
-                    DimensionScore(dimension="Answer Velocity", weight=0.15, score=80.0, observation="BLUF present"),
-                    DimensionScore(dimension="MFA & Structural Footprint", weight=0.10, score=90.0 if heuristics["has_markdown_table"] else 50.0, observation="Tabular structure evaluated"),
-                ],
-                critical_flaws=[],
-                structural_pruning_targets=[],
-                data_injection_directives=[] if heuristics["has_markdown_table"] else ["Inject Markdown comparison table"],
+            logger.warning("LLM router returned invalid json, building fallback AuditResult from heuristics via audit_text_quick.")
+            return self.audit_text_quick(
+                content=content,
+                title=title,
+                pillar=pillar,
+                url=url,
+                slug=slug,
+                competitor_texts=competitor_texts,
             )
 
         raw_result["target_url"] = url
         raw_result["target_slug"] = slug
         return AuditResult.model_validate(raw_result)
+
+    def audit_text_quick(
+        self,
+        content: str,
+        title: str,
+        pillar: str = "money",
+        url: str | None = None,
+        slug: str | None = None,
+        competitor_texts: list[str] | None = None,
+    ) -> AuditResult:
+        """Heuristic-only quick audit without invoking external LLM APIs.
+        Guarantees deterministic scoring based on word count, FID, table presence, and IG.
+        """
+        heuristics = compute_nlp_heuristics(content)
+        ig = compute_serp_information_gain(content, competitor_texts or [])
+
+        # Deterministic Instant Rejection: Thin Content (< 500 words)
+        if heuristics["word_count"] < 500:
+            flaw = CriticalFlaw(
+                flaw_type="COMMODITY_REWRITE",
+                severity="FATAL",
+                excerpt=content[:180] + "..." if len(content) > 180 else content,
+                diagnostic_rationale=f"Article has only {int(heuristics['word_count'])} words (< 500 minimum threshold). Fails QRG §4.0 thin content.",
+                remediation_action="INJECT_VERIFIABLE_DATA",
+                remediation_directive="Expand article with primary empirical data, authoritative benchmarks, and an empirical decision table.",
+            )
+            return AuditResult(
+                target_url=url,
+                target_slug=slug,
+                overall_quality_score=round(heuristics["word_count"] / 10.0, 1),
+                verdict="REJECT",
+                estimated_fluff_percentage=round(heuristics["fid"] * 100, 1),
+                information_gain_classification="COMMODITY_REDUNDANT",
+                dimension_breakdown=[
+                    DimensionScore(dimension="Information Gain & Novelty", weight=0.30, score=20.0, observation="Thin content stub"),
+                    DimensionScore(dimension="Fluff Density & AI Artifacts", weight=0.25, score=30.0, observation=f"FID: {heuristics['fid']}"),
+                    DimensionScore(dimension="E-E-A-T Entity Anchoring", weight=0.20, score=25.0, observation="Insufficient depth for verified citations"),
+                    DimensionScore(dimension="Answer Velocity", weight=0.15, score=40.0, observation="Underdeveloped prose"),
+                    DimensionScore(dimension="MFA & Structural Footprint", weight=0.10, score=10.0, observation="Absence of required comparison matrix"),
+                ],
+                critical_flaws=[flaw],
+                structural_pruning_targets=[],
+                data_injection_directives=[
+                    "Inject empirical comparison table",
+                    "Add at least 10 verified data points from primary benchmarks (FRED, BLS, CFPB, DOE)",
+                ],
+            )
+
+        # Deterministic Instant Rejection: Severe Fluff (FID > 0.85)
+        if heuristics["fid"] > 0.85:
+            flaw = CriticalFlaw(
+                flaw_type="FLUFF_PADDING",
+                severity="FATAL",
+                excerpt=content[:200] + "...",
+                diagnostic_rationale=f"Fluff Density {heuristics['fid']:.2f} > 0.85 limit. Over 85% of sentences lack verifiable factual assertions.",
+                remediation_action="DELETE",
+                remediation_directive="Strip generic filler introductions and replace with data-backed quantitative trade-offs.",
+            )
+            return AuditResult(
+                target_url=url,
+                target_slug=slug,
+                overall_quality_score=45.0,
+                verdict="REJECT",
+                estimated_fluff_percentage=round(heuristics["fid"] * 100, 1),
+                information_gain_classification="COMMODITY_REDUNDANT",
+                dimension_breakdown=[
+                    DimensionScore(dimension="Information Gain & Novelty", weight=0.30, score=40.0, observation="High repetition of common knowledge"),
+                    DimensionScore(dimension="Fluff Density & AI Artifacts", weight=0.25, score=25.0, observation=f"Extreme FID: {heuristics['fid']}"),
+                    DimensionScore(dimension="E-E-A-T Entity Anchoring", weight=0.20, score=40.0, observation="Generic conversational phrasing"),
+                    DimensionScore(dimension="Answer Velocity", weight=0.15, score=50.0, observation="Throat-clearing opening paragraphs"),
+                    DimensionScore(dimension="MFA & Structural Footprint", weight=0.10, score=30.0, observation="Text padding without tabular breakdown"),
+                ],
+                critical_flaws=[flaw],
+                structural_pruning_targets=["Introduction filler", "Generic definitional summaries"],
+                data_injection_directives=["Inject specific numeric units and primary source citations"],
+            )
+
+        wc_score = min(30.0, (heuristics["word_count"] / 1000.0) * 30.0)
+        table_score = 25.0 if heuristics["has_markdown_table"] else 10.0
+        fid_score = max(5.0, (1.0 - heuristics["fid"]) * 25.0)
+        ig_score = min(20.0, max(5.0, ig * 40.0))
+
+        overall = round(min(100.0, wc_score + table_score + fid_score + ig_score), 1)
+        if overall >= 85.0 and heuristics["has_markdown_table"] and heuristics["fid"] <= 0.65 and ig >= 0.20:
+            verdict = "PASS"
+        elif overall >= 70.0:
+            verdict = "CONDITIONAL_PASS"
+        else:
+            verdict = "REJECT"
+
+        return AuditResult(
+            target_url=url,
+            target_slug=slug,
+            overall_quality_score=overall,
+            verdict=verdict,
+            estimated_fluff_percentage=round(heuristics["fid"] * 100, 1),
+            information_gain_classification="HIGH_NOVELTY" if ig >= 0.25 else ("MODERATE" if ig >= 0.15 else "COMMODITY_REDUNDANT"),
+            dimension_breakdown=[
+                DimensionScore(dimension="Information Gain & Novelty", weight=0.30, score=round(min(100.0, ig_score * 5.0), 1), observation=f"Computed IG: {ig}"),
+                DimensionScore(dimension="Fluff Density & AI Artifacts", weight=0.25, score=round((1.0 - heuristics["fid"]) * 100, 1), observation=f"FID: {heuristics['fid']}"),
+                DimensionScore(dimension="E-E-A-T Entity Anchoring", weight=0.20, score=80.0 if heuristics["verifiable_sentence_ratio"] >= 0.25 else 60.0, observation=f"Verifiable ratio: {heuristics['verifiable_sentence_ratio']}"),
+                DimensionScore(dimension="Answer Velocity", weight=0.15, score=80.0, observation="BLUF present"),
+                DimensionScore(dimension="MFA & Structural Footprint", weight=0.10, score=90.0 if heuristics["has_markdown_table"] else 50.0, observation="Tabular structure evaluated"),
+            ],
+            critical_flaws=[],
+            structural_pruning_targets=[],
+            data_injection_directives=[] if heuristics["has_markdown_table"] else ["Inject Markdown comparison table"],
+        )
 
     def audit_supabase_slug(self, slug: str) -> AuditResult:
         """Fetches an article by slug from Supabase and audits it."""
