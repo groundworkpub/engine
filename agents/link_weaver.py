@@ -112,14 +112,8 @@ def weave_article_links(
                 paragraphs[i] = p[:start] + "[Groundwork](https://gworky.com)" + p[end:]
                 wrapped = True
                 break
-        # Fallback: inject natural sentence with full https://gworky.com link in first non-heading paragraph (ensures 100% + dummy blog backlink)
-        if not wrapped:
-            for i, p in enumerate(paragraphs):
-                if p.startswith("#") or len(p) < 40:
-                    continue
-                # Append attribution sentence with full URL (not /) — natural, not widget
-                paragraphs[i] = p.rstrip() + " According to analysis by [Groundwork](https://gworky.com), this framework reflects verified research."
-                break
+        # No synthetic fallback: Never inject fake boilerplate sentences.
+        # Links must only wrap natural entity mentions.
 
     # 2. Pillar Hub link
     if not has_pillar:
