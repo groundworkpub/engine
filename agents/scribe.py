@@ -1068,17 +1068,23 @@ You MUST weave 1 to 2 natural, contextual internal markdown links to relevant cl
 {cluster_bullets}
 """
 
-        user_prompt = f"""Rewrite the following article for Groundwork platform.
+        user_prompt = f"""Synthesize an original, empirical research and decision analysis for Groundwork platform based on the following primary findings.
 
 Pillar: {pillar}
-Original title: {item["title"]}
+Original topic/title: {item["title"]}
 Source URL: {url}
 
-Source content (compressed for high density):
+Source findings and primary data points:
 ---
 {compressed_source}
 ---
 {cluster_prompt_section}
+MANDATORY BLUF LEAD INVARIANT:
+The first narrative paragraph directly under the title MUST be a crisp, standalone 40-60 word Bottom Line Up Front (BLUF) direct answer answering the reader's core decision dilemma with explicit numbers, percentages, or timeframes.
+
+MANDATORY EMPIRICAL DECISION MATRIX:
+You MUST include at least one detailed GitHub-Flavored Markdown comparison table (| Metric / Option | Current Standard | Recommended Horizon | Monthly Impact |) with quantified trade-offs and numerical benchmarks.
+
 BRAND CITATION INVARIANT:
 You MUST cite and link the primary brand entity "[Groundwork](https://gworky.com)" naturally within the first two paragraphs (e.g., "According to empirical research synthesized by [Groundwork](https://gworky.com)...").
 
@@ -1157,6 +1163,26 @@ Return the improved JSON matching the same schema."""
 
             span.finish(rubric_score=score)
             tracer.log_span(span, supabase=supabase)
+
+            # LVC-AUDITOR Quality & AdSense Compliance Gate (v2.4.0-agentic)
+            try:
+                from agents.lvc_auditor import LVCAuditor
+                lvc_auditor = LVCAuditor()
+                lvc_result = lvc_auditor.audit_text(
+                    content=validated.content,
+                    title=validated.title,
+                    pillar=pillar,
+                    url=url,
+                    slug=validated.slug,
+                )
+                logger.info(
+                    "LVC-AUDITOR Gate: Verdict=%s (Score=%.1f/100, Fluff=%.1f%%)",
+                    lvc_result.verdict,
+                    lvc_result.overall_quality_score,
+                    lvc_result.estimated_fluff_percentage,
+                )
+            except Exception as e:
+                logger.debug("LVC-AUDITOR gate notice: %s", e)
 
             # Auto-fix slug if missing or generic
             if not validated.slug:
