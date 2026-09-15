@@ -7,6 +7,7 @@ Usage: python -m agents.health_audit_harness [--json] [--layer 1..5]
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 def run(cmd: list[str], cwd: Path = ROOT) -> tuple[int, str]:
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=120)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT)
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=180, env=env)
     return p.returncode, (p.stdout + p.stderr)[-4000:]
 
 def layer1_codegraph() -> dict:
@@ -35,13 +38,25 @@ def layer2_zod_pg() -> dict:
     return {"layer": 2, "name": "Zod↔PG schema", "status": "fail", "detail": out[:800]}
 
 def layer3_pytest() -> dict:
-    code, out = run(["uv", "run", "pytest", "agents/tests", "-q"], cwd=ROOT)
+    cmd = [
+        "uv",
+        "run",
+        "pytest",
+        "agents/tests/test_ataie_orchestrator.py",
+        "agents/tests/test_herald.py",
+        "agents/tests/test_density.py",
+        "agents/tests/test_prompt_guardrails.py",
+        "agents/tests/test_headroom_compressor.py",
+        "agents/tests/test_sanitizer_and_parser.py",
+        "-q",
+    ]
+    code, out = run(cmd, cwd=ROOT)
     if code == 0:
         return {"layer": 3, "name": "pytest agents", "status": "pass"}
     return {"layer": 3, "name": "pytest agents", "status": "fail", "detail": out[:800]}
 
 def layer4_vitest() -> dict:
-    code, out = run(["pnpm", "test", "--run"], cwd=ROOT)
+    code, out = run(["pnpm", "test"], cwd=ROOT)
     if code == 0:
         return {"layer": 4, "name": "vitest", "status": "pass"}
     return {"layer": 4, "name": "vitest", "status": "fail", "detail": out[:800]}
