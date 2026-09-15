@@ -174,24 +174,34 @@ class ScribeOutput(BaseModel):
             return data
 
         def _truncate(text: str, limit: int) -> str:
-            if len(text) <= limit:
-                return text
-            cut = text[:limit]
-            # Prefer breaking at the last sentence boundary inside the limit
-            for sep in (". ", "! ", "? "):
+            cleaned = text.strip()
+            if len(cleaned) <= limit and cleaned and cleaned[-1] in (".", "!", "?", '"', '”'):
+                return cleaned
+            cut = cleaned[:limit]
+            # Prefer breaking at the last sentence boundary inside the limit (min 35 chars)
+            for sep in (". ", "! ", "? ", ".\n"):
                 idx = cut.rfind(sep)
-                if idx > limit * 0.6:
-                    return cut[: idx + 1]
-            # Fall back to the last word boundary
+                if idx >= 35:
+                    return cut[: idx + 1].strip()
+            # If cut itself ends with sentence punctuation at or before limit
+            if cut and cut[-1] in (".", "!", "?"):
+                return cut.strip()
+            # Fall back to the last word boundary and guarantee a closing period
             space_idx = cut.rfind(" ")
-            return cut[:space_idx] if space_idx > limit * 0.5 else cut.rstrip()
+            candidate = cut[:space_idx].rstrip(" ,;:-—") if space_idx > 35 else cut.rstrip(" ,;:-—")
+            if candidate and candidate[-1] not in (".", "!", "?", '"', '”'):
+                candidate += "."
+            return candidate
 
         if isinstance(data.get("excerpt"), str):
-            data["excerpt"] = _truncate(data["excerpt"], 160)
+            ex = re.sub(r"^(?:javascript|json|html|markdown|```[a-z]*)\s*", "", data["excerpt"], flags=re.I).strip()
+            data["excerpt"] = _truncate(ex, 160)
         elif not data.get("excerpt"):
             # Synthesize from content when the model omitted it entirely
             body = str(data.get("content") or "").strip()
-            data["excerpt"] = _truncate(re.sub(r"[#*_>`]", "", body), 160) if body else ""
+            clean_body = re.sub(r"[#*_>`]", "", body)
+            clean_body = re.sub(r"^(?:javascript|json|html|markdown|```[a-z]*)\s*", "", clean_body, flags=re.I).strip()
+            data["excerpt"] = _truncate(clean_body, 160) if clean_body else ""
         if isinstance(data.get("title"), str):
             t = data["title"].strip()
             # Clean common boilerplate fluff prefixes
@@ -343,7 +353,7 @@ OUTPUT FORMAT (strict JSON):
   "slug": "url-friendly-slug-max-80-chars",
   "title": "Article title in sentence case",
   "content": "Full markdown article body — minimum 1,100 words, NO H1, use ## for H2, ### for H3",
-  "excerpt": "150-160 char meta description — answer the primary question, include keyword",
+  "excerpt": "A single complete grammatical sentence (120-155 chars) ending with a period. Answer primary question with keyword. NEVER truncate mid-sentence.",
   "schema_type": "Article|HowTo|Review|NewsArticle",
   "takeaway": "40-80 word direct answer and practical takeaway",
   "expert_comment": "2-3 sentence sharp empirical analysis in the assigned research voice, without invented credentials",
