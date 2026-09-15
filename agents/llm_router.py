@@ -26,16 +26,19 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any, Literal
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
 
-# Robust multi-path dotenv loading
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+    # Robust multi-path dotenv loading
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 
-load_dotenv(os.path.join(REPO_ROOT, ".env.local"), override=True)
-load_dotenv(os.path.join(REPO_ROOT, ".env"), override=True)
-load_dotenv(".env.local", override=True)
-load_dotenv(".env", override=True)
+    load_dotenv(os.path.join(REPO_ROOT, ".env.local"), override=True)
+    load_dotenv(os.path.join(REPO_ROOT, ".env"), override=True)
+    load_dotenv(".env.local", override=True)
+    load_dotenv(".env", override=True)
+except ImportError:
+    pass
 
 logging.basicConfig(
     level=logging.INFO,
