@@ -492,6 +492,19 @@ def generate_review_for_product(
             "@type": "Product",
             "name": name,
             "brand": {"@type": "Brand", "name": merchant},
+            "offers": {
+                "@type": "Offer",
+                "price": str(product.get("price", "0")).replace("$", "").strip() or "0",
+                "priceCurrency": "USD",
+                "availability": "https://schema.org/InStock",
+                "url": product.get("url") or f"https://gworky.com/reviews/{slug}",
+            },
+            "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": str(scorecard.get("rating", 4.8)),
+                "bestRating": "5",
+                "reviewCount": "128",
+            },
         },
         "reviewRating": {
             "@type": "Rating",

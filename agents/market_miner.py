@@ -276,6 +276,88 @@ def harvest_vector_c_reddit(subreddits: list[str], client: httpx.Client, limit: 
     return sorted(intent_queries)[:limit]
 
 
+# ── Vector D: YouTube Video Trends (yt-dlp) ──────────────────────────────────
+def harvest_vector_d_youtube(seed: str, limit: int = 10) -> list[str]:
+    """Extracts viral video titles and high-velocity search queries from YouTube using yt-dlp."""
+    results: set[str] = set()
+    try:
+        import yt_dlp
+
+        ydl_opts = {
+            "quiet": True,
+            "extract_flat": True,
+            "skip_download": True,
+            "no_warnings": True,
+        }
+        query = f"{seed} 2026"
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            data = ydl.extract_info(f"ytsearch{min(limit * 2, 10)}:{query}", download=False)
+            for entry in (data.get("entries") or []):
+                title = entry.get("title") or ""
+                clean = re.sub(r"\[.*?\]|\(.*?\)", "", title)
+                clean = re.sub(r"[^\w\s-]", "", clean).strip().lower()
+                clean = re.sub(r"\s+", " ", clean)
+                if len(clean) > 8 and len(clean) < 80:
+                    results.add(clean)
+    except Exception as err:
+        logger.debug(f"Vector D YouTube yt-dlp notice for '{seed}': {err}")
+
+    return sorted(results)[:limit]
+
+
+# ── Vector E: Google Trends Live RSS (Breakout Queries) ──────────────────────
+def harvest_vector_e_google_trends(pillar: str, client: httpx.Client, limit: int = 10) -> list[str]:
+    """Extracts real-time breakout queries and trending topics from Google Trends RSS."""
+    trends: set[str] = set()
+    try:
+        url = "https://trends.google.com/trending/rss?geo=US"
+        resp = client.get(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        if resp.status_code == 200:
+            root = ET.fromstring(resp.text)
+            for item in root.findall(".//item"):
+                t_elem = item.find("title")
+                if t_elem is not None and t_elem.text:
+                    trend_title = t_elem.text.strip().lower()
+                    news_items = item.findall("{https://trends.google.com/trending/rss}news_item")
+                    matched = False
+                    for n in news_items:
+                        snippet_elem = n.find("{https://trends.google.com/trending/rss}news_item_snippet")
+                        if snippet_elem is not None and snippet_elem.text:
+                            snippet = snippet_elem.text.lower()
+                            if any(w in snippet for w in [pillar, "money", "tax", "cost", "health", "tech", "home", "solar", "car", "job"]):
+                                trends.add(f"{trend_title} guide")
+                                matched = True
+                                break
+                    if not matched and len(trends) < limit:
+                        trends.add(f"{trend_title} analysis")
+    except Exception as err:
+        logger.debug(f"Vector E Google Trends notice: {err}")
+
+    return sorted(trends)[:limit]
+
+
+# ── Vector F: Community Problem & Friction Mining (Hacker News Algolia) ──────
+def harvest_vector_f_community(seed: str, client: httpx.Client, limit: int = 10) -> list[str]:
+    """Ingests authentic consumer dilemmas and technical debates from Hacker News Algolia."""
+    topics: set[str] = set()
+    try:
+        url = f"https://hn.algolia.com/api/v1/search?query={quote(seed)}&tags=story&hitsPerPage={min(limit * 2, 8)}"
+        resp = client.get(url)
+        if resp.status_code == 200:
+            hits = resp.json().get("hits", [])
+            for hit in hits:
+                title = hit.get("title") or ""
+                clean = re.sub(r"\[.*?\]|\(.*?\)", "", title)
+                clean = re.sub(r"[^\w\s-]", "", clean).strip().lower()
+                clean = re.sub(r"\s+", " ", clean)
+                if len(clean) > 8 and len(clean) < 75:
+                    topics.add(clean)
+    except Exception as err:
+        logger.debug(f"Vector F Hacker News notice for '{seed}': {err}")
+
+    return sorted(topics)[:limit]
+
+
 # ── Anti-Cannibalization Gate ─────────────────────────────────────────────────
 def compute_semantic_overlap(query_a: str, query_b: str) -> float:
     """Computes Jaccard + token overlap between candidate query and indexed titles."""
@@ -529,7 +611,24 @@ def run_market_mining(
                 reddit_items = harvest_vector_c_reddit(subreddits, client, limit=limit_per_seed)
                 candidate_queries.update(reddit_items)
 
-            logger.info(f"Harvested {len(candidate_queries)} raw candidate queries for '{pillar}'.")
+            # 4. Vector D: YouTube Video Trends (yt-dlp)
+            if vector_filter in ["all", "youtube", "d"]:
+                for seed in seeds[:2]:
+                    youtube_items = harvest_vector_d_youtube(seed, limit=limit_per_seed)
+                    candidate_queries.update(youtube_items)
+
+            # 5. Vector E: Google Trends Live RSS (Breakout Queries)
+            if vector_filter in ["all", "trends", "e"]:
+                gtrends_items = harvest_vector_e_google_trends(pillar, client, limit=limit_per_seed)
+                candidate_queries.update(gtrends_items)
+
+            # 6. Vector F: Community Problem & Friction Mining (Hacker News Algolia)
+            if vector_filter in ["all", "community", "f"]:
+                for seed in seeds[:2]:
+                    hn_items = harvest_vector_f_community(seed, client, limit=limit_per_seed)
+                    candidate_queries.update(hn_items)
+
+            logger.info(f"Harvested {len(candidate_queries)} raw candidate queries for '{pillar}' across active vectors.")
 
             # Anti-cannibalization filtering
             filtered_queries: list[str] = []
