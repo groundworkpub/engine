@@ -38,6 +38,16 @@
       "\"next.js static architecture\" inurl:category/dev \"leave a comment\""
     ]
   },
+  "institutional_resource_page_dorks": {
+    "academic_open_source": "site:.edu \"resources\" + \"open source\"",
+    "academic_tool_submissions": "site:.edu inurl:resources \"submit\"",
+    "government_niche_guides": "site:.gov \"helpful links\" + {{NICHE}}",
+    "university_library_software": "site:.edu inurl:links \"educational software\"",
+    "money_education": "site:.edu inurl:resources (\"mortgage calculator\" OR \"financial literacy\")",
+    "home_energy_extension": "site:.edu inurl:resources (\"solar calculator\" OR \"heat pump\" OR \"energy efficiency\")",
+    "health_nutrition_extension": "site:.gov inurl:resources (\"dietary guidelines\" OR \"clinical trial data\")",
+    "consumer_protection_resources": "site:.gov (\"helpful links\" OR \"consumer resources\") (\"consumer protection\" OR \"financial tools\")"
+  },
   "seed_sites": [
     {
       "domain": "techcrunch.com",
