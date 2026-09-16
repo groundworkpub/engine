@@ -1041,10 +1041,11 @@ def queue_master_video_campaign(
     )
     results.append({"step": "launch_announcement", "result": r_main})
 
-    # 3. Queue chapter teaser snippets
+    # 3. Queue chapter teaser snippets with native vertical Shorts videos
     for idx, ch in enumerate(chapters[:3], start=1):
         ch_title = ch.get("title", f"Chapter {idx}")
         ch_stat = ch.get("key_stat", "")
+        ch_slug = ch.get("slug", "")
         time_mark = ch.get("timestamp_formatted", "00:00")
         ch_text = (
             f"💡 In Chapter {idx} of our {pillar.title()} Master Suite ({time_mark}): '{ch_title}'\n\n"
@@ -1053,11 +1054,17 @@ def queue_master_video_campaign(
             f"Interactive models at: https://gworky.com/{pillar}\n\n"
             f"{hashtags}"
         )
+
+        # Use chapter-specific 9:16 vertical Shorts video (<=58s) so Buffer / Instagram / TikTok
+        # processes it as a native Reel instead of rejecting a 40-minute file and falling back to a static image
+        ch_video_url = f"https://media.gworky.com/videos/{ch_slug}.mp4" if ch_slug else resolved_video_url
+        ch_image_url = f"https://media.gworky.com/covers/{ch_slug}.webp" if ch_slug else thumbnail_url
+
         r_ch = publish_to_buffer(
             title=f"Chapter {idx} Teaser: {ch_title}",
             text=ch_text,
-            image_url=thumbnail_url,
-            video_url=resolved_video_url,
+            image_url=ch_image_url,
+            video_url=ch_video_url,
             env=env,
         )
         results.append({"step": f"chapter_{idx}_teaser", "result": r_ch})

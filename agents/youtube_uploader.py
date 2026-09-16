@@ -30,7 +30,7 @@ from typing import Any
 logger = logging.getLogger("youtube_uploader")
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status,localizations"
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true"
 
 DEFAULT_CATEGORY = "27"  # Education
@@ -109,6 +109,21 @@ def build_video_metadata(
             "categoryId": category_id,
             "defaultLanguage": "en",
             "defaultAudioLanguage": "en-US",
+        },
+        "localizations": {
+            "en": {
+                "title": clean_title,
+                "description": clean_description,
+            },
+            # Explicitly lock Indonesian to English so YouTube never falls back to auto-translating into Indonesian
+            "id": {
+                "title": clean_title,
+                "description": clean_description,
+            },
+            "in": {
+                "title": clean_title,
+                "description": clean_description,
+            },
         },
         "status": {
             "privacyStatus": privacy_status,

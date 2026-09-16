@@ -173,24 +173,33 @@ class ScribeOutput(BaseModel):
         if not isinstance(data, dict):
             return data
 
-        def _truncate(text: str, limit: int) -> str:
+        def _truncate(text: str, limit: int, require_period: bool = True) -> str:
             cleaned = text.strip()
-            if len(cleaned) <= limit and cleaned and cleaned[-1] in (".", "!", "?", '"', '”'):
-                return cleaned
+            if not require_period:
+                cleaned = cleaned.rstrip(".")
+            if len(cleaned) <= limit and cleaned:
+                if not require_period:
+                    return cleaned
+                if cleaned[-1] in (".", "!", "?", '"', '”'):
+                    return cleaned
             cut = cleaned[:limit]
             # Prefer breaking at the last sentence boundary inside the limit (min 35 chars)
-            for sep in (". ", "! ", "? ", ".\n"):
-                idx = cut.rfind(sep)
-                if idx >= 35:
-                    return cut[: idx + 1].strip()
-            # If cut itself ends with sentence punctuation at or before limit
-            if cut and cut[-1] in (".", "!", "?"):
-                return cut.strip()
-            # Fall back to the last word boundary and guarantee a closing period
+            if require_period:
+                for sep in (". ", "! ", "? ", ".\n"):
+                    idx = cut.rfind(sep)
+                    if idx >= 35:
+                        return cut[: idx + 1].strip()
+                # If cut itself ends with sentence punctuation at or before limit
+                if cut and cut[-1] in (".", "!", "?"):
+                    return cut.strip()
+            # Fall back to the last word boundary
             space_idx = cut.rfind(" ")
             candidate = cut[:space_idx].rstrip(" ,;:-—") if space_idx > 35 else cut.rstrip(" ,;:-—")
-            if candidate and candidate[-1] not in (".", "!", "?", '"', '”'):
-                candidate += "."
+            if require_period:
+                if candidate and candidate[-1] not in (".", "!", "?", '"', '”'):
+                    candidate += "."
+            else:
+                candidate = candidate.rstrip(".")
             return candidate
 
         if isinstance(data.get("excerpt"), str):
@@ -213,7 +222,7 @@ class ScribeOutput(BaseModel):
                 if t.lower().startswith(prefix.lower()):
                     t = t[len(prefix):].capitalize()
                     break
-            clean_t = _truncate(t, 90)
+            clean_t = _truncate(t, 90, require_period=False)
             # Prevent title terminating on a dangling preposition, pronoun, or conjunction
             while clean_t and _DANGLING_TITLE_RE.search(clean_t):
                 words = clean_t.split()
@@ -254,25 +263,9 @@ class ScribeOutput(BaseModel):
                 elif hasattr(f, "question") and hasattr(f, "answer"):
                     cleaned_faq.append(f)
 
-        if len(cleaned_faq) < 3:
-            topic = str(data.get("title") or data.get("sub_topic") or "this topic").replace("##", "").strip()
-            topic_clean = topic.rstrip(".?!")
-            defaults = [
-                {
-                    "question": f"How does empirical evidence inform decisions on {topic_clean}?",
-                    "answer": f"Groundwork's analysis evaluates primary research data, benchmarks, and quantitative modeling to establish actionable decision criteria for {topic_clean}.",
-                },
-                {
-                    "question": f"What are the primary cost or risk factors associated with {topic_clean}?",
-                    "answer": "Core considerations involve balancing initial expenditures against long-term returns, regulatory compliance, and scenario-tested risk thresholds.",
-                },
-                {
-                    "question": f"What practical next steps should be taken regarding {topic_clean}?",
-                    "answer": "Review the calculations and structured frameworks detailed in this guide, model individual scenarios, and verify current provider benchmarks.",
-                },
-            ]
-            cleaned_faq = cleaned_faq + defaults[: 3 - len(cleaned_faq)]
-
+        # Anti-Slop & Better Ads Invariant (Rule §2.1 & §2.12):
+        # Do NOT inject repetitive generic boilerplate FAQ questions (e.g. 'How does empirical evidence inform...').
+        # Only retain authentic, domain-specific Q&As generated from primary content.
         data["faq"] = cleaned_faq
         if isinstance(data.get("content"), str) and data["content"]:
             data["content"] = _sanitize_internal_links(data["content"])

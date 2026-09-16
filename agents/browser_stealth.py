@@ -31,19 +31,31 @@ ANALYTICS_DOMAINS: frozenset[str] = frozenset(
 )
 
 # ── AdSense / Mediavine Zero-Fraud Firewall ────────────────────────────────
-# CRITICAL: Every simulation session MUST block ALL ad & tracker domains.
+# CRITICAL: Every simulation session MUST block ALL ad & tracker domains by default.
 # Any intercepted ad impression = IVT violation -> account suspension risk.
 # Domains cover: DSPs, SSPs, DMPs, pixel trackers, ad delivery networks.
-AD_BLOCK_DOMAINS: frozenset[str] = frozenset(
+
+SECONDARY_AD_DOMAINS: frozenset[str] = frozenset(
     [
-        # Monetag / Propeller Ads ecosystem (zero-fraud firewall)
+        # Monetag / Propeller Ads ecosystem
         "quge5.com",
         "3nbf4.com",
         "5gvci.com",
         "monetag.com",
         "propellerads.com",
         "propellerclick.com",
-        # Google Ads ecosystem (AdSense, Ad Exchange, Ad Manager)
+        "propush.me",
+        # Adsterra / Direct Link ecosystem
+        "adsterra.com",
+        "al5sm.com",
+        "highcpmgate.com",
+        "profitablegatecpm.com",
+    ]
+)
+
+PREMIUM_FIREWALL_DOMAINS: frozenset[str] = frozenset(
+    [
+        # Google Ads ecosystem (AdSense, Ad Exchange, Ad Manager) - 100% BLOCKED PERMANENTLY
         "googlesyndication.com",
         "doubleclick.net",
         "googleadservices.com",
@@ -100,6 +112,8 @@ AD_BLOCK_DOMAINS: frozenset[str] = frozenset(
         "ads.linkedin.com",
     ]
 )
+
+AD_BLOCK_DOMAINS: frozenset[str] = frozenset(PREMIUM_FIREWALL_DOMAINS | SECONDARY_AD_DOMAINS)
 
 # ── Fingerprint Matrix (OS/platform -> WebGL vendor & renderer) ─────────────
 # 1:1 sync between User-Agent platform and WebGL/navigator hardware identity.
@@ -452,15 +466,20 @@ def stealth_launch_args() -> list[str]:
     ]
 
 
-def domain_is_blocked(url: str, allow_analytics: bool = False) -> bool:
+def domain_is_blocked(url: str, allow_analytics: bool = False, allow_secondary: bool = False) -> bool:
     """Return True if url hits any AdSense/ad firewall domain.
 
     If allow_analytics is False (default), analytics domains are also blocked.
     If allow_analytics is True, Google Analytics & GTM are allowed through so GA4
-    Realtime records the session, while 100% of ad networks remain strictly blocked.
+    Realtime records the session.
+    If allow_secondary is True, secondary ad networks (Monetag, Adsterra, PropellerAds)
+    are allowed through for targeted yield testing, while PREMIUM_FIREWALL_DOMAINS
+    (Google AdSense/DoubleClick/Mediavine) remain 100% strictly blocked under all conditions.
     """
     if not allow_analytics and any(domain in url for domain in ANALYTICS_DOMAINS):
         return True
+    if allow_secondary:
+        return any(domain in url for domain in PREMIUM_FIREWALL_DOMAINS)
     return any(domain in url for domain in AD_BLOCK_DOMAINS)
 
 

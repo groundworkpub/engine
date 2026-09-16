@@ -771,6 +771,7 @@ class AdvancedOrganicSimulator:
         proxy_url: str | None = None,
         engine: str | None = None,
         allow_analytics: bool = False,
+        allow_secondary_ads: bool = False,
     ) -> None:
         self.supabase = supabase
         self.dry_run = dry_run
@@ -779,6 +780,7 @@ class AdvancedOrganicSimulator:
         # Engine resolved at construction (validated); default = playwright.
         self._engine = get_engine(engine)
         self.allow_analytics = allow_analytics
+        self.allow_secondary_ads = allow_secondary_ads
 
     def resolve_proxy(self, geo_region: str, session_id: str) -> str | None:
         # Triage C geo-coherence guard (ADR-0006): only target EN geos may route
@@ -875,18 +877,53 @@ class AdvancedOrganicSimulator:
 
                 page = await context.new_page()
 
-                # ── AdSense / Mediavine Zero-Fraud Firewall (shared SSOT list) ─────────
+                # ── Asymmetric Ad Firewall (Google 100% blocked, Secondary conditional) ──
                 async def _strict_ad_firewall(route: Any, request: Any) -> None:
                     url = request.url
-                    if domain_is_blocked(url, allow_analytics=self.allow_analytics):
+                    if domain_is_blocked(
+                        url,
+                        allow_analytics=self.allow_analytics,
+                        allow_secondary=self.allow_secondary_ads,
+                    ):
                         await route.abort("blockedbyclient")
                     else:
                         await route.continue_()
 
                 await page.route("**/*", _strict_ad_firewall)
+
+                # Auto-dismiss dialogs to prevent runner freezing
+                page.on("dialog", lambda d: asyncio.create_task(d.dismiss()))
+
+                # Cascading multi-window popunder listener (only when secondary ads allowed)
+                if self.allow_secondary_ads:
+                    async def on_popunder_child(new_page: Any) -> None:
+                        try:
+                            # Child popunder page MUST still block 100% of Google/Premium ads
+                            async def _child_ad_firewall(r: Any, req: Any) -> None:
+                                if domain_is_blocked(req.url, allow_analytics=False, allow_secondary=True):
+                                    await r.abort("blockedbyclient")
+                                else:
+                                    await r.continue_()
+                            await new_page.route("**/*", _child_ad_firewall)
+                            new_page.on("dialog", lambda d: asyncio.create_task(d.dismiss()))
+                            logger.info("🪟 [Asymmetric Arbitrage] Child Popunder Opened: %s", new_page.url)
+                            await new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            dwell = random.uniform(20.0, 45.0)
+                            await asyncio.sleep(dwell)
+                            await new_page.close()
+                            telemetry.actions_triggered.append(f"popunder_dwell_{int(dwell)}s")
+                        except Exception as e:
+                            logger.debug("Child popunder handling ended: %s", e)
+                            try:
+                                await new_page.close()
+                            except Exception:
+                                pass
+
+                    context.on("page", on_popunder_child)
+
                 logger.debug(
-                    "🛡️  Ad firewall active — %d blocked domains (allow_analytics=%s)",
-                    len(AD_BLOCK_DOMAINS),
+                    "🛡️  Ad firewall active — secondary_allowed=%s (allow_analytics=%s)",
+                    self.allow_secondary_ads,
                     self.allow_analytics,
                 )
 
@@ -1226,6 +1263,13 @@ async def main() -> None:
         help="Allow Google Analytics (GA4) & GTM network requests so Realtime analytics captures the session (AdSense/ads remain 100%% blocked)",
     )
     parser.add_argument(
+        "--monetize-secondary",
+        "--allow-secondary-ads",
+        action="store_true",
+        dest="allow_secondary_ads",
+        help="Enable Asymmetric Ad Arbitrage: allows secondary ad networks (Monetag/Adsterra) to load while Google/Premium Ads remain 100%% permanently blocked",
+    )
+    parser.add_argument(
         "--ghost-journey",
         action="store_true",
         help="Execute real Google Search navigation, typing jitter, competitor pogo-sticking, and terminal Groundwork satisfaction",
@@ -1419,6 +1463,7 @@ async def main() -> None:
         proxy_url=proxy_url,
         engine=args.engine,
         allow_analytics=args.allow_analytics,
+        allow_secondary_ads=args.allow_secondary_ads,
     )
 
     targets = resolve_simulation_targets(supabase, limit=args.limit, specific_slug=args.slug)

@@ -520,6 +520,7 @@ Return strict JSON matching schema:
                     {
                         "text": text,
                         "model_id": "eleven_multilingual_v2",
+                        "language_code": "en",
                         "voice_settings": {"stability": 0.5, "similarity_boost": 0.8},
                     }
                 ).encode("utf-8")
@@ -536,12 +537,24 @@ Return strict JSON matching schema:
                     f"ElevenLabs TTS synthesis fallback (Quota or Error: {e}). Seamlessly switching to Edge-TTS."
                 )
 
-        # 2. Resilient Edge-TTS Free Neural Engine Fallback
-        comm = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
+        # 2. Resilient Edge-TTS Free Neural Engine Fallback (guaranteed en-US voice)
+        target_voice = voice if voice.startswith("en-") else "en-US-AriaNeural"
+        comm = edge_tts.Communicate(text=text, voice=target_voice, rate=rate, pitch=pitch)
         await comm.save(out_file)
 
     async def render_dialogue_audio(self, script: PodcastScript, output_mp3_path: str) -> tuple[int, str]:
         """Synthesizes all dialogue turns, concatenates with breath gaps, masters to -16 LUFS."""
+        # Strict Linguistic Quarantine: Enforce 100% English-only (Rule §2.10)
+        indonesian_tokens = {"yang", "adalah", "untuk", "dengan", "pada", "dari", "ini", "tidak", "akan"}
+        for t in script.turns:
+            tokens = set(re.findall(r"\b\w+\b", t.text.lower()))
+            common = tokens.intersection(indonesian_tokens)
+            if len(common) >= 2:
+                raise ValueError(
+                    f"Linguistic Quarantine Violation: Detected non-English tokens {common} in turn '{t.speaker}'. "
+                    "Aborting audio generation to enforce 100% English invariant."
+                )
+
         temp_dir = tempfile.mkdtemp(prefix="gw_audio_")
         segment_files = []
 
@@ -744,7 +757,7 @@ Return strict JSON matching schema:
         self,
         article: dict[str, Any],
         generate_video: bool = False,
-        video_format: str = "landscape",
+        video_format: str = "shorts",
         shorts_max_seconds: float | None = None,
     ) -> dict[str, Any] | None:
         slug = article.get("slug")

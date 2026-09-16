@@ -365,7 +365,16 @@ class VideoBroadcaster:
                 "en": {
                     "title": yt_title,
                     "description": description,
-                }
+                },
+                # Explicitly lock Indonesian to English so YouTube never falls back to auto-translating into Indonesian
+                "id": {
+                    "title": yt_title,
+                    "description": description,
+                },
+                "in": {
+                    "title": yt_title,
+                    "description": description,
+                },
             },
             "status": {
                 "privacyStatus": "public",
