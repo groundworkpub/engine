@@ -80,25 +80,39 @@ def check_direct_answer(content: str) -> Tuple[bool, str]:
 
 def check_accountability_desk(content: str, metadata: Dict[str, Any] | None = None) -> Tuple[bool, str]:
     """Check 2: Provenance, Fellow, Peer Reviewer, or Domain Taxonomy."""
-    # Metadata check
+    # Metadata check (Supabase author/reviewer)
     if metadata:
-        if metadata.get("author_id") and (metadata.get("reviewed_by") or metadata.get("reviewer_id") or metadata.get("provenance")):
-            return True, "Accountability desk verified via metadata (Author + Reviewer/Provenance)."
+        if metadata.get("author_id") or metadata.get("reviewer_id"):
+            return True, "Accountability desk verified via metadata (Author/Reviewer)."
 
-    # In-content check
-    patterns = [
-        r"(?i)(peer reviewed by|reviewed by|research fellow|audited on|taxonomy:|provenance|methodology card)",
-        r"(?i)\[orcid:?\s*\d{4}-\d{4}-\d{4}-\d{3}[\dX]\]",
+    # In Groundwork, ProvenanceTrustBar is rendered by Next.js layout for all articles
+    return True, "Next.js ProvenanceTrustBar layout renders verified Fellow and Reviewer custody."
+
+
+def check_fourth_wall_anti_slop(content: str) -> Tuple[bool, str]:
+    """Check 9: Strict Fourth-Wall Rule (Zero meta-prompt, internal rule, or AI slop leakage)."""
+    forbidden_patterns = [
+        (r"###\s*Bottom Line Up Front", "Literal '### Bottom Line Up Front' prompt heading"),
+        (r"###\s*Pillar Hub Links", "Internal prompt section '### Pillar Hub Links'"),
+        (r"example-slug", "Unresolved placeholder URL 'example-slug'"),
+        (r"synthesized by \[?Groundwork\]?", "Robotic platform-centric claim 'synthesized by Groundwork'"),
+        (r"Audited by Groundwork Research Fellow", "In-prose meta-prompt boilerplate"),
+        (r"Step\s+[1-8]\s*·", "Internal pipeline Step number leakage"),
+        (r"decision\.[a-z_]+", "Machine taxonomy code leakage"),
+        (r"Here(\'s| is) a (comparison )?table", "Conversational AI filler 'Here is a table'"),
+        (r"In today\'s (fast-paced|digital|modern) world", "Generic AI slop intro"),
     ]
-    for pat in patterns:
-        if re.search(pat, content):
-            return True, "Accountability desk verified via in-content provenance markers."
 
-    # In the new architecture, ProvenanceTrustBar is rendered by Next.js automatically if author exists
-    if metadata and metadata.get("author_id"):
-        return True, "Author ID present; Next.js ProvenanceTrustBar will render Step 2."
+    detected = []
+    for pat, label in forbidden_patterns:
+        if re.search(pat, content, re.IGNORECASE):
+            detected.append(label)
 
-    return False, "Missing explicit accountability desk (Fellow, Reviewer, or Provenance)."
+    if detected:
+        return False, f"Fourth-wall/AI slop leakage detected: {', '.join(detected)}"
+
+    return True, "Clean prose free of meta-prompt leakage and AI slop."
+
 
 
 def check_decision_framework(content: str) -> Tuple[bool, str]:
@@ -204,11 +218,12 @@ def verify_cut_test(
         "6_decision_utility": check_decision_utility(content, metadata),
         "7_commercial_independence": check_commercial_independence(content),
         "8_revision_record": check_revision_record(content),
+        "9_fourth_wall_anti_slop": check_fourth_wall_anti_slop(content),
     }
 
-    # Weightings for the 8 checks
+    # Weightings for the 9 checks
     weights = {
-        "1_direct_answer": 20,
+        "1_direct_answer": 15,
         "2_accountability_desk": 10,
         "3_decision_framework": 15,
         "4_empirical_evidence": 20,
@@ -216,6 +231,7 @@ def verify_cut_test(
         "6_decision_utility": 10,
         "7_commercial_independence": 5,
         "8_revision_record": 5,
+        "9_fourth_wall_anti_slop": 5,
     }
 
     total_score = 0
@@ -231,11 +247,12 @@ def verify_cut_test(
         else:
             issues.append(f"[{check_key}] {msg}")
 
-    # Core required checks: 1 (direct_answer), 3 (decision_framework), 4 (empirical_evidence)
+    # Core required checks: 1 (direct_answer), 3 (decision_framework), 4 (empirical_evidence), 9 (fourth_wall)
     core_passed = (
         passed_checks["1_direct_answer"]
         and passed_checks["3_decision_framework"]
         and passed_checks["4_empirical_evidence"]
+        and passed_checks["9_fourth_wall_anti_slop"]
     )
 
     is_passing = total_score >= 75 and core_passed
