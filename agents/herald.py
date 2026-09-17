@@ -654,8 +654,18 @@ def publish_to_mastodon(text: str, env: dict[str, str] | None = None) -> dict[st
 
 
 def publish_to_wordpress(article: dict[str, Any], env: dict[str, str] | None = None) -> dict[str, Any]:
-    """Syndicates a 400-500 word summary with canonical header to remote WordPress REST API."""
+    """Syndicates a 400-500 word summary with canonical header to remote WordPress REST API.
+    SSOT: Decommissioned by default to prevent canonical equity dilution and satellite link toxic loops.
+    Only permitted if explicitly enabled via WP_SYNDICATION_ENABLED=true and article has decision utility.
+    """
     creds = _env(env)
+    if creds.get("WP_SYNDICATION_ENABLED", "").lower() not in ("true", "1", "yes"):
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": "WordPress satellite syndication decommissioned per SSOT (prevents canonical equity dilution & toxic backlink loops; set WP_SYNDICATION_ENABLED=true to override)",
+        }
+
     wp_site = creds.get("WP_SITE_URL")
     wp_user = creds.get("WP_USERNAME")
     wp_app_pass = creds.get("WP_APP_PASSWORD")
@@ -821,10 +831,13 @@ def publish_to_buffer(
 
     channels = []
     scheduled_counts: dict[str, int] = {}
+    total_org_queued = 0
     if c_status == 200:
         c_data = c_payload.get("data", {})
         channels = c_data.get("channels", [])
-        for edge in c_data.get("posts", {}).get("edges", []):
+        edges = c_data.get("posts", {}).get("edges", [])
+        total_org_queued = len(edges)
+        for edge in edges:
             ch_id = edge.get("node", {}).get("channelId")
             if ch_id:
                 scheduled_counts[ch_id] = scheduled_counts.get(ch_id, 0) + 1
@@ -833,6 +846,11 @@ def publish_to_buffer(
 
     # If channels are found, schedule to queue for each compatible channel (Twitter/X, Facebook, TikTok)
     if channels:
+        # Buffer Free Plan constraint: Max 10 posts in queue across entire organization
+        if total_org_queued >= 9 and creds.get("BUFFER_SHARE_MODE", "addToQueue") == "addToQueue":
+            logger.warning("Buffer organization queue near capacity (%d/10 queued); skipping social scheduling to protect Free tier limits.", total_org_queued)
+            return {"ok": True, "skipped": True, "reason": f"buffer org queue full ({total_org_queued}/10)"}
+
         post_mutation = """
         mutation CreatePost($input: CreatePostInput!) {
           createPost(input: $input) {
@@ -1303,12 +1321,39 @@ def publish_to_linkedin(
     return {"ok": False, "skipped": False, "error": f"LinkedIn API dual broadcast failed across targets: {targets}"}
 
 
+def _has_decision_utility(article: dict[str, Any]) -> bool:
+    """Checks whether an article contains verified decision utility fixtures.
+
+    SSOT: Amplifying commodity rewrites without interactive tools, comparison tables,
+    or mathematical formulas dilutes domain authority and risks social brand fatigue.
+    """
+    content = str(article.get("content") or "")
+    # 1. Contains interactive tool bridge or calculator link
+    if "/tools/" in content:
+        return True
+    # 2. Contains structured comparison table
+    if re.search(r"\|(?:\s*[-:]+\s*\|)+", content):
+        return True
+    # 3. Contains explicit mathematical formula
+    if any(k in content for k in ("$", "EV =", "ROI =", "break-even", "formula", "dataset")):
+        return True
+    return False
+
+
 # --------------------------------------------------------------------------
 # Dispatch Router
 # --------------------------------------------------------------------------
 def dispatch(article: dict[str, Any], platform: str, env: dict[str, str] | None = None) -> dict[str, Any]:
     """Route one article to its designated platform publisher."""
     env = _env(env)
+
+    # Invariant: Only syndicate articles that offer genuine Decision Utility
+    if not _has_decision_utility(article):
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": "Syndication skipped: article lacks verified Decision Utility fixture (no /tools/ bridge, comparison table, or calculation formula per SSOT)",
+        }
 
     if platform == "bluesky":
         # 5-Part Chained Thread for Bluesky
@@ -1394,7 +1439,7 @@ def _supabase() -> Any:
 
 def _fetch_published_articles(supabase: Any, limit: int, slug: str | None = None) -> list[dict[str, Any]]:
     fetch_limit = limit if slug else max(limit * 5, 25)
-    query = supabase.table("articles").select("slug,title,excerpt,pillar,status,takeaway,image_url,published_at,updated_at")
+    query = supabase.table("articles").select("slug,title,excerpt,pillar,status,takeaway,content,image_url,published_at,updated_at")
     query = query.eq("slug", slug) if slug else query.eq("status", "published").order("published_at", desc=True)
     result = query.limit(fetch_limit).execute()
     return result.data or []

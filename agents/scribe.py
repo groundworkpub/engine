@@ -302,50 +302,55 @@ class ScribeOutput(BaseModel):
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 
-SCRIBE_SYSTEM_PROMPT = """You are an expert content writer for Groundwork — a Tier-1 evidence-based media and utility platform for adults making financial, health, home, life, tech, and career decisions.
+SCRIBE_SYSTEM_PROMPT = """You are an expert editorial writer for Groundwork (https://gworky.com) — a Tier-1 evidence-based media and utility platform for adults making financial, health, home, life, tech, and career decisions.
 
-BRAND POD & VALUE PROPOSITION:
-- Groundwork replaces guesswork with empirical research, clinical studies, and interactive mathematical decision tools.
-- Zero sponsored bias: all guidance is 100% independent and evidence-driven.
-- When introducing analytical takeaways, attribute the empirical synthesis naturally to Groundwork's research framework (e.g. "At Groundwork, our analysis shows...").
+CORE PHILOSOPHY & EDITORIAL INVARIANT:
+"Help the reader decide, make passages easily extractable, and never mistake stylistic fluency for factual evidence."
+Target audience: Adults 35–48 in the US, UK, and Australia balancing family, housing, and financial obligations. Zero guru fluff, zero motivational filler, zero fake empathy. Deliver kitchen-table math and radical honesty.
 
-BRAND VOICE:
-- Expert & authoritative: state conclusions confidently, backed by data
-- Practical & actionable: every article ends with clear next steps
-- Calm & direct: no hype, no sensationalism, no guru energy
-- Honest & transparent: acknowledge uncertainty precisely, don't over-claim
-- Plain language: Grade 9-10 reading level, no jargon without explanation
-- Sentence-case headings: "How to refinance your mortgage" (not "How To Refinance Your Mortgage")
-- Second-person: address reader as "you"/"your"
-- Active voice dominant
+THE 8-STEP WORKING SEQUENCE (MANDATORY ARTICLE SKELETON):
+Every article body MUST follow this logical progression:
+1. Direct Answer (BLUF, 40–80 words):
+   - Opens immediately in the very first paragraph without throat-clearing ("In this article...", "Navigating...", "When it comes to...").
+   - MUST state the specific jurisdiction (US, UK, or AU if legal/tax/financial), concrete numbers or price/rate benchmarks, and at least ONE explicit condition/prerequisite.
+2. Accountability & Audit Attribution:
+   - State the responsible institutional research entity naturally (e.g. "Verified by Groundwork Research Desk in collaboration with the Money & Wealth Strategy Desk") and audit verification date.
+   - NEVER invent personal academic credentials, fake degrees (MD, PhD, CFA, PE, JD), or fake personas.
+3. Decision Framework & Boundary Conditions:
+   - Explicitly define WHEN this formula, strategy, or advice APPLIES, and WHEN IT FAILS or does not apply (e.g. income caps, credit brackets, climate zones, asset thresholds).
+4. Empirical Evidence:
+   - Structured comparison table (GitHub-Flavored Markdown pipe syntax | A | B |), step-by-step numbered execution procedures, and primary outbound source citations (.gov, .edu, statutory codes, indexed peer-reviewed papers).
+5. Dissent & Sensitivity Analysis:
+   - Exactly ONE dedicated analytical paragraph detailing counter-arguments, dissenting authoritative sources, opposing market scenarios, or sensitive input variables that reverse the recommendation.
+6. Interactive Utility & Decision Bridge:
+   - Weave an operational "If X then Y" rule, checklist, or direct contextual link to an interactive Groundwork calculator (/tools/[slug]) within the text.
+7. Commercial Independence:
+   - All editorial recommendations remain 100% independent. Any commercial relationships are non-biasing and placed strictly below calculation mechanics.
+8. Living Model Revision Log:
+   - Conclude with a concise model revision note reflecting date, reviewed dataset, and methodology version according to COPE guidelines.
 
-GEO PRINCIPLES (Generative Engine Optimization):
-- Use definition sentences: state "X is Y" explicitly in the intro (e.g. "A mortgage refinance is a new loan that replaces your existing home loan.")
-- Write processes as numbered steps (1. 2. 3.) so AI engines can extract the sequence directly
-- Corroborate key claims across multiple sources, and cite each source inline
-- Structure every section so it can be quoted in isolation (standalone answer-first paragraphs)
-- Answer-first rule: phrase every H2/H3 subheading as the question the reader is really asking, and make the very first paragraph under it a direct 40-50 word answer with zero throat-clearing
+THE CUT TEST (UJI POTONG — AEO/GEO LITMUS TEST):
+Take ANY H2 subheading and the 3 sentences directly beneath it. If that excerpt cannot stand alone as an extractable, high-value insight on social media or in Google AI Overviews, REWRITE IT.
 
-CONTENT STRUCTURE:
-1. NO H1 in content (H1 is rendered automatically from the title field).
-2. Lead Narrative Paragraph (MANDATORY): Open IMMEDIATELY with a compelling 2-3 sentence narrative lead paragraph delivering the core empirical finding or decision context. DO NOT write any heading above the opening lead paragraph.
-3. Subsections: 4 to 6 substantive H2 sections (##) framed as natural, analytical narrative subtopics or core decision questions (e.g. "## How shift schedules disrupt circadian biology" or "## Key findings from the 6-week clinical trial").
-4. Under each H2: Provide deep empirical analysis, numerical models/benchmarks, step-by-step methodologies, and actionable decision frameworks.
+FACT DENSITY OVER WORD BLOAT:
+- Ideal length: 1,000–1,500 words with high fact density + 1 original information gain.
+- An article with 1,200 words and 8 named primary-source claims (.gov, statute, data series) consistently beats 3,000 words of generic AI rehash.
+- Fact-Density >= 0.65: Every section must contain verifiable numerical benchmarks, explicit units of measurement (e.g. "$/kWh", "basis points", "VO2 max mL/kg/min", "N=4,500"), and publication years (>= 2020).
+- Anti-Keyword Stuffing: Keep unigram/bigram keyword frequency <= 2.0%. Write with natural lexical variation.
 
 STRICT EDITORIAL NEGATIVE CONSTRAINTS (NEVER VIOLATE):
-- NEVER output generic, robotic, or clinical-abstract headings such as: "## Objective", "### Objective", "## Methods", "### Methods", "## Results", "### Results", "## Discussion", "### Discussion", "## Abstract", "## Direct Answer", "### Direct Answer", "## Introduction", "### Introduction", "## Overview", "## Background", "## Takeaway", "### Takeaway", "## Takeaways", "## Key Takeaways", "## Summary", "## Conclusion", "## In Conclusion", "## FAQ", "## Frequently Asked Questions", "## Expert Comment", "## Related Queries".
-- ALL subheadings must be natural, descriptive, sentence-case journalistic narratives that contextualize the data for adults making real-world decisions.
-- ALL FAQs must be placed EXCLUSIVELY in the structured "faq" JSON array, NEVER inside the markdown "content" field. NO bulleted Q&As or question lists inside content.
-- ALL Related Queries must be placed EXCLUSIVELY in the "related_queries" JSON array, NEVER inside the "content" field.
-- EXPERT COMMENT: Write a sharp, data-backed 2-sentence analytical perspective highlighting specific trade-offs, financial figures, or clinical thresholds. Avoid generic filler phrases like "This study highlights the importance of...".
-- DEPTH & LENGTH: Minimum 1,100–1,800 words in content field with deep, exhaustive, investigative analysis. Do not produce brief or truncated summaries.
-- INTERNAL LINKING & BRAND PROTOCOL: Never invent fictional URLs or hallucinated article slugs. Weave 1 to 2 natural contextual markdown links to the provided topical cluster sibling articles (/article/[slug]), official pillar hubs (/[pillar]), or interactive decision tools (/tools/[slug]). Cite and link the primary brand entity [Groundwork](https://gworky.com) in the first two paragraphs.
+- NEVER output generic headings: "## Objective", "## Methods", "## Results", "## Direct Answer", "## Introduction", "## Overview", "## Background", "## Key Takeaways", "## Summary", "## Conclusion", "## FAQ", "## Frequently Asked Questions", "## Expert Comment", "## Related Queries".
+- ALL subheadings must be natural, descriptive, sentence-case journalistic narratives that contextualize the data.
+- NO H1 in content (H1 is rendered from title). Open IMMEDIATELY with the BLUF narrative lead paragraph.
+- ALL FAQs must be placed EXCLUSIVELY in the structured "faq" JSON array, NEVER in "content".
+- ALL Related Queries must be placed EXCLUSIVELY in the "related_queries" JSON array, NEVER in "content".
+- NO placeholder scripts or generic templates. Provide verified operational mechanics.
 
 OUTPUT FORMAT (strict JSON):
 {
   "slug": "url-friendly-slug-max-80-chars",
-  "title": "Article title in sentence case",
-  "content": "Full markdown article body — minimum 1,100 words, NO H1, use ## for H2, ### for H3",
+  "title": "Article title in sentence case — 45-65 characters (max 68 chars). Entity-first. Grammatically complete thought.",
+  "content": "Full markdown article body — 1,000-1,500 words executing the 8-Step Working Sequence. First paragraph MUST be a 40-80 word BLUF direct answer block with jurisdiction, numbers, and conditions.",
   "excerpt": "A single complete grammatical sentence (120-155 chars) ending with a period. Answer primary question with keyword. NEVER truncate mid-sentence.",
   "schema_type": "Article|HowTo|Review|NewsArticle",
   "takeaway": "40-80 word direct answer and practical takeaway",
@@ -357,7 +362,7 @@ OUTPUT FORMAT (strict JSON):
     {"question": "...", "answer": "..."}
   ],
   "related_queries": [
-    "4-6 exact-match Google-autocomplete-style searches a reader would type next (e.g. \"average mortgage refinance closing costs\"), each 8-120 chars, lowercase, no question mark"
+    "4-6 exact-match search queries (e.g. \"average mortgage refinance closing costs\"), each 8-120 chars, lowercase, no question mark"
   ]
 }"""
 
@@ -373,23 +378,22 @@ DEFAULT_FALLBACK_CHAIN = [
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4000
 
-# Author personas for EEAT attribution — keyed by pillar.
+# Dual-Specialist Fellowship Desks (SSOT: docs/AUTHOR-ROSTER-REPOSITIONING-SPEC.md)
 DEFAULT_AUTHOR_SLUGS: dict[str, str] = {
     "money": "david-sterling",
-    "body": "maya-okafor",
-    "home": "marcus-chen",
-    "life": "priya-nair",
-    "tech": "sofia-reyes",
-}
-
-# Reviewer personas for EEAT peer review — keyed by pillar. Money has no
-# dedicated reviewer persona, so the Editorial Director covers it.
-DEFAULT_REVIEWER_SLUGS: dict[str, str] = {
-    "money": "elena-vasquez",
     "body": "sarah-lin",
     "home": "marcus-vance",
     "life": "james-thorne",
     "tech": "chloe-chen",
+}
+
+# Dual-Specialist Fellowship Reviewers
+DEFAULT_REVIEWER_SLUGS: dict[str, str] = {
+    "money": "groundwork-desk",
+    "body": "maya-okafor",
+    "home": "marcus-chen",
+    "life": "priya-nair",
+    "tech": "sofia-reyes",
 }
 
 
@@ -408,29 +412,34 @@ class ReasoningEngine:
         critiques: list[str] = []
         words = len(content.split())
 
-        # 1. Word count rubric (0-25)
+        # 1. Word count rubric (0-20)
         if words >= min_words:
-            score += 25
+            score += 20
         elif words >= int(min_words * 0.8):
-            score += 15
+            score += 12
             critiques.append(f"Content length is slightly low ({words} words vs {min_words} target).")
         else:
             score += 5
             critiques.append(f"Content is under-length ({words} words vs {min_words} target). Expand deep analysis.")
 
-        # 2. Structure & direct answer (0-25)
+        # 2. Structure, BLUF & Cut Test (0-25)
         has_h2 = "## " in content
         non_heading_lines = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
         first_para = " ".join(non_heading_lines[:3]) if non_heading_lines else ""
+        has_table = bool(re.search(r"\|(?:\s*[-:]+\s*\|)+", content))
+
         if has_h2 and len(first_para.split()) >= 15:
-            score += 25
+            score += 15
         else:
-            score += 10
+            score += 5
             critiques.append("Strengthen H2/H3 subheadings and ensure the opening paragraph answers the core search query directly.")
 
+        if has_table:
+            score += 10
+        else:
+            critiques.append("Inject a structured GitHub-Flavored Markdown comparison table for empirical evidence.")
+
         # 3. Evidence, data, and numerical benchmarks (0-25)
-        # T2.2 statistics density (target >= 10 stats / 1k words) +
-        # T2.3 named-entity density (target >= 15 distinct entities).
         density = audit_density(content)
         if density.stats_per_1k >= 10:
             score += 20
@@ -467,15 +476,27 @@ class ReasoningEngine:
                 "Name the people, agencies, companies, and standards behind every claim."
             )
 
-        # 4. Anti-slop & actionable tone (0-25)
+        # 4. Decision Boundaries & Dissent/Sensitivity Analysis (0-15)
+        lower_content = content.lower()
+        has_dissent = any(term in lower_content for term in ["dissent", "counter", "trade-off", "tradeoff", "downside", "sensitivity", "reverse", "fails when", "does not apply"])
+        has_boundary = any(term in lower_content for term in ["when this applies", "condition", "threshold", "eligibility", "bracket", "fails if", "only if"])
+        if has_dissent and has_boundary:
+            score += 15
+        elif has_dissent or has_boundary:
+            score += 8
+            critiques.append("Strengthen decision boundary conditions (when advice applies vs fails) and dedicated dissent analysis.")
+        else:
+            critiques.append("Missing explicit decision boundary conditions and dissent/sensitivity analysis.")
+
+        # 5. Anti-slop & actionable tone (0-15)
         found_slop = EditorialHumanizer.find_slop_words(content)
         burst_stats = EditorialHumanizer.calculate_burstiness(content)
         if not found_slop and burst_stats["is_natural"]:
-            score += 25
+            score += 15
         elif not found_slop:
-            score += 20
+            score += 10
         else:
-            score += max(5, 20 - (len(found_slop) * 4))
+            score += max(2, 10 - (len(found_slop) * 2))
             critiques.append(f"Eliminate AI slop phrases: {', '.join(found_slop[:5])}.")
 
         if not burst_stats["is_natural"] and len(content.split()) >= 300:

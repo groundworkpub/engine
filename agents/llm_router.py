@@ -78,11 +78,10 @@ HUGGINGFACE_MODELS = [
 ]
 
 GEMINI_MODELS = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.6-flash",
+    "gemini-flash-latest",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-flash-lite-latest",
-    "gemini-3.1-flash-lite-preview",
 ]
 
 
@@ -95,7 +94,10 @@ class LLMRouter:
         self.cf_key = os.getenv("CLOUDFLARE_GLOBAL_API_KEY")
         self.gateway_id = os.getenv("CLOUDFLARE_GATEWAY_ID")  # AI Gateway E3
         self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        self.groq_key = os.getenv("GROQ_API_KEY")
+        raw_groq = os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY") or ""
+        self.groq_keys = [k.strip() for k in raw_groq.split(",") if k.strip()]
+        self.groq_key = self.groq_keys[0] if self.groq_keys else None
+        self._groq_key_idx = 0
         self.gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
         self.failed_providers: dict[str, float] = {}  # provider_name -> cooloff_until_timestamp
@@ -206,10 +208,11 @@ class LLMRouter:
     def _call_groq(
         self,
         messages: list[dict[str, str]],
-        model: str = "llama-3.3-70b-versatile",
+        model: str = "qwen/qwen3.8-27b",
         max_tokens: int = 4096,
     ) -> str | None:
-        if not self.groq_key:
+        keys_to_try = self.groq_keys if self.groq_keys else ([self.groq_key] if self.groq_key else [])
+        if not keys_to_try:
             return None
 
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -220,25 +223,31 @@ class LLMRouter:
             "temperature": 0.7,
         }).encode()
 
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self.groq_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=25) as resp:
-                data = json.loads(resp.read().decode())
-                choices = data.get("choices", [])
-                if choices:
-                    return choices[0].get("message", {}).get("content", "")
-                return None
-        except Exception as e:
-            logger.warning(f"Groq API ({model}) failed: {e}")
-            return None
+        num_keys = len(keys_to_try)
+        start_idx = self._groq_key_idx
+        self._groq_key_idx = (self._groq_key_idx + 1) % num_keys
+
+        for i in range(num_keys):
+            gkey = keys_to_try[(start_idx + i) % num_keys]
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {gkey}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode())
+                    choices = data.get("choices", [])
+                    if choices:
+                        return choices[0].get("message", {}).get("content", "")
+            except Exception as e:
+                logger.warning(f"Groq API ({model}) with key {gkey[:10]}... failed: {e}. Trying next key...")
+                continue
+        return None
 
     # ─── Provider 3: OpenRouter Dynamic Rotator ──────────────────────────────
 
@@ -383,10 +392,14 @@ class LLMRouter:
         max_tokens: int = 4096,
         temperature: float = 0.7,
         time_budget_s: float = 240.0,
+        prefer_provider: str | None = None,
     ) -> str | None:
         """Execute resilient inference query through multi-tier pool with automatic failover."""
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
+
+        if prefer_provider is None:
+            prefer_provider = os.getenv("PRIMARY_LLM_PROVIDER", "groq")
 
         start_time = time.time()
         deadline = start_time + time_budget_s
@@ -400,125 +413,119 @@ class LLMRouter:
                 return True
             return False
 
-        # 0. Tier 0: Cloudflare AI Gateway (E3) — observability-first tap
-        #    Routes ANY upstream (Workers AI / OpenRouter / Groq) through one
-        #    gateway URL for logging, caching, and fallback handled centrally.
-        if self._is_provider_healthy("ai_gateway") and self.gateway_id:
-            for gw_model in CLOUDFLARE_MODELS:
-                if exhausted():
-                    return None
-                raw_out = self._call_with_deadline(
-                    lambda m=gw_model: self._call_ai_gateway(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via AI Gateway ({gw_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("ai_gateway", 120)
+        def _try_groq() -> str | None:
+            if self._is_provider_healthy("groq_api") and (self.groq_keys or self.groq_key):
+                for g_model in GROQ_MODELS:
+                    if exhausted():
+                        return None
+                    logger.info(f"Attempting inference with Groq: {g_model}")
+                    raw = self._call_with_deadline(
+                        lambda m=g_model: self._call_groq(messages, model=m, max_tokens=max_tokens),
+                        deadline_s=remaining(),
+                    )
+                    if raw and len(raw.strip()) > 10:
+                        latency = round(time.time() - start_time, 2)
+                        logger.info(f"Inference succeeded via Groq ({g_model}) in {latency}s.")
+                        return raw
+                self._trip_circuit_breaker("groq_api", 120)
+            return None
 
-        # 1. Tier 1: Cloudflare Workers AI Primary
-        if self._is_provider_healthy("cloudflare_ai"):
-            for cf_model in CLOUDFLARE_MODELS:
-                if exhausted():
-                    return None
-                logger.info(f"Attempting inference with Cloudflare AI: {cf_model}")
-                raw_out = self._call_with_deadline(
-                    lambda m=cf_model: self._call_cloudflare_ai(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via Cloudflare AI ({cf_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("cloudflare_ai", 120)
+        def _try_gemini() -> str | None:
+            if self._is_provider_healthy("gemini_api") and self.gemini_key:
+                for g_model in GEMINI_MODELS:
+                    if exhausted():
+                        return None
+                    logger.info(f"Attempting inference with Google Gemini: {g_model}")
+                    raw = self._call_with_deadline(
+                        lambda m=g_model: self._call_gemini(messages, model=m, max_tokens=max_tokens),
+                        deadline_s=remaining(),
+                    )
+                    if raw and len(raw.strip()) > 10:
+                        latency = round(time.time() - start_time, 2)
+                        logger.info(f"Inference succeeded via Gemini API ({g_model}) in {latency}s.")
+                        return raw
+                self._trip_circuit_breaker("gemini_api", 180)
+            return None
 
-        # 2. Tier 2: Groq Direct API Primary
-        if self._is_provider_healthy("groq_api") and self.groq_key:
-            for g_model in GROQ_MODELS:
-                if exhausted():
-                    return None
-                logger.info(f"Attempting inference with Groq: {g_model}")
-                raw_out = self._call_with_deadline(
-                    lambda m=g_model: self._call_groq(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via Groq ({g_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("groq_api", 120)
+        def _try_cloudflare() -> str | None:
+            if self._is_provider_healthy("ai_gateway") and self.gateway_id:
+                for gw_model in CLOUDFLARE_MODELS:
+                    if exhausted():
+                        return None
+                    raw = self._call_with_deadline(
+                        lambda m=gw_model: self._call_ai_gateway(messages, model=m, max_tokens=max_tokens),
+                        deadline_s=remaining(),
+                    )
+                    if raw and len(raw.strip()) > 10:
+                        latency = round(time.time() - start_time, 2)
+                        logger.info(f"Inference succeeded via AI Gateway ({gw_model}) in {latency}s.")
+                        return raw
+                self._trip_circuit_breaker("ai_gateway", 120)
 
-        # 3. Tier 3: OpenRouter Free Model Dynamic Rotator
-        if self._is_provider_healthy("openrouter_free") and self.openrouter_key:
-            shuffled_models = list(OPENROUTER_FREE_MODELS)
-            random.shuffle(shuffled_models)
+            if self._is_provider_healthy("cloudflare_ai"):
+                for cf_model in CLOUDFLARE_MODELS:
+                    if exhausted():
+                        return None
+                    logger.info(f"Attempting inference with Cloudflare AI: {cf_model}")
+                    raw = self._call_with_deadline(
+                        lambda m=cf_model: self._call_cloudflare_ai(messages, model=m, max_tokens=max_tokens),
+                        deadline_s=remaining(),
+                    )
+                    if raw and len(raw.strip()) > 10:
+                        latency = round(time.time() - start_time, 2)
+                        logger.info(f"Inference succeeded via Cloudflare AI ({cf_model}) in {latency}s.")
+                        return raw
+                self._trip_circuit_breaker("cloudflare_ai", 120)
+            return None
 
-            for or_model in shuffled_models:
-                if exhausted():
-                    return None
-                logger.info(f"Attempting failover inference with OpenRouter: {or_model}")
-                raw_out = self._call_with_deadline(
-                    lambda m=or_model: self._call_openrouter(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via OpenRouter ({or_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("openrouter_free", 180)
+        def _try_openrouter() -> str | None:
+            if self._is_provider_healthy("openrouter_free") and self.openrouter_key:
+                shuffled_models = list(OPENROUTER_FREE_MODELS)
+                random.shuffle(shuffled_models)
+                for or_model in shuffled_models:
+                    if exhausted():
+                        return None
+                    logger.info(f"Attempting failover inference with OpenRouter: {or_model}")
+                    raw = self._call_with_deadline(
+                        lambda m=or_model: self._call_openrouter(messages, model=m, max_tokens=max_tokens),
+                        deadline_s=remaining(),
+                    )
+                    if raw and len(raw.strip()) > 10:
+                        latency = round(time.time() - start_time, 2)
+                        logger.info(f"Inference succeeded via OpenRouter ({or_model}) in {latency}s.")
+                        return raw
+                self._trip_circuit_breaker("openrouter_free", 180)
+            return None
 
-        # 3b. Tier 3b: Hugging Face Serverless Inference (Free $0 Hub Provider)
-        if self._is_provider_healthy("huggingface_api") and self.hf_token:
-            for hf_model in HUGGINGFACE_MODELS:
-                if exhausted():
-                    return None
-                logger.info(f"Attempting inference with Hugging Face: {hf_model}")
-                raw_out = self._call_with_deadline(
-                    lambda m=hf_model: self._call_huggingface(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via Hugging Face ({hf_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("huggingface_api", 180)
+        def _try_huggingface() -> str | None:
+            if self._is_provider_healthy("huggingface_api") and self.hf_token:
+                for hf_model in HUGGINGFACE_MODELS:
+                    if exhausted():
+                        return None
+                    logger.info(f"Attempting inference with Hugging Face: {hf_model}")
+                    raw = self._call_with_deadline(
+                        lambda m=hf_model: self._call_huggingface(messages, model=m, max_tokens=max_tokens),
+                        deadline_s=remaining(),
+                    )
+                    if raw and len(raw.strip()) > 10:
+                        latency = round(time.time() - start_time, 2)
+                        logger.info(f"Inference succeeded via Hugging Face ({hf_model}) in {latency}s.")
+                        return raw
+                self._trip_circuit_breaker("huggingface_api", 180)
+            return None
 
-        # 4. Tier 4: OpenRouter Paid — OPT-IN ONLY via ALLOW_PAID_LLM=1 ($0 constraint)
-        if (
-            os.getenv("ALLOW_PAID_LLM") == "1"
-            and self._is_provider_healthy("openrouter_paid")
-            and self.openrouter_key
-        ):
-            for paid_model in OPENROUTER_PAID_MODELS:
-                if exhausted():
-                    return None
-                logger.info(f"Attempting high-reliability fallback inference with OpenRouter: {paid_model}")
-                raw_out = self._call_with_deadline(
-                    lambda m=paid_model: self._call_openrouter(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via OpenRouter Paid Fallback ({paid_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("openrouter_paid", 180)
+        # Build order based on preference (Groq primary by default as agreed in architecture)
+        if prefer_provider == "groq":
+            tiers = [_try_groq, _try_gemini, _try_cloudflare, _try_openrouter, _try_huggingface]
+        else:
+            tiers = [_try_cloudflare, _try_groq, _try_openrouter, _try_huggingface, _try_gemini]
 
-        # 5. Tier 5: Google Gemini Direct API (Official AQ-Key Integration)
-        if self._is_provider_healthy("gemini_api") and self.gemini_key:
-            for g_model in GEMINI_MODELS:
-                if exhausted():
-                    return None
-                logger.info(f"Attempting inference with Google Gemini: {g_model}")
-                raw_out = self._call_with_deadline(
-                    lambda m=g_model: self._call_gemini(messages, model=m, max_tokens=max_tokens),
-                    deadline_s=remaining(),
-                )
-                if raw_out and len(raw_out.strip()) > 10:
-                    latency = round(time.time() - start_time, 2)
-                    logger.info(f"Inference succeeded via Gemini API ({g_model}) in {latency}s.")
-                    return raw_out
-            self._trip_circuit_breaker("gemini_api", 180)
+        for tier_fn in tiers:
+            if exhausted():
+                break
+            res = tier_fn()
+            if res:
+                return res
 
         logger.error("All LLM providers in the multi-tier pool failed or were rate-limited.")
         return None
@@ -622,9 +629,10 @@ def call_llm(
     messages: list[dict[str, str]] | str,
     response_format: Literal["text", "json"] = "text",
     max_tokens: int = 4096,
+    prefer_provider: str | None = None,
 ) -> str | None:
     """Convenience helper function for agent pipeline."""
-    return router.generate(messages, response_format=response_format, max_tokens=max_tokens)
+    return router.generate(messages, response_format=response_format, max_tokens=max_tokens, prefer_provider=prefer_provider)
 
 
 def call_llm_json(

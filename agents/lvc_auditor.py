@@ -28,13 +28,16 @@ try:
 except ImportError:
     textstat = None
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from agents.density import COMPILED_STAT_PATTERNS
 from agents.llm_router import call_llm_json
+from agents.cut_test_validator import verify_cut_test
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("lvc_auditor")
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load_env_local() -> None:
@@ -457,18 +460,25 @@ ARTICLE CONTENT:
                 data_injection_directives=["Inject specific numeric units and primary source citations"],
             )
 
+        cut_test_res = verify_cut_test(content, title=title, pillar=pillar)
         wc_score = min(30.0, (heuristics["word_count"] / 1000.0) * 30.0)
         table_score = 25.0 if heuristics["has_markdown_table"] else 10.0
         fid_score = max(5.0, (1.0 - heuristics["fid"]) * 25.0)
         ig_score = min(20.0, max(5.0, ig * 40.0))
 
-        overall = round(min(100.0, wc_score + table_score + fid_score + ig_score), 1)
-        if overall >= 85.0 and heuristics["has_markdown_table"] and heuristics["fid"] <= 0.65 and ig >= 0.20:
+        heuristic_base = min(100.0, wc_score + table_score + fid_score + ig_score)
+        overall = round(heuristic_base * 0.5 + cut_test_res["score"] * 0.5, 1)
+
+        if overall >= 85.0 and heuristics["has_markdown_table"] and heuristics["fid"] <= 0.65 and ig >= 0.20 and cut_test_res["passed"]:
             verdict = "PASS"
-        elif overall >= 70.0:
+        elif overall >= 70.0 and cut_test_res["core_passed"]:
             verdict = "CONDITIONAL_PASS"
         else:
             verdict = "REJECT"
+
+        combined_directives = list(cut_test_res.get("issues", []))
+        if not heuristics["has_markdown_table"]:
+            combined_directives.append("Inject Markdown comparison table with quantitative metrics")
 
         return AuditResult(
             target_url=url,
@@ -481,12 +491,12 @@ ARTICLE CONTENT:
                 DimensionScore(dimension="Information Gain & Novelty", weight=0.30, score=round(min(100.0, ig_score * 5.0), 1), observation=f"Computed IG: {ig}"),
                 DimensionScore(dimension="Fluff Density & AI Artifacts", weight=0.25, score=round((1.0 - heuristics["fid"]) * 100, 1), observation=f"FID: {heuristics['fid']}"),
                 DimensionScore(dimension="E-E-A-T Entity Anchoring", weight=0.20, score=80.0 if heuristics["verifiable_sentence_ratio"] >= 0.25 else 60.0, observation=f"Verifiable ratio: {heuristics['verifiable_sentence_ratio']}"),
-                DimensionScore(dimension="Answer Velocity", weight=0.15, score=80.0, observation="BLUF present"),
+                DimensionScore(dimension="Answer Velocity", weight=0.15, score=85.0 if cut_test_res["passed_checks"].get("1_direct_answer") else 40.0, observation="Cut Test BLUF check"),
                 DimensionScore(dimension="MFA & Structural Footprint", weight=0.10, score=90.0 if heuristics["has_markdown_table"] else 50.0, observation="Tabular structure evaluated"),
             ],
             critical_flaws=[],
             structural_pruning_targets=[],
-            data_injection_directives=[] if heuristics["has_markdown_table"] else ["Inject Markdown comparison table"],
+            data_injection_directives=combined_directives,
         )
 
     def audit_supabase_slug(self, slug: str) -> AuditResult:
@@ -511,6 +521,107 @@ ARTICLE CONTENT:
             url=f"https://gworky.com/article/{slug}",
         )
 
+    def batch_triage(self, limit: int = 50, pillar: str | None = None, enqueue: bool = False) -> dict[str, Any]:
+        """Triage published articles into Tier A, Tier B, and Tier C.
+
+        - Tier A (Quarantine / Full Rewrite): thin (<700 words), high fluff, no tables.
+        - Tier B (Elevation): 700-1000 words, missing tables or primary citations.
+        - Tier C (Pass): Solid quality (>= 1000 words), low fluff, verified comparison table.
+        """
+        if not self.supabase_url or not self.supabase_key:
+            raise ValueError("Supabase environment variables missing.")
+
+        url = f"{self.supabase_url}/rest/v1/articles"
+        params: dict[str, str] = {
+            "select": "id,slug,title,pillar,content,status,published_at",
+            "status": "eq.published",
+            "order": "published_at.desc",
+            "limit": str(limit),
+        }
+        if pillar and pillar != "all":
+            params["pillar"] = f"eq.{pillar}"
+
+        res = self.client.get(url, headers=HEADERS, params=params)
+        res.raise_for_status()
+        articles = res.json()
+
+        tier_a_quarantine: list[dict[str, Any]] = []
+        tier_b_elevate: list[dict[str, Any]] = []
+        tier_c_pass: list[dict[str, Any]] = []
+
+        for art in articles:
+            slug = art.get("slug") or ""
+            content = art.get("content") or ""
+            title = art.get("title") or ""
+            art_pillar = art.get("pillar") or "money"
+
+            audit = self.audit_text_quick(content=content, title=title, pillar=art_pillar, slug=slug)
+            heuristics = compute_nlp_heuristics(content)
+
+            summary = {
+                "slug": slug,
+                "title": title,
+                "pillar": art_pillar,
+                "score": audit.overall_quality_score,
+                "word_count": int(heuristics["word_count"]),
+                "fid": heuristics["fid"],
+                "has_table": bool(heuristics["has_markdown_table"]),
+                "verdict": audit.verdict,
+            }
+
+            if heuristics["word_count"] < 700 or (heuristics["fid"] > 0.65 and not heuristics["has_markdown_table"]):
+                summary["reason"] = "full_rewrite: Tier A thin content"
+                tier_a_quarantine.append(summary)
+            elif audit.overall_quality_score < 80.0 or not heuristics["has_markdown_table"]:
+                summary["reason"] = "elevation: Tier B needs GFM table"
+                tier_b_elevate.append(summary)
+            else:
+                tier_c_pass.append(summary)
+
+        enqueued_count = 0
+        if enqueue:
+            queue_items = []
+            for item in tier_a_quarantine:
+                queue_items.append({
+                    "url": f"https://gworky.com/article/{item['slug']}",
+                    "slug": item["slug"],
+                    "asset_type": "article",
+                    "status": "queued",
+                    "reason": item["reason"],
+                })
+            for item in tier_b_elevate:
+                queue_items.append({
+                    "url": f"https://gworky.com/article/{item['slug']}",
+                    "slug": item["slug"],
+                    "asset_type": "article",
+                    "status": "queued",
+                    "reason": item["reason"],
+                })
+
+            if queue_items:
+                q_url = f"{self.supabase_url}/rest/v1/seo_refresh_queue"
+                q_headers = {
+                    **HEADERS,
+                    "Prefer": "resolution=merge-duplicates,return=representation",
+                }
+                q_res = self.client.post(q_url, headers=q_headers, json=queue_items)
+                if q_res.is_success:
+                    enqueued_count = len(q_res.json())
+                    logger.info("Successfully enqueued %d items to seo_refresh_queue", enqueued_count)
+                else:
+                    logger.error("Failed to enqueue items: %s %s", q_res.status_code, q_res.text)
+
+        return {
+            "total_audited": len(articles),
+            "tier_a_quarantine_count": len(tier_a_quarantine),
+            "tier_b_elevate_count": len(tier_b_elevate),
+            "tier_c_pass_count": len(tier_c_pass),
+            "enqueued_count": enqueued_count,
+            "tier_a_quarantine": tier_a_quarantine,
+            "tier_b_elevate": tier_b_elevate,
+            "tier_c_pass": tier_c_pass,
+        }
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LVC-AUDITOR: Low-Value Content Compliance Engine")
@@ -518,16 +629,48 @@ def main() -> None:
     parser.add_argument("--file", type=str, help="Path to local text/markdown file to audit")
     parser.add_argument("--title", type=str, default="Audit Target", help="Title of article")
     parser.add_argument("--pillar", type=str, default="money", help="Pillar domain")
+    parser.add_argument("--batch-triage", action="store_true", help="Run batch corpus triage on published Supabase articles")
+    parser.add_argument("--limit", type=int, default=50, help="Number of articles to audit in batch mode")
+    parser.add_argument("--enqueue", action="store_true", help="Enqueue Tier A/B candidates to seo_refresh_queue")
     parser.add_argument("--json", action="store_true", help="Output raw JSON format")
     args = parser.parse_args()
 
     auditor = LVCAuditor()
 
-    if args.slug:
+    if args.batch_triage:
+        logger.info("Running Batch Corpus Triage on latest %d published articles (pillar=%s, enqueue=%s)...", args.limit, args.pillar, args.enqueue)
+        triage_report = auditor.batch_triage(limit=args.limit, pillar=args.pillar if args.pillar != "money" or "--pillar" in sys.argv else None, enqueue=args.enqueue)
+        if args.json:
+            print(json.dumps(triage_report, indent=2))
+        else:
+            logger.info("================ CORPUS TRIAGE REPORT ================")
+            logger.info("Total Audited: %d", triage_report["total_audited"])
+            logger.info("Tier C (Passing - High Value): %d", triage_report["tier_c_pass_count"])
+            logger.info("Tier B (Elevation Candidates): %d", triage_report["tier_b_elevate_count"])
+            logger.info("Tier A (Quarantine / Low Value): %d", triage_report["tier_a_quarantine_count"])
+            if args.enqueue:
+                logger.info("Enqueued into seo_refresh_queue: %d", triage_report["enqueued_count"])
+            if triage_report["tier_a_quarantine"]:
+                logger.info("--- TIER A SAMPLES (Needs Quarantine/Rewrite) ---")
+                for s in triage_report["tier_a_quarantine"][:5]:
+                    logger.info(" [!] %s: %d words, FID: %.2f, score: %.1f", s["slug"], s["word_count"], s["fid"], s["score"])
+            if triage_report["tier_b_elevate"]:
+                logger.info("--- TIER B SAMPLES (Needs Table / Math Injection) ---")
+                for s in triage_report["tier_b_elevate"][:5]:
+                    logger.info(" [*] %s: %d words, table: %s, score: %.1f", s["slug"], s["word_count"], s["has_table"], s["score"])
+    elif args.slug:
         result = auditor.audit_supabase_slug(args.slug)
+        if args.json:
+            print(result.model_dump_json(indent=2))
+        else:
+            _print_audit_result(result)
     elif args.file:
         content = Path(args.file).read_text(encoding="utf-8")
         result = auditor.audit_text(content=content, title=args.title, pillar=args.pillar)
+        if args.json:
+            print(result.model_dump_json(indent=2))
+        else:
+            _print_audit_result(result)
     else:
         logger.info("No target specified. Running heuristic test on benchmark sample...")
         sample_good = """## Quick Answer (BLUF)
@@ -542,21 +685,24 @@ For a 30-year fixed mortgage, refinancing is mathematically justified when the p
 
 According to Federal Reserve Economic Data (FRED 30-Year Mortgage Series MORTGAGE30US) and CFPB closing fee disclosure benchmarks, loan origination charges average 1.2% of principal."""
         result = auditor.audit_text(content=sample_good, title="Mortgage Refinance Break-Even Analysis 2026", pillar="money")
+        if args.json:
+            print(result.model_dump_json(indent=2))
+        else:
+            _print_audit_result(result)
 
-    if args.json:
-        print(result.model_dump_json(indent=2))
-    else:
-        logger.info("================ AUDIT RESULT ================")
-        logger.info("Target: %s", result.target_slug or result.target_url or "Direct Text")
-        logger.info("Verdict: %s (Score: %.1f / 100)", result.verdict, result.overall_quality_score)
-        logger.info("Estimated Fluff: %.1f%% | Information Gain: %s", result.estimated_fluff_percentage, result.information_gain_classification)
-        logger.info("Dimension Breakdown:")
-        for dim in result.dimension_breakdown:
-            logger.info(" - %-32s: %5.1f (Weight: %.2f) | %s", dim.dimension, dim.score, dim.weight, dim.observation)
-        if result.critical_flaws:
-            logger.info("Critical Flaws (%d):", len(result.critical_flaws))
-            for flaw in result.critical_flaws:
-                logger.info(" [!] [%s] %s: %s", flaw.severity, flaw.flaw_type, flaw.remediation_directive)
+
+def _print_audit_result(result: AuditResult) -> None:
+    logger.info("================ AUDIT RESULT ================")
+    logger.info("Target: %s", result.target_slug or result.target_url or "Direct Text")
+    logger.info("Verdict: %s (Score: %.1f / 100)", result.verdict, result.overall_quality_score)
+    logger.info("Estimated Fluff: %.1f%% | Information Gain: %s", result.estimated_fluff_percentage, result.information_gain_classification)
+    logger.info("Dimension Breakdown:")
+    for dim in result.dimension_breakdown:
+        logger.info(" - %-32s: %5.1f (Weight: %.2f) | %s", dim.dimension, dim.score, dim.weight, dim.observation)
+    if result.critical_flaws:
+        logger.info("Critical Flaws (%d):", len(result.critical_flaws))
+        for flaw in result.critical_flaws:
+            logger.info(" [!] [%s] %s: %s", flaw.severity, flaw.flaw_type, flaw.remediation_directive)
 
 
 if __name__ == "__main__":
