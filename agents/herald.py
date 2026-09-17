@@ -774,14 +774,78 @@ def publish_to_twitter(text: str, env: dict[str, str] | None = None) -> dict[str
     return {"ok": False, "status": status, "error": err_detail}
 
 
+def _verify_reachable_media(url: str | None, timeout: float = 3.5) -> bool:
+    """Performs a fast HTTP HEAD request to ensure an image/video URL returns HTTP 200 before Buffer ingestion."""
+    if not url or not url.startswith("http"):
+        return False
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            url,
+            method="HEAD",
+            headers={"User-Agent": "GroundworkAssetVerifier/1.0 (+https://gworky.com)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status in (200, 204, 206)
+    except Exception:
+        return False
+
+
+def _resolve_safe_social_image(article: dict[str, Any] | None, is_podcast: bool = False) -> str:
+    """Resolves a guaranteed reachable image URL for social platforms.
+    Falls back dynamically to verified assets (podcast-og.png or cover.png) instead of 404s.
+    """
+    if article:
+        candidates = []
+        if article.get("image_url"):
+            candidates.append(article["image_url"])
+        slug = article.get("slug")
+        if slug:
+            candidates.append(f"https://media.gworky.com/covers/{slug}.webp")
+
+        for c in candidates:
+            if _verify_reachable_media(c):
+                return c
+
+    # Canonical verified domain assets (guaranteed HTTP 200)
+    if is_podcast or (article and article.get("pillar") == "podcast"):
+        return "https://gworky.com/podcast-og.png"
+    return "https://gworky.com/cover.png"
+
+
+def _send_telegram_buffer_queue_alert(queued_count: int, title: str) -> None:
+    """Notifies founder when Buffer Free Plan queue reaches capacity (>= 9 posts)."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_FOUNDER_CHAT_ID")
+    if not token or not chat_id:
+        return
+    try:
+        import httpx
+        msg = (
+            f"⚠️ <b>[BUFFER QUEUE NEAR CAPACITY]</b>\n\n"
+            f"• <b>Current Queued:</b> {queued_count}/10 posts (Buffer Free Tier limit)\n"
+            f"• <b>Skipped Post:</b> <i>{title[:65]}...</i>\n\n"
+            f"👉 <b>Action:</b> Review or publish pending posts in Buffer to resume auto-scheduling:\n"
+            f"https://publish.buffer.com/schedule?tab=queue"
+        )
+        httpx.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True},
+            timeout=8.0,
+        )
+    except Exception as ex:
+        logger.warning("Could not dispatch Buffer queue Telegram alert: %s", ex)
+
+
 def publish_to_buffer(
     title: str,
     text: str,
     image_url: str | None = None,
     video_url: str | None = None,
     env: dict[str, str] | None = None,
+    article: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create Queue Posts or Ideas in Buffer via GraphQL API for multi-channel syndication (X, Facebook, TikTok)."""
+    """Create Queue Posts or Ideas in Buffer via GraphQL API for multi-channel syndication (X, Facebook, TikTok, Instagram)."""
     creds = _env(env)
     token = creds.get("BUFFER_ACCESS_TOKEN")
     org_id = creds.get("BUFFER_ORG_ID") or "6a856b7084d800cf2ad90298"
@@ -844,11 +908,12 @@ def publish_to_buffer(
 
     created_posts = []
 
-    # If channels are found, schedule to queue for each compatible channel (Twitter/X, Facebook, TikTok)
+    # If channels are found, schedule to queue for each compatible channel (Twitter/X, Facebook, TikTok, Instagram)
     if channels:
         # Buffer Free Plan constraint: Max 10 posts in queue across entire organization
         if total_org_queued >= 9 and creds.get("BUFFER_SHARE_MODE", "addToQueue") == "addToQueue":
             logger.warning("Buffer organization queue near capacity (%d/10 queued); skipping social scheduling to protect Free tier limits.", total_org_queued)
+            _send_telegram_buffer_queue_alert(total_org_queued, title)
             return {"ok": True, "skipped": True, "reason": f"buffer org queue full ({total_org_queued}/10)"}
 
         post_mutation = """
@@ -876,6 +941,11 @@ def publish_to_buffer(
         """
         import time
 
+        # Pre-verify media reachability to eliminate 404 image errors
+        is_audio = bool(video_url or (article and ("podcast" in str(article) or article.get("audio_url"))))
+        safe_img = image_url if _verify_reachable_media(image_url) else _resolve_safe_social_image(article, is_podcast=is_audio)
+        safe_video = video_url if _verify_reachable_media(video_url) else None
+
         for ch in channels:
             ch_id = ch.get("id")
             service = ch.get("service")
@@ -895,22 +965,19 @@ def publish_to_buffer(
             metadata = {}
             assets = []
 
-            # Default fallback HD visual
-            media_img = image_url or "https://i.ytimg.com/vi/CT3g8oO7-QI/hqdefault.jpg"
-
-            # UNIFIED VIDEO/AUDIOVISUAL ASSET FOR ALL CHANNELS (X, Facebook, TikTok)
-            if video_url:
-                assets = [{"video": {"url": video_url}}]
-            elif media_img:
-                assets = [{"image": {"url": media_img}}]
+            # UNIFIED VIDEO/AUDIOVISUAL ASSET FOR ALL CHANNELS (X, Facebook, TikTok, Instagram)
+            if safe_video:
+                assets = [{"video": {"url": safe_video}}]
+            elif safe_img:
+                assets = [{"image": {"url": safe_img}}]
 
             if service == "facebook":
-                metadata["facebook"] = {"type": "reel" if "short" in (video_url or "").lower() else "post"}
+                metadata["facebook"] = {"type": "reel" if "short" in (safe_video or "").lower() else "post"}
             elif service == "tiktok":
                 metadata["tiktok"] = {"title": title[:90]}
             elif service == "instagram":
                 metadata["instagram"] = {
-                    "type": "reel" if video_url else "post",
+                    "type": "reel" if safe_video else "post",
                     "shouldShareToFeed": True,
                 }
 
@@ -918,9 +985,18 @@ def publish_to_buffer(
 
             # Format text per channel requirements
             channel_text = text
-            if service == "twitter" and len(channel_text) > 280:
+            if service == "instagram" and article:
+                # Instagram does not allow clickable links in captions; use optimized Bio copy
+                channel_text = build_instagram_copy(article)
+            elif service == "twitter" and len(channel_text) > 280:
                 urls = re.findall(r"https?://\S+", channel_text)
-                url_part = f"\n\n{urls[0]}" if urls else ""
+                # Keep the primary article or target canonical URL rather than blindly picking urls[0]
+                primary_url = None
+                for u in urls:
+                    if "/article/" in u or "/podcast" in u or "/tools/" in u:
+                        primary_url = u
+                        break
+                url_part = f"\n\n{primary_url or urls[0]}" if urls else ""
                 available_len = 280 - len(url_part) - 4
                 channel_text = f"{title[:available_len]}...{url_part}"
 
@@ -950,8 +1026,10 @@ def publish_to_buffer(
                 post_obj = p_data.get("post")
                 if post_obj:
                     created_posts.append(post_obj.get("id"))
-                elif p_data.get("message"):
-                    logger.warning("Buffer posting notice for %s: %s", service, p_data.get("message"))
+                else:
+                    err_type = list(p_data.keys())[0] if p_data else "UnknownError"
+                    err_msg = p_data.get("message") or str(p_data)
+                    logger.warning("Buffer posting error for %s (%s): %s", service, err_type, err_msg)
 
     if created_posts:
         return {
@@ -1403,7 +1481,10 @@ def dispatch(article: dict[str, Any], platform: str, env: dict[str, str] | None 
         if not video_url:
             video_url = article.get("video_url")
 
-        return publish_to_buffer(title, caption, image_url=img, video_url=video_url, env=env)
+        is_audio = bool(video_url or article.get("audio_url"))
+        safe_img = _resolve_safe_social_image(article, is_podcast=is_audio)
+
+        return publish_to_buffer(title, caption, image_url=safe_img, video_url=video_url, env=env, article=article)
 
     if platform == "pinterest":
         board_id = env.get("PINTEREST_BOARD_ID")
