@@ -1,8 +1,9 @@
+# Decommissioned per Rule §2.5 Anti-Mock invariant; archived and preserved without deletion
 name: Organic Discovery & Traffic Simulation
 
 on:
-  schedule:
-    - cron: "0 */4 * * *" # Every 4 hours: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC (6x daily)
+  # schedule:
+  #   - cron: "0 */4 * * *" # Decommissioned per Rule §2.5 Anti-Mock invariant
   workflow_dispatch:
     inputs:
       limit:
@@ -42,6 +43,7 @@ jobs:
     name: Run 3-Shard Traffic & Brand Discovery Engine (${{ matrix.runner_shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: false # Decommissioned per Rule §2.5 Anti-Mock invariant (archived and preserved)
     strategy:
       matrix:
         runner_shard: [1, 2, 3]
