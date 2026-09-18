@@ -144,13 +144,21 @@ def deactivate_stale(supabase: Any, seen_hashes: set[str]) -> int:
     return len(to_deactivate)
 
 
-def upsert_jobs(supabase: Any, rows: list[dict[str, Any]]) -> tuple[int, str | None]:
+def upsert_jobs(supabase: Any, rows: list[dict[str, Any]], batch_size: int = 50) -> tuple[int, str | None]:
     if not rows:
         return 0, None
-    result = supabase.table("jobs").upsert(rows, on_conflict="source_hash").execute()
-    if getattr(result, "error", None):
-        return 0, str(result.error)
-    return len(rows), None
+    total_upserted = 0
+    for i in range(0, len(rows), batch_size):
+        chunk = rows[i : i + batch_size]
+        try:
+            result = supabase.table("jobs").upsert(chunk, on_conflict="source_hash").execute()
+            if getattr(result, "error", None):
+                return total_upserted, str(result.error)
+            total_upserted += len(chunk)
+        except Exception as exc:
+            logger.error("Error upserting jobs chunk %d-%d: %s", i, i + len(chunk), exc)
+            return total_upserted, str(exc)
+    return total_upserted, None
 
 
 def enforce_active_cap(supabase: Any, max_active: int = MAX_ACTIVE_JOBS) -> int:

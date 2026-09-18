@@ -14,16 +14,24 @@ Exit code 0 on success/partial, 1 on total failure.
 """
 
 import argparse
+import http.client
 import json
 import logging
 import os
 import re
+import socket
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+# Ensure project root is in sys.path for internal imports
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
 
@@ -48,32 +56,22 @@ PLATFORMS = ("buffer", "bluesky", "linkedin")
 
 def _env(
     env: dict[str, str] | os._Environ | None = None,
-) -> dict[str, str]:
-    """Normalize the optional env override into a plain dict and auto-load .env.local if present."""
-    res = dict(os.environ)
-    env_file = Path(__file__).resolve().parent.parent / ".env.local"
-    if env_file.exists():
-        try:
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, _, v = line.partition("=")
-                    res.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-        except Exception:
-            pass
+) -> dict[str, str] | os._Environ:
     if env is not None:
-        res.update(dict(env))
-    if not res.get("WP_SITE_URL") and res.get("WORDPRESS_URL"):
-        res["WP_SITE_URL"] = res["WORDPRESS_URL"]
-    if not res.get("WP_USERNAME") and res.get("WORDPRESS_USERNAME"):
-        res["WP_USERNAME"] = res["WORDPRESS_USERNAME"]
-    if not res.get("WP_APP_PASSWORD") and res.get("WORDPRESS_APPLICATION_PASSWORD"):
-        res["WP_APP_PASSWORD"] = res["WORDPRESS_APPLICATION_PASSWORD"]
-    return res
+        return env
+    try:
+        from dotenv import dotenv_values
+
+        loaded = dotenv_values(".env.local")
+        merged = dict(os.environ)
+        merged.update({k: v for k, v in loaded.items() if v is not None})
+        return merged
+    except ImportError:
+        return os.environ
 
 
 # --------------------------------------------------------------------------
-# HTTP plumbing — stdlib only (urllib), mirrors the rest of the pipeline.
+# HTTP helpers.
 # --------------------------------------------------------------------------
 def _http_json(
     url: str,
@@ -82,7 +80,7 @@ def _http_json(
     headers: dict[str, str] | None = None,
     body: dict[str, Any] | None = None,
     timeout: int = 30,
-) -> tuple[int, dict[str, Any], urllib.error.HTTPError | None]:
+) -> tuple[int, dict[str, Any], Exception | None]:
     req_headers = {
         "User-Agent": "GroundworkHerald/1.0 (+https://gworky.com; en-US)",
         "Accept-Language": "en-US,en;q=0.9",
@@ -103,6 +101,15 @@ def _http_json(
         except json.JSONDecodeError:
             detail = {"raw": raw[:500]}
         return exc.code, detail, exc
+    except (TimeoutError, socket.timeout) as exc:
+        logger.warning("HTTP request to %s timed out after %ds: %s", url, timeout, exc)
+        return 408, {"error": "request timed out", "detail": str(exc)}, exc
+    except (urllib.error.URLError, http.client.RemoteDisconnected, ConnectionResetError, ConnectionError) as exc:
+        logger.warning("HTTP request to %s failed with network/connection error: %s", url, exc)
+        return 503, {"error": "network connection failed", "detail": str(exc)}, exc
+    except Exception as exc:
+        logger.warning("HTTP request to %s failed with unexpected exception: %s", url, exc)
+        return 500, {"error": "unexpected request error", "detail": str(exc)}, exc
 
 
 def _social_error_detail(payload: dict[str, Any]) -> str:
@@ -897,8 +904,9 @@ def publish_to_buffer(
 
     # If channels are found, schedule to queue for each compatible channel (Twitter/X, Facebook, TikTok, Instagram)
     if channels:
+        share_mode = creds.get("BUFFER_SHARE_MODE", "shareNow")
         # Buffer Free Plan constraint: Max 10 posts in queue across entire organization
-        if total_org_queued >= 9 and creds.get("BUFFER_SHARE_MODE", "addToQueue") == "addToQueue":
+        if total_org_queued >= 9 and share_mode == "addToQueue":
             logger.warning("Buffer organization queue near capacity (%d/10 queued); skipping social scheduling to protect Free tier limits.", total_org_queued)
             _send_telegram_buffer_queue_alert(total_org_queued, title)
             return {"ok": True, "skipped": True, "reason": f"buffer org queue full ({total_org_queued}/10)"}
@@ -944,7 +952,7 @@ def publish_to_buffer(
 
             # Buffer Free Plan constraint: Max 10 posts in queue per channel
             current_queued = scheduled_counts.get(ch_id, 0)
-            if current_queued >= 9 and creds.get("BUFFER_SHARE_MODE", "addToQueue") == "addToQueue":
+            if current_queued >= 9 and share_mode == "addToQueue":
                 logger.warning("Channel %s (%s) has %d queued posts; skipping to respect Buffer Free tier cap (max 10).", ch.get("name"), service, current_queued)
                 continue
 
@@ -968,7 +976,7 @@ def publish_to_buffer(
                     "shouldShareToFeed": True,
                 }
 
-            share_mode = creds.get("BUFFER_SHARE_MODE", "addToQueue")
+            share_mode = creds.get("BUFFER_SHARE_MODE", "shareNow")
 
             # Format text per channel requirements
             channel_text = text
@@ -1548,8 +1556,21 @@ def amplify_article(
     rows: list[dict[str, Any]] = []
     slug = article.get("slug", "")
     for platform in platforms:
-        result = dispatch(article, platform, env)
-        status = "posted" if result.get("ok") else ("skipped" if result.get("skipped") else "failed")
+        try:
+            result = dispatch(article, platform, env)
+        except Exception as exc:
+            logger.error("Dispatch error for %s on %s: %s", slug, platform, exc)
+            result = {"ok": False, "status": 500, "error": f"dispatch exception: {exc}"}
+
+        is_ok = bool(result.get("ok"))
+        is_skipped = bool(result.get("skipped"))
+        if is_skipped:
+            status = "skipped"
+        elif is_ok:
+            status = "posted"
+        else:
+            status = "failed"
+
         err = result.get("error")
         row: dict[str, Any] = {
             "slug": slug,

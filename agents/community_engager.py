@@ -288,25 +288,37 @@ async def send_approval_card(draft: AnswerDraft) -> bool:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return False
     brand_note = "\n⚠️ <b>Contains brand mention</b> (disclosed)" if draft.mentions_brand else ""
+    header_status = "⚡ AUTO-APPROVED" if draft.status == "auto_approved" else "DRAFT"
     text = (
-        f"💬 <b>[COMMUNITY ANSWER DRAFT — {draft.platform.upper()}]</b>\n\n"
+        f"💬 <b>[COMMUNITY ANSWER {header_status} — {draft.platform.upper()}]</b>\n\n"
         f"• <b>Thread:</b> {draft.thread_title}\n"
         f"• <b>URL:</b> {draft.thread_url}\n"
         f"• <b>Pillar:</b> {draft.pillar}{brand_note}\n\n"
         f"<b>Draft (copy-paste ready):</b>\n<i>{draft.answer[:3500]}</i>"
     )
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "reply_markup": {
+    if draft.status == "auto_approved":
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "⚡ Auto-Approved (Ready to Paste)", "callback_data": "noop"},
+                    {"text": "❌ Revoke", "callback_data": f"reject_answer:{draft.draft_id}"},
+                ]
+            ]
+        }
+    else:
+        reply_markup = {
             "inline_keyboard": [
                 [
                     {"text": "✅ Approve (manual paste)", "callback_data": f"approve_answer:{draft.draft_id}"},
                     {"text": "❌ Dismiss", "callback_data": f"reject_answer:{draft.draft_id}"},
                 ]
             ]
-        },
+        }
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": reply_markup,
     }
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -431,6 +443,7 @@ async def run(max_drafts: int = MAX_DRAFTS_PER_RUN) -> list[AnswerDraft]:
         result = await draft_answer(c.title, c.pillar)
         if not result or not result.get("answer"):
             continue
+        is_auto = c.relevance >= 2.0
         draft = AnswerDraft(
             draft_id=f"{c.platform}-{c.thread_id}-{int(time.time())}",
             platform=c.platform,
@@ -439,10 +452,15 @@ async def run(max_drafts: int = MAX_DRAFTS_PER_RUN) -> list[AnswerDraft]:
             pillar=c.pillar,
             answer=result["answer"],
             mentions_brand=bool(result.get("mentions_brand", False)),
+            status="auto_approved" if is_auto else "pending",
         )
         drafts.append(draft)
         state.setdefault("drafts", {})[draft.draft_id] = asdict(draft)
         seen[c.thread_id] = {"url": c.url, "relevance": c.relevance, "at": today_key()}
+        if is_auto:
+            key = f"{draft.platform}:{today_key()}"
+            counts = state.setdefault("daily_counts", {})
+            counts[key] = int(counts.get(key, 0)) + 1
         await send_approval_card(draft)
 
     save_state(state)
