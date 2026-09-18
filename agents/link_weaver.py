@@ -68,7 +68,7 @@ def _is_safe_to_link(text: str, phrase: str) -> tuple[int, int, str] | None:
     idx = m.start()
     matched_text = m.group(1)
     before = text[:idx]
-    after = text[idx + len(matched_text):]
+    text[idx + len(matched_text):]
 
     if before.count("[") > before.count("]"):
         return None
@@ -102,7 +102,6 @@ def weave_article_links(
 
     # 1. Homepage link — natural wrap + synthetic fallback for 100% coverage (systematic, not manual)
     if not has_homepage:
-        wrapped = False
         for i, p in enumerate(paragraphs):
             if p.startswith("#"):
                 continue
@@ -110,7 +109,6 @@ def weave_article_links(
             if safe:
                 start, end, _ = safe
                 paragraphs[i] = p[:start] + "[Groundwork](https://gworky.com)" + p[end:]
-                wrapped = True
                 break
         # No synthetic fallback: Never inject fake boilerplate sentences.
         # Links must only wrap natural entity mentions.

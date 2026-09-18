@@ -109,7 +109,7 @@ def fetch_cdx_routes(domain: str, limit: int = 50) -> list[dict[str, Any]]:
                 return []
 
             headers = rows[0]
-            entries = [dict(zip(headers, row)) for row in rows[1:]]
+            entries = [dict(zip(headers, row, strict=False)) for row in rows[1:]]
 
             # Filter out images, feeds, non-content paths
             valid_routes = []

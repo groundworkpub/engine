@@ -12,9 +12,7 @@ Operates automated browser interactions without official platform APIs using Pla
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import os
 import random
 import sys
 import time

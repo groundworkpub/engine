@@ -56,7 +56,7 @@ def send_consolidated_telegram_digest(report: dict[str, Any]) -> bool:
     drip = report.get("drip_feed", [])
     mass = report.get("mass_aggregator", [])
     pitches = report.get("pr_pitches", [])
-    navboost = report.get("navboost", {})
+    report.get("navboost", {})
 
     drip_lines = "\n".join([f"  • <b>{d['name']}</b> (DR {d.get('dr', 'N/A')})" for d in drip[:4]])
     mass_success = sum(1 for m in mass if m.get("status") == "success")
@@ -119,8 +119,8 @@ def run_full_growth_cycle(dry_run: bool = False) -> dict[str, Any]:
     # 3. Qwoted AI PR Outreach
     logger.info("Step 3/5: Harvesting Media Opportunities & Synthesizing Pitches...")
     try:
-        from agents.qwoted_harvester import harvest_media_opportunities
         from agents.pr_pitch_agent import run_pitch_synthesis
+        from agents.qwoted_harvester import harvest_media_opportunities
         opps = harvest_media_opportunities(limit=3)
         report["pr_pitches"] = run_pitch_synthesis(queries=opps, auto_dispatch=False)
     except Exception as exc:

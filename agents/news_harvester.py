@@ -114,10 +114,7 @@ def harvest_feed(url: str, pillar: str, limit: int = 5) -> list[NewsItem]:
                 source_name = source_elem.text if source_elem is not None and source_elem.text else "Open Wire"
 
                 # Strip trailing " - Publisher Name" from Google News titles
-                if " - " in title:
-                    title_clean = title.rsplit(" - ", 1)[0]
-                else:
-                    title_clean = title
+                title_clean = title.rsplit(" - ", 1)[0] if " - " in title else title
 
                 slug = slugify(title_clean)
                 if not slug:

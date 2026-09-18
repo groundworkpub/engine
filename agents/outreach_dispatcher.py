@@ -11,23 +11,22 @@ Enforces:
 6. Real-time Telegram alerts to @gwelena_bot.
 """
 
-import os
-import sys
-import json
-import time
-import random
-import logging
 import argparse
-from datetime import datetime, timezone, timedelta
-from typing import Any
+import logging
+import os
+import random
+import sys
+import time
+from datetime import UTC, datetime, timedelta
+
 import httpx
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from agents.outreach_verifier import verify_prospect, extract_domain
 from agents.egress_dataimpulse import DataImpulseProxyRouter
+from agents.outreach_verifier import extract_domain, verify_prospect
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("outreach_dispatcher")
@@ -39,7 +38,7 @@ def load_env():
     """Load credentials from .env.local if present."""
     env_file = os.path.join(ROOT_DIR, ".env.local")
     if os.path.exists(env_file):
-        with open(env_file, "r", encoding="utf-8") as f:
+        with open(env_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("#") or "=" not in line:
@@ -61,7 +60,7 @@ def get_daily_sent_count() -> int:
     if not key:
         return 0
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(
@@ -274,7 +273,7 @@ def process_prospect(prospect_id: str, proxy: str | None = None, dry_run: bool =
                 client.patch(
                     f"{url}/rest/v1/outreach_prospects?id=eq.{prospect_id}",
                     headers={"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={"status": "dead", "updated_at": datetime.now(timezone.utc).isoformat()}
+                    json={"status": "dead", "updated_at": datetime.now(UTC).isoformat()}
                 )
             logger.info(f"Marked {target_url} as dead (invalid DNS MX).")
         else:
@@ -313,7 +312,7 @@ def process_prospect(prospect_id: str, proxy: str | None = None, dry_run: bool =
         return False
 
     # 7. Update Supabase record status to 'sent'
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     try:
         with httpx.Client(timeout=10.0) as client:
             patch_resp = client.patch(

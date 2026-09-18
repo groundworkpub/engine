@@ -20,13 +20,11 @@ from __future__ import annotations
 import difflib
 import json
 import logging
-import math
 import os
-from pathlib import Path
-import time
-from typing import Any, Dict, List, Optional, Set, Tuple
 import urllib.parse
 import urllib.request
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("semantic_graph_engine")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -36,7 +34,7 @@ _root = Path(__file__).resolve().parent.parent
 _env_file = _root / ".env.local"
 if _env_file.exists():
     try:
-        with open(_env_file, "r", encoding="utf-8") as f:
+        with open(_env_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
@@ -59,14 +57,14 @@ except ImportError:
 
 # ── Built-in Pure-Python PageRank & Centrality (Zero-Dependency Engine) ──────
 def python_pagerank(
-    nodes: List[str],
-    edges: List[Tuple[str, str, float]],
+    nodes: list[str],
+    edges: list[tuple[str, str, float]],
     alpha: float = 0.85,
     max_iter: int = 100,
     tol: float = 1e-6,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Pure-Python power iteration PageRank algorithm.
-    
+
     Guarantees deterministic execution even in minimal environments without networkx.
     """
     if not nodes:
@@ -77,8 +75,8 @@ def python_pagerank(
     node_indices = {node: i for i, node in enumerate(nodes)}
 
     # Build adjacency lists and out-degree weights
-    out_weights: Dict[str, float] = {node: 0.0 for node in nodes}
-    in_edges: Dict[str, List[Tuple[str, float]]] = {node: [] for node in nodes}
+    out_weights: dict[str, float] = {node: 0.0 for node in nodes}
+    in_edges: dict[str, list[tuple[str, float]]] = {node: [] for node in nodes}
 
     for u, v, w in edges:
         if u in node_set and v in node_set:
@@ -109,18 +107,18 @@ def python_pagerank(
 
 
 def python_directed_degree_centrality(
-    nodes: List[str],
-    edges: List[Tuple[str, str, float]],
-) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
+    nodes: list[str],
+    edges: list[tuple[str, str, float]],
+) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
     """Pure-Python directed degree centrality (total, in-degree, out-degree)."""
     if not nodes or len(nodes) <= 1:
         zero_map = {n: 0.0 for n in nodes}
         return zero_map, zero_map, zero_map
 
     denom = len(nodes) - 1
-    total_degrees: Dict[str, int] = {node: 0 for node in nodes}
-    in_degrees: Dict[str, int] = {node: 0 for node in nodes}
-    out_degrees: Dict[str, int] = {node: 0 for node in nodes}
+    total_degrees: dict[str, int] = {node: 0 for node in nodes}
+    in_degrees: dict[str, int] = {node: 0 for node in nodes}
+    out_degrees: dict[str, int] = {node: 0 for node in nodes}
 
     for u, v, _ in edges:
         if u in out_degrees:
@@ -143,12 +141,12 @@ class WikidataResolver:
     CACHE_FILE = _root / "data" / "wikidata_entity_cache.json"
 
     def __init__(self):
-        self.cache: Dict[str, Dict[str, Any]] = self._load_cache()
+        self.cache: dict[str, dict[str, Any]] = self._load_cache()
 
-    def _load_cache(self) -> Dict[str, Dict[str, Any]]:
+    def _load_cache(self) -> dict[str, dict[str, Any]]:
         if self.CACHE_FILE.exists():
             try:
-                with open(self.CACHE_FILE, "r", encoding="utf-8") as f:
+                with open(self.CACHE_FILE, encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
                 logger.warning("Could not read wikidata cache: %s", e)
@@ -162,7 +160,7 @@ class WikidataResolver:
         except Exception as e:
             logger.warning("Could not save wikidata cache: %s", e)
 
-    def resolve(self, entity_name: str, aliases: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    def resolve(self, entity_name: str, aliases: list[str] | None = None) -> dict[str, Any] | None:
         """Resolves an entity name against Wikidata API with strict fuzzy similarity gating."""
         norm_key = entity_name.strip().lower()
         if norm_key in self.cache:
@@ -189,7 +187,7 @@ class WikidataResolver:
 
                 candidates_to_match = [entity_name.lower()] + [a.lower() for a in (aliases or [])]
 
-                best_candidate: Optional[Dict[str, Any]] = None
+                best_candidate: dict[str, Any] | None = None
                 best_score = 0.0
 
                 for res in search_results:
@@ -240,7 +238,7 @@ class WikidataResolver:
 # ── Master Semantic Graph Engine ──────────────────────────────────────────────
 class SemanticGraphEngine:
     """Core Knowledge Graph Orchestrator for Groundwork.
-    
+
     Transforms unstructured entities into structured mathematical graphs,
     computes topological PageRank, resolves global Wikidata IDs, and produces
     deployment-ready Schema.org JSON-LD.
@@ -248,8 +246,8 @@ class SemanticGraphEngine:
 
     def __init__(self):
         self.schema_ns = "https://schema.org/"
-        self.nodes: Dict[str, Dict[str, Any]] = {}
-        self.edges: List[Dict[str, Any]] = []
+        self.nodes: dict[str, dict[str, Any]] = {}
+        self.edges: list[dict[str, Any]] = []
         self.resolver = WikidataResolver()
 
     def ingest_node(
@@ -259,9 +257,9 @@ class SemanticGraphEngine:
         pillar: str = "money",
         entity_type: str = "concept",
         description: str = "",
-        aliases: Optional[List[str]] = None,
-        tool_slug: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        aliases: list[str] | None = None,
+        tool_slug: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Ingests or updates a canonical entity node."""
         self.nodes[node_id] = {
@@ -281,7 +279,7 @@ class SemanticGraphEngine:
         predicate: str,
         obj: str,
         confidence: float = 0.9,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """Ingests a Subject-Predicate-Object relationship with edge confidence."""
         edge = {
@@ -293,9 +291,9 @@ class SemanticGraphEngine:
         }
         self.edges.append(edge)
 
-    def resolve_wikidata_ids(self) -> Dict[str, str]:
+    def resolve_wikidata_ids(self) -> dict[str, str]:
         """Resolves Wikidata QIDs for all ingested nodes."""
-        resolved: Dict[str, str] = {}
+        resolved: dict[str, str] = {}
         for node_id, node in self.nodes.items():
             res = self.resolver.resolve(node["name"], aliases=node.get("aliases", []))
             if res and res.get("wikidata_id"):
@@ -304,9 +302,9 @@ class SemanticGraphEngine:
                 resolved[node_id] = res["wikidata_id"]
         return resolved
 
-    def compute_topical_authority(self) -> Dict[str, Dict[str, float]]:
+    def compute_topical_authority(self) -> dict[str, dict[str, float]]:
         """Computes PageRank and Degree Centrality across the entire graph.
-        
+
         Uses NetworkX if available, otherwise delegates to the deterministic
         pure-Python power-iteration engine.
         """
@@ -335,7 +333,7 @@ class SemanticGraphEngine:
             pr = python_pagerank(all_nodes, all_edges)
             dc, in_dc, out_dc = python_directed_degree_centrality(all_nodes, all_edges)
 
-        report: Dict[str, Dict[str, float]] = {}
+        report: dict[str, dict[str, float]] = {}
         for n in all_nodes:
             report[n] = {
                 "pagerank": round(pr.get(n, 0.0), 5),
@@ -347,10 +345,10 @@ class SemanticGraphEngine:
         # Sort descending by PageRank
         return dict(sorted(report.items(), key=lambda item: item[1]["pagerank"], reverse=True))
 
-    def detect_information_gaps(self, top_n: int = 10) -> List[Dict[str, Any]]:
+    def detect_information_gaps(self, top_n: int = 10) -> list[dict[str, Any]]:
         """Identifies underserved peripheral entities that lack robust connective edges."""
         authority = self.compute_topical_authority()
-        gaps: List[Dict[str, Any]] = []
+        gaps: list[dict[str, Any]] = []
 
         for node_id, metrics in authority.items():
             node = self.nodes.get(node_id, {})
@@ -367,7 +365,7 @@ class SemanticGraphEngine:
 
         return sorted(gaps, key=lambda g: (g["in_degree_centrality"], -g["pagerank"]))[:top_n]
 
-    def serialize_to_schema_jsonld(self, node_id: str) -> Dict[str, Any]:
+    def serialize_to_schema_jsonld(self, node_id: str) -> dict[str, Any]:
         """Compiles an entity node into a rich, deployment-ready Schema.org JSON-LD object."""
         node = self.nodes.get(node_id)
         if not node:
@@ -385,7 +383,7 @@ class SemanticGraphEngine:
         s_type = schema_type_map.get(node.get("entity_type", "concept"), "Thing")
         canonical_url = f"https://gworky.com/tools/{node['tool_slug']}" if node.get("tool_slug") else f"https://gworky.com/search?q={urllib.parse.quote(node['name'])}"
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "@context": "https://schema.org",
             "@type": s_type,
             "@id": f"{canonical_url}#entity",

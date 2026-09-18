@@ -19,7 +19,8 @@ import json
 import logging
 import os
 import sys
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 import httpx
 import psycopg2
 from dotenv import load_dotenv
@@ -30,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("awin_syncer")
 
 class AwinTransactionSyncer:
-    def __init__(self, oauth_token: Optional[str] = None, publisher_id: Optional[str] = None):
+    def __init__(self, oauth_token: str | None = None, publisher_id: str | None = None):
         self.oauth_token = oauth_token or os.getenv("AWIN_OAUTH_TOKEN", "")
         self.publisher_id = publisher_id or os.getenv("AWIN_PUBLISHER_ID", "3081079")
         self.base_url = "https://api.awin.com"
@@ -45,13 +46,13 @@ class AwinTransactionSyncer:
     def is_configured(self) -> bool:
         return bool(self.oauth_token and self.publisher_id)
 
-    def fetch_transactions(self, days: int = 30) -> List[Dict[str, Any]]:
+    def fetch_transactions(self, days: int = 30) -> list[dict[str, Any]]:
         """Fetches transactions from Awin Publisher API within the lookback window."""
         if not self.is_configured():
             logger.info("Awin OAuth credentials not configured (SKIPPED_NO_CREDS).")
             return []
 
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         start_date = (now - datetime.timedelta(days=days)).strftime("%Y-%m-%dT00:00:00")
         end_date = now.strftime("%Y-%m-%dT23:59:59")
 
@@ -95,7 +96,7 @@ class AwinTransactionSyncer:
             sslmode="require",
         )
 
-    def upsert_conversions(self, conversions: List[Dict[str, Any]]) -> int:
+    def upsert_conversions(self, conversions: list[dict[str, Any]]) -> int:
         """Upserts normalized conversion records into public.affiliate_conversions."""
         if not conversions:
             logger.info("No conversions to upsert.")
@@ -145,7 +146,7 @@ class AwinTransactionSyncer:
         logger.info("Successfully upserted %d conversions into Supabase.", inserted_count)
         return inserted_count
 
-def generate_sample_conversion() -> Dict[str, Any]:
+def generate_sample_conversion() -> dict[str, Any]:
     """Generates a verified sample conversion record for end-to-end integration testing."""
     sample_id = f"awin-tx-sample-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     return {
@@ -158,7 +159,7 @@ def generate_sample_conversion() -> Dict[str, Any]:
         "status": "confirmed",
         "sub_id": "calc-rent-vs-buy",
         "clickref": "portal-article-speed-teardown",
-        "converted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "converted_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "raw_payload": {
             "advertiserId": 7168,
             "advertiserName": "NordVPN",
@@ -207,7 +208,7 @@ def main():
             "status": "confirmed" if tx.get("commissionStatus") == "approved" else "pending",
             "sub_id": tx.get("clickRefs", {}).get("clickRef"),
             "clickref": tx.get("clickRefs", {}).get("clickRef"),
-            "converted_at": tx.get("transactionDate") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "converted_at": tx.get("transactionDate") or datetime.datetime.now(datetime.UTC).isoformat(),
             "raw_payload": tx,
         })
 

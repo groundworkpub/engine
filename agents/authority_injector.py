@@ -14,7 +14,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -530,7 +529,7 @@ def main() -> None:
         ]
         for topic, dom, pillar, title, tool_url in hubs:
             pack = generate_high_authority_evidence_pack(topic, dom, pillar, title, tool_url)
-            print(f"\n=======================================================")
+            print("\n=======================================================")
             print(f"🎯 Target: {dom} | Topic: {topic}")
             print(f"📌 Subject: {pack['subject']}")
             print(f"📝 Body:\n{pack['body']}")

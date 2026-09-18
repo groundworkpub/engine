@@ -34,9 +34,10 @@ import re
 import sys
 import time
 import urllib.parse
-from datetime import datetime, timezone
+from urllib.parse import urlparse
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
@@ -67,21 +68,21 @@ except ImportError:
 
 try:
     from agents.outreach_verifier import (
+        DISPOSABLE_DOMAINS,
+        calculate_relevance_score,
         extract_domain,
         resolve_mx_records,
         validate_email_syntax_and_domain,
         verify_live_http,
-        calculate_relevance_score,
-        DISPOSABLE_DOMAINS,
     )
 except ImportError:
     from outreach_verifier import (
+        DISPOSABLE_DOMAINS,
+        calculate_relevance_score,
         extract_domain,
         resolve_mx_records,
         validate_email_syntax_and_domain,
         verify_live_http,
-        calculate_relevance_score,
-        DISPOSABLE_DOMAINS,
     )
 
 # Canonical Groundwork SSOT Base URL
@@ -133,7 +134,7 @@ EXCLUDED_DOMAINS = {
     "merriam-webster.com", "dictionary.cambridge.org", "thefreedictionary.com",
     "vocabulary.com", "dictionary.com", "thesaurus.com", "reference.com",
     "urbandictionary.com", "collinsdictionary.com", "oxfordlearnersdictionaries.com",
-    "languagetool.org", "wordreference.com", "oed.com", "wikipedia.org"
+    "languagetool.org", "wordreference.com", "oed.com"
 }
 
 # Non-English Country-Code TLDs to immediately quarantine (Rule 2.10)
@@ -150,7 +151,7 @@ def is_non_english_domain(domain: str) -> bool:
     return any(d.endswith(tld) for tld in NON_ENGLISH_TLDS)
 
 # Structured Dork Footprint Matrix
-DORK_FOOTPRINT_MATRIX: Dict[str, Dict[str, List[str]]] = {
+DORK_FOOTPRINT_MATRIX: dict[str, dict[str, list[str]]] = {
     "money": {
         "resources": [
             '"mortgage refinance" inurl:resources intitle:resources',
@@ -209,7 +210,7 @@ EMAIL_EXTRACT_REGEX = re.compile(
 )
 
 
-def get_supabase_config() -> Tuple[str, str]:
+def get_supabase_config() -> tuple[str, str]:
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "https://keflumlrmggffyrsrmlk.supabase.co")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     return url.rstrip("/"), key
@@ -236,7 +237,7 @@ def decode_bing_url(raw_url: str) -> str:
     return raw_url
 
 
-def scrape_bing_serp(query: str, count: int = 10) -> List[Dict[str, str]]:
+def scrape_bing_serp(query: str, count: int = 10) -> list[dict[str, str]]:
     """Scrapes Bing US SERP using DataImpulse US Residential Proxy."""
     proxy_url = DataImpulseProxyRouter.get_proxy_url("us")
     headers = {
@@ -248,7 +249,7 @@ def scrape_bing_serp(query: str, count: int = 10) -> List[Dict[str, str]]:
     url = "https://www.bing.com/search"
     params = {"q": query, "count": count, "setlang": "en-US", "cc": "US"}
 
-    results: List[Dict[str, str]] = []
+    results: list[dict[str, str]] = []
     try:
         with httpx.Client(proxy=proxy_url, headers=headers, timeout=12.0, follow_redirects=True, verify=False) as client:
             resp = client.get(url, params=params)
@@ -278,7 +279,7 @@ def scrape_bing_serp(query: str, count: int = 10) -> List[Dict[str, str]]:
     return results
 
 
-def scrape_tavily_search(query: str, count: int = 10) -> List[Dict[str, str]]:
+def scrape_tavily_search(query: str, count: int = 10) -> list[dict[str, str]]:
     """Failover search using Tavily API if available."""
     api_key = os.environ.get("TAVILY_API_KEY")
     if not api_key:
@@ -291,7 +292,7 @@ def scrape_tavily_search(query: str, count: int = 10) -> List[Dict[str, str]]:
         "search_depth": "basic",
         "max_results": count,
     }
-    results: List[Dict[str, str]] = []
+    results: list[dict[str, str]] = []
     try:
         with httpx.Client(timeout=15.0) as client:
             resp = client.post(url, json=payload)
@@ -308,7 +309,7 @@ def scrape_tavily_search(query: str, count: int = 10) -> List[Dict[str, str]]:
     return results
 
 
-def search_dork_cascade(query: str, count: int = 10) -> List[Dict[str, str]]:
+def search_dork_cascade(query: str, count: int = 10) -> list[dict[str, str]]:
     """Cascading search: Bing US Residential Proxy -> Tavily API Failover."""
     logger.info(f"Executing Dork Query: {query}")
     # 1. Primary Engine: Bing US via DataImpulse Residential Proxy
@@ -327,7 +328,7 @@ def search_dork_cascade(query: str, count: int = 10) -> List[Dict[str, str]]:
     return []
 
 
-def inspect_landing_page(target_url: str, proxy: Optional[str] = None) -> Dict[str, Any]:
+def inspect_landing_page(target_url: str, proxy: str | None = None) -> dict[str, Any]:
     """
     Crawls target landing page with retry and www fallback.
     Extracts page title, text length, email addresses, and form types.
@@ -340,7 +341,7 @@ def inspect_landing_page(target_url: str, proxy: Optional[str] = None) -> Dict[s
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
-    extracted_emails: List[str] = []
+    extracted_emails: list[str] = []
     has_comment_form = False
     has_resource_form = False
     title = ""
@@ -375,7 +376,7 @@ def inspect_landing_page(target_url: str, proxy: Optional[str] = None) -> Dict[s
                 for form in soup.find_all("form"):
                     form_text = form.get_text(strip=True).lower()
                     form_html = str(form).lower()
-                    
+
                     # Comment form detection
                     if "comment" in form_html or "reply" in form_html or form.find("textarea", attrs={"name": re.compile(r"comment", re.I)}):
                         has_comment_form = True
@@ -411,7 +412,7 @@ DAILY_WARMUP_LIMIT = 15
 MIN_AUTONOMOUS_SCORE = 0.85
 
 
-def send_via_resend(to_email: str, subject: str, body_text: str) -> Optional[str]:
+def send_via_resend(to_email: str, subject: str, body_text: str) -> str | None:
     """Dispatches email via Resend API using verified gworky.com domain."""
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
@@ -453,7 +454,7 @@ def get_daily_sent_count(supabase_url: str, supabase_key: str) -> int:
     if not supabase_key:
         return 0
     from datetime import timedelta
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(
@@ -492,7 +493,7 @@ def check_bounce_rate_safety(supabase_url: str, supabase_key: str) -> bool:
     return True
 
 
-def generate_dork_outreach_pitch(prospect: Dict[str, Any], tool_info: Dict[str, str]) -> Tuple[str, str]:
+def generate_dork_outreach_pitch(prospect: dict[str, Any], tool_info: dict[str, str]) -> tuple[str, str]:
     """Generates bespoke, anti-slop pitch for Elena Vance referencing www.gworky.com."""
     domain = extract_domain(prospect["url"])
     pillar = prospect.get("pillar", "money")
@@ -577,7 +578,7 @@ def send_telegram_alert(message: str) -> None:
         "disable_web_page_preview": True,
     }
 
-    for attempt in range(4):
+    for _attempt in range(4):
         try:
             with httpx.Client(timeout=10.0) as client:
                 res = client.post(telegram_url, json=payload)
@@ -599,9 +600,9 @@ def send_telegram_alert(message: str) -> None:
 
 
 def send_autonomous_dispatch_report(
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     resend_id: str,
-    v_res: Dict[str, Any],
+    v_res: dict[str, Any],
     daily_count: int,
     subject: str,
 ) -> None:
@@ -609,7 +610,7 @@ def send_autonomous_dispatch_report(
     domain = extract_domain(prospect["url"])
     target_url = prospect["url"]
     contact = prospect.get("contact", "")
-    pillar = prospect.get("pillar", "").upper()
+    prospect.get("pillar", "").upper()
     score = prospect.get("relevance_score", 0.85)
     tool_slug = prospect.get("tool_slug", "mortgage-refinance-calculator")
     embed_url = f"{CANONICAL_GROUNDWORK_BASE}/embed-builder?tool={tool_slug}"
@@ -633,7 +634,7 @@ def send_autonomous_dispatch_report(
     send_telegram_alert(msg)
 
 
-def send_harvest_discovery_report(prospect: Dict[str, Any], v_res: Dict[str, Any]) -> None:
+def send_harvest_discovery_report(prospect: dict[str, Any], v_res: dict[str, Any]) -> None:
     """Sends pure observational harvest discovery report to Telegram (Zero human approval buttons)."""
     domain = extract_domain(prospect["url"])
     target_url = prospect["url"]
@@ -675,13 +676,13 @@ def check_existing_prospect(supabase_url: str, supabase_key: str, domain: str) -
     return False
 
 
-def save_prospect_to_supabase(supabase_url: str, supabase_key: str, prospect: Dict[str, Any]) -> bool:
+def save_prospect_to_supabase(supabase_url: str, supabase_key: str, prospect: dict[str, Any]) -> bool:
     """Inserts a prospect row into Supabase `outreach_prospects`."""
     if not supabase_key:
         logger.info(f"[DRY-RUN] Would insert into Supabase: {prospect['url']}")
         return True
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
 
     # Ensure source_type matches database check constraints ('resource_page', 'guest_post', 'comment_section')
     act_type = prospect.get("action_type", "resource_page")
@@ -734,12 +735,12 @@ def save_prospect_to_supabase(supabase_url: str, supabase_key: str, prospect: Di
     return False
 
 
-def enqueue_comment_target_to_link_logs(supabase_url: str, supabase_key: str, prospect: Dict[str, Any]) -> bool:
+def enqueue_comment_target_to_link_logs(supabase_url: str, supabase_key: str, prospect: dict[str, Any]) -> bool:
     """Enqueues a comment target into link_injection_logs for the offpage orchestrator."""
     if not supabase_key:
         return True
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     pillar = prospect.get("pillar", "money")
     tool_slug = prospect.get("tool_slug", "mortgage-refinance-calculator")
     target_url = prospect["url"]
@@ -809,7 +810,7 @@ def run_dork_harvest_pipeline(
     for pil in pillars_to_run:
         tool_info = DEFAULT_TOOLS_BY_PILLAR.get(pil, DEFAULT_TOOLS_BY_PILLAR["money"])
         footprint_dict = DORK_FOOTPRINT_MATRIX.get(pil, {})
-        
+
         categories = [footprint_type] if footprint_type in footprint_dict else list(footprint_dict.keys())
 
         for cat in categories:
@@ -851,7 +852,7 @@ def run_dork_harvest_pipeline(
                     has_resource = inspection.get("has_resource_form", False)
                     primary_email = emails[0] if emails else ""
 
-                    mx_hosts: List[str] = []
+                    mx_hosts: list[str] = []
                     action_type = "resource_submission"
 
                     if primary_email:
@@ -897,9 +898,9 @@ def run_dork_harvest_pipeline(
 
                     # 6. Autonomous Pitch Synthesis & Execution
                     subject, pitch_body = generate_dork_outreach_pitch(prospect_record, tool_info)
-                    
+
                     status = "draft"
-                    resend_id: Optional[str] = None
+                    resend_id: str | None = None
 
                     if action_type == "email_outreach" and primary_email and mx_hosts and score >= MIN_AUTONOMOUS_SCORE:
                         # Check safety and daily warmup limit

@@ -13,7 +13,6 @@ Combines AI Scribe and AI Critic into a self-correcting two-pass pipeline:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import re

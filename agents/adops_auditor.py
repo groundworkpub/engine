@@ -29,8 +29,9 @@ _agents_dir = _root_dir / "agents"
 if str(_agents_dir) not in sys.path:
     sys.path.insert(0, str(_agents_dir))
 
+import contextlib
+
 from browser_stealth import (
-    PREMIUM_FIREWALL_DOMAINS,
     build_stealth_script,
     domain_is_blocked,
     stealth_launch_args,
@@ -128,10 +129,8 @@ class AdOpsAuditor:
                 nonlocal popunder_count
                 popunder_count += 1
                 result.anomalies.append(f"Unexpected popup opened: {child_page.url}")
-                try:
+                with contextlib.suppress(Exception):
                     await child_page.close()
-                except Exception:
-                    pass
 
             context.on("page", on_new_window)
 
@@ -433,7 +432,7 @@ async def main() -> None:
         return
 
     result = await auditor.audit_ad_experience(target_path=args.url, viewport=args.viewport)
-    telemetry = auditor.fetch_telemetry_metrics()
+    auditor.fetch_telemetry_metrics()
 
     print("\n" + "=" * 60)
     print("        GROUNDWORK ADOPS AUDIT SUMMARY REPORT        ")

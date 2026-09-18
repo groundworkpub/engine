@@ -639,19 +639,6 @@ def publish_to_mastodon(text: str, env: dict[str, str] | None = None) -> dict[st
         return {"ok": True, "post_id": "dry-run", "post_url": "https://mastodon.social/@dry-run", "error": None}
     return {"ok": False, "skipped": True, "error": "mastodon syndication permanently decommissioned (account suspended on mastodon.social)"}
 
-    endpoint = f"{base_url.rstrip('/')}/api/v1/statuses"
-    status, payload, err = _http_json(
-        endpoint,
-        method="POST",
-        headers={"Authorization": f"Bearer {token}"},
-        body={"status": text, "visibility": "public"},
-    )
-    if status in (200, 201):
-        post_id = str(payload.get("id", ""))
-        post_url = payload.get("url") or f"{base_url}/@{post_id}"
-        return {"ok": True, "post_id": post_id, "post_url": post_url}
-    return {"ok": False, "status": status, "error": str(err) if err else f"HTTP {status}"}
-
 
 def publish_to_wordpress(article: dict[str, Any], env: dict[str, str] | None = None) -> dict[str, Any]:
     """Syndicates a 400-500 word summary with canonical header to remote WordPress REST API.
@@ -1413,9 +1400,7 @@ def _has_decision_utility(article: dict[str, Any]) -> bool:
     if re.search(r"\|(?:\s*[-:]+\s*\|)+", content):
         return True
     # 3. Contains explicit mathematical formula
-    if any(k in content for k in ("$", "EV =", "ROI =", "break-even", "formula", "dataset")):
-        return True
-    return False
+    return bool(any(k in content for k in ("$", "EV =", "ROI =", "break-even", "formula", "dataset")))
 
 
 # --------------------------------------------------------------------------
@@ -1456,8 +1441,8 @@ def dispatch(article: dict[str, Any], platform: str, env: dict[str, str] | None 
         title = article.get("title", "Groundwork Research")
         caption = build_standard_social_caption(article)
         slug = article.get("slug", "")
-        img = article.get("image_url") or f"https://media.gworky.com/covers/{slug}.webp"
-        
+        article.get("image_url") or f"https://media.gworky.com/covers/{slug}.webp"
+
         # 1. Lookup verified video from podcast_episodes table
         video_url = None
         try:

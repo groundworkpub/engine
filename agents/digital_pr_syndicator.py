@@ -19,10 +19,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -252,7 +250,7 @@ def process_article_pr(article: dict[str, Any], autonomous: bool = False) -> Non
 
     ok = record_outreach_prospect(pr_pack)
     if ok:
-        logger.info(f"Successfully registered in outreach_prospects")
+        logger.info("Successfully registered in outreach_prospects")
 
     notify_telegram_pr(pr_pack, is_autonomous=autonomous)
 

@@ -26,11 +26,10 @@ import logging
 import os
 import re
 import sys
-import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
@@ -471,7 +470,7 @@ def persist_keyword_triad(
 ) -> dict[str, int]:
     """Executes Triad Persistence across Supabase, local JSON, and repository ledgers."""
     stats = {"inserted": 0, "skipped": 0}
-    timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp_str = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
     # 1. Supabase public.keywords table insertion
     if not dry_run and SUPABASE_URL and SUPABASE_KEY:
@@ -515,7 +514,7 @@ def persist_keyword_triad(
 
 def update_ledgers(total_found: int, inserted: int, artifact_name: str, dry_run: bool) -> None:
     """Synchronizes state shifts to research-state.yaml and logs entries in findings.md."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
 
     # Update findings.md
     findings_path = ROOT_DIR / "findings.md"

@@ -17,7 +17,6 @@ import argparse
 import json
 import logging
 import os
-import sys
 import urllib.parse
 from datetime import UTC, datetime
 from pathlib import Path

@@ -12,12 +12,11 @@ Usage:
   python3 agents/awin_approval_listener.py --check
 """
 
-import os
-import sys
 import json
 import logging
-import urllib.request
+import os
 import urllib.error
+import urllib.request
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("awin_listener")

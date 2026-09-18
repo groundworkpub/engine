@@ -105,9 +105,7 @@ class LLMRouter:
     def _is_provider_healthy(self, provider_id: str) -> bool:
         """Check if provider is not currently tripped by circuit breaker."""
         cooloff = self.failed_providers.get(provider_id, 0)
-        if time.time() < cooloff:
-            return False
-        return True
+        return not time.time() < cooloff
 
     def _trip_circuit_breaker(self, provider_id: str, cooloff_seconds: int = 180) -> None:
         """Temporarily isolate a failing provider."""

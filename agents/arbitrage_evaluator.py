@@ -18,23 +18,23 @@ import json
 import logging
 import os
 import sys
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 # Ensure parent directory is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents.affiliate_adapters.openaffiliate import OpenAffiliateAdapter
-from agents.affiliate_adapters.clickbank import ClickBankAdapter
 from agents.affiliate_adapters.awin import AwinAdapter
-from agents.affiliate_adapters.impact import ImpactAdapter
-from agents.affiliate_adapters.firstpromoter import FirstPromoterAdapter
 from agents.affiliate_adapters.base import AffiliateProductDTO
+from agents.affiliate_adapters.clickbank import ClickBankAdapter
+from agents.affiliate_adapters.firstpromoter import FirstPromoterAdapter
+from agents.affiliate_adapters.impact import ImpactAdapter
+from agents.affiliate_adapters.openaffiliate import OpenAffiliateAdapter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("arbitrage_evaluator")
 
 # Benchmark average order values (AOV) by vertical to normalize RevShare into expected CPA
-ESTIMATED_AOV: Dict[str, float] = {
+ESTIMATED_AOV: dict[str, float] = {
     "money": 120.0,
     "home": 350.0,
     "tech": 85.0,
@@ -43,7 +43,7 @@ ESTIMATED_AOV: Dict[str, float] = {
 }
 
 # Network Trust Factors (reflecting EPC stability, fraud filtering, and refund risks)
-NETWORK_TRUST_FACTORS: Dict[str, float] = {
+NETWORK_TRUST_FACTORS: dict[str, float] = {
     "direct": 0.98,
     "impact": 0.95,
     "awin": 0.90,
@@ -53,7 +53,7 @@ NETWORK_TRUST_FACTORS: Dict[str, float] = {
 }
 
 # Regional Affinity Weights by Network
-REGIONAL_AFFINITY: Dict[str, Dict[str, float]] = {
+REGIONAL_AFFINITY: dict[str, dict[str, float]] = {
     "US": {"impact": 1.10, "direct": 1.05, "clickbank": 1.05, "awin": 0.95, "firstpromoter": 1.00, "openaffiliate": 1.00},
     "UK": {"awin": 1.15, "impact": 1.00, "direct": 1.00, "clickbank": 0.90, "firstpromoter": 0.95, "openaffiliate": 1.00},
     "AU": {"impact": 1.05, "awin": 1.05, "direct": 1.00, "clickbank": 0.90, "firstpromoter": 0.95, "openaffiliate": 1.00},
@@ -182,13 +182,13 @@ class ArbitrageEvaluator:
         self.impact = ImpactAdapter()
         self.firstpromoter = FirstPromoterAdapter()
 
-    def evaluate_all(self, pillar_filter: Optional[str] = None, region: str = "US") -> Dict[str, Any]:
+    def evaluate_all(self, pillar_filter: str | None = None, region: str = "US") -> dict[str, Any]:
         """
         Harvests offers across available adapters, computes Net Expected Yield via the
         Hybrid Weighted EPC Matrix, and ranks opportunities by pillar.
         """
         logger.info("Harvesting offers across Impact, Awin, ClickBank, FirstPromoter, and OpenAffiliate...")
-        all_programs: List[Dict[str, Any]] = []
+        all_programs: list[dict[str, Any]] = []
 
         # 1. Harvest Impact.com (Enterprise SaaS)
         try:
@@ -295,7 +295,7 @@ class ArbitrageEvaluator:
             prog["net_expected_yield"] = net_yield
 
         # Group by pillar
-        by_pillar: Dict[str, List[Dict[str, Any]]] = {}
+        by_pillar: dict[str, list[dict[str, Any]]] = {}
         for prog in all_programs:
             pil = prog.get("pillar") or "tech"
             if pillar_filter and pil != pillar_filter:

@@ -71,7 +71,7 @@ class HunterClient:
     async def get_account_info(self) -> dict[str, Any]:
         """Fetches remaining search & verification credits."""
         if not self.api_key:
-            return {"configured": False, "calls_remaining": 0, "searches_remaining": 0}
+            return {"configured": False, "mock": True, "calls_remaining": 0, "searches_remaining": 0}
 
         url = f"{self.BASE_URL}/account?api_key={self.api_key}"
         async with httpx.AsyncClient(timeout=10.0) as client:

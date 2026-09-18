@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sys
+
 import httpx
 
 TELEGRAPH_CREATE = "https://api.telegra.ph/createPage"

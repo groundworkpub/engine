@@ -190,7 +190,7 @@ def _run_corpus_elevation(supabase: Any, limit: int = 5, run_log: dict[str, Any]
     logger.info("=" * 60)
     elevated_count = 0
     try:
-        from scripts.elevate_corpus_batch import find_elevation_candidates, elevate_single_article
+        from scripts.elevate_corpus_batch import elevate_single_article, find_elevation_candidates
         candidates = find_elevation_candidates(limit=limit)
         logger.info("Found %d articles eligible for empirical elevation.", len(candidates))
         for art in candidates:

@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -69,7 +68,7 @@ def run_aggregator_ping(domain: str = "gworky.com", limit: int = 10, dry_run: bo
             clean_domain = tier2_url  # for logging
             # For Tier 2, pattern may contain {{URL}} or {{DOMAIN}} — replace accordingly
             use_tier2 = True
-        except:
+        except Exception:
             targets = CURATED_AGGREGATOR_PATTERNS[:limit]
             clean_domain = tier2_url
             use_tier2 = False
@@ -100,7 +99,7 @@ def run_aggregator_ping(domain: str = "gworky.com", limit: int = 10, dry_run: bo
                 elif url == pat:  # no replacement happened, try domain
                     try:
                         url = pat.format(domain=clean_domain)
-                    except:
+                    except Exception:
                         url = pat
             else:
                 url = pat.format(domain=clean_domain)
@@ -114,7 +113,6 @@ def run_aggregator_ping(domain: str = "gworky.com", limit: int = 10, dry_run: bo
 
             try:
                 resp = client.get(url)
-                status = "success" if resp.status_code in (200, 301, 302, 403) else f"http_{resp.status_code}"
                 logger.info(f"Pinged [{name}] (DR {dr}) -> {url[:60]} (Status: {resp.status_code})")
                 results.append({
                     "name": name,

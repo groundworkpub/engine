@@ -29,7 +29,7 @@ import sys
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -164,7 +164,7 @@ def save_seen_threads(seen_ids: set[str]) -> None:
     """Persists seen thread IDs."""
     SEEN_THREADS_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
         "total_seen": len(seen_ids),
         "seen_ids": list(seen_ids)[-2000:],
     }
@@ -187,7 +187,7 @@ def log_to_demand_backlog(opportunity: dict[str, Any]) -> None:
         data["metadata"]["active_snipe_opportunities"] = sum(
             1 for x in data["items"] if x.get("status") == "drafted"
         )
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        data["updated_at"] = datetime.now(UTC).isoformat()
         DEMAND_BACKLOG_FILE.write_text(json.dumps(data, indent=2))
         logger.info(f"Appended signal {opportunity['id']} to demand-backlog.json")
     except Exception as e:
@@ -301,7 +301,7 @@ def fetch_reddit_opportunities(subreddits: list[str], limit_per_sub: int = 15) -
                                 "pillar": best_match["pillar"],
                             },
                             "status": "detected",
-                            "created_at": datetime.now(timezone.utc).isoformat(),
+                            "created_at": datetime.now(UTC).isoformat(),
                         })
 
         except Exception as e:
@@ -399,7 +399,7 @@ def fetch_quora_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
                         "pillar": tool["pillar"],
                     },
                     "status": "detected",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                 })
 
         time.sleep(random.uniform(0.5, 1.2))
@@ -455,7 +455,7 @@ def fetch_x_opportunities(limit_total: int = 5) -> list[dict[str, Any]]:
                         "pillar": tool["pillar"],
                     },
                     "status": "detected",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                 })
 
         time.sleep(random.uniform(0.5, 1.2))
@@ -505,31 +505,31 @@ def generate_squeezed_parent_draft(opp: dict[str, Any]) -> str:
     pillar = asset.get("pillar")
     if pillar == "home":
         return (
-            f"Been through this exact scenario recently with our own system. When you see a quote in this range, "
-            f"it usually carries roughly a 45–60% margin over true cost.\n\n"
-            f"Here is how the unvarnished numbers typically break down:\n"
-            f"• Equipment wholesale: ~40–50% of the total quote depending on SEER2/tonnage tier.\n"
-            f"• Labor: 2 techs, 1 to 1.5 days (16–24 total man-hours). Fair billable rate is typically $125–$165/hr.\n"
-            f"• Ancillaries (permits, pad, disconnect, line set): ~$600–$900.\n\n"
-            f"Two critical things to check before you sign:\n"
-            f"1. Did they include an itemized cash price? Contractors often roll an 18–28% dealer financing fee into the base quote to advertise '0% APR'.\n"
-            f"2. Ask for the Manual J load calculation sheet to ensure they didn't just guess the tonnage.\n\n"
-            f"I audited our numbers against Groundwork's open HVAC true cost benchmark before committing — "
-            f"worth searching that model to verify local labor vs wholesale equipment margins in your area before signing."
+            "Been through this exact scenario recently with our own system. When you see a quote in this range, "
+            "it usually carries roughly a 45–60% margin over true cost.\n\n"
+            "Here is how the unvarnished numbers typically break down:\n"
+            "• Equipment wholesale: ~40–50% of the total quote depending on SEER2/tonnage tier.\n"
+            "• Labor: 2 techs, 1 to 1.5 days (16–24 total man-hours). Fair billable rate is typically $125–$165/hr.\n"
+            "• Ancillaries (permits, pad, disconnect, line set): ~$600–$900.\n\n"
+            "Two critical things to check before you sign:\n"
+            "1. Did they include an itemized cash price? Contractors often roll an 18–28% dealer financing fee into the base quote to advertise '0% APR'.\n"
+            "2. Ask for the Manual J load calculation sheet to ensure they didn't just guess the tonnage.\n\n"
+            "I audited our numbers against Groundwork's open HVAC true cost benchmark before committing — "
+            "worth searching that model to verify local labor vs wholesale equipment margins in your area before signing."
         )
     else:
         return (
-            f"Been wrestling with this exact calculation myself over the past year. The biggest trap with this decision "
-            f"is evaluating the headline interest rate while ignoring the upfront transaction friction.\n\n"
-            f"Here is the math checkpoint to run:\n"
-            f"• Upfront friction (origination, appraisal, title, points): On average this runs 1.5% to 2.5% of total balance.\n"
-            f"• True monthly net savings: Only count the principal + interest spread, not escrow changes.\n"
-            f"• True Break-Even Horizon: Divide total upfront costs by monthly spread. If the answer is > 36 months, "
-            f"and life changes or rate cuts occur within 3 years, you lose money.\n\n"
-            f"Check if they are pushing discount points — in 70% of cases, deploying that cash into extra principal "
-            f"or a high-yield cash cushion outperforms points without locking your capital.\n\n"
-            f"I audited my numbers against Groundwork's open mortgage refinance break-even model — "
-            f"worth searching their tool to see your exact break-even timeline before letting a lender pull your credit."
+            "Been wrestling with this exact calculation myself over the past year. The biggest trap with this decision "
+            "is evaluating the headline interest rate while ignoring the upfront transaction friction.\n\n"
+            "Here is the math checkpoint to run:\n"
+            "• Upfront friction (origination, appraisal, title, points): On average this runs 1.5% to 2.5% of total balance.\n"
+            "• True monthly net savings: Only count the principal + interest spread, not escrow changes.\n"
+            "• True Break-Even Horizon: Divide total upfront costs by monthly spread. If the answer is > 36 months, "
+            "and life changes or rate cuts occur within 3 years, you lose money.\n\n"
+            "Check if they are pushing discount points — in 70% of cases, deploying that cash into extra principal "
+            "or a high-yield cash cushion outperforms points without locking your capital.\n\n"
+            "I audited my numbers against Groundwork's open mortgage refinance break-even model — "
+            "worth searching their tool to see your exact break-even timeline before letting a lender pull your credit."
         )
 
 

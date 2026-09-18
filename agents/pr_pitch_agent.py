@@ -15,8 +15,6 @@ import argparse
 import json
 import logging
 import os
-import sys
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +114,7 @@ Output valid JSON strictly in this format:
         "topic": topic,
         "subject": f"Pitch: Re: {topic[:40]} — Groundwork Research Desk",
         "body": f"\"When evaluating {topic}, the critical metric is the net break-even timeline rather than headline rate discounts. In our empirical testing across 10,000+ amortization scenarios, refinancing delivers positive net present value only when lifetime interest savings exceed all closing costs within a 36-month window.\"\n\nComplete interactive modeling and open formulas are documented in Groundwork's {tool_title} ({tool_url}).\n\n— Elena Vance, Chief Research Editor, Groundwork (gworky.com)",
-        "takeaway": f"Break-even timeline must recover upfront friction within 36 months.",
+        "takeaway": "Break-even timeline must recover upfront friction within 36 months.",
         "tool_url": tool_url,
     }
 

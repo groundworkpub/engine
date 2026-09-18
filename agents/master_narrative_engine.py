@@ -15,9 +15,7 @@ import asyncio
 import json
 import logging
 import os
-import re
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +127,6 @@ class MasterNarrativeEngine:
 
     def generate_master_scripts(self) -> dict[str, Any]:
         """Compiles the narrative arc: Master Opening, Chapters with transition bridges, and Master Outro."""
-        chapters_data = []
 
         # 1. Master Agenda Opening (00:00)
         master_intro_text = (

@@ -17,7 +17,6 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -154,7 +153,7 @@ def run_strategic_synthesis(telemetry_data: dict[str, Any] | None = None) -> dic
         }
 
     synthesis_payload = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "synthesis": synthesis_result,
     }
 

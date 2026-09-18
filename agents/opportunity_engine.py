@@ -685,6 +685,7 @@ if __name__ == "__main__":
 
     if args.harvest_signals:
         import os
+
         from dotenv import load_dotenv
         from supabase import create_client
         load_dotenv(".env.local")

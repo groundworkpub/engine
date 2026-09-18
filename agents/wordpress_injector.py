@@ -23,15 +23,14 @@ import logging
 import os
 import random
 import re
-import sys
-import time
 import xmlrpc.client
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+
 
 # Load environment
 def _load_env_local() -> None:
@@ -197,7 +196,7 @@ TIER2_DESTINATIONS: dict[str, dict[str, str]] = {
 
 def select_weighted_tier2_destination(pillar: str = "money") -> dict[str, str]:
     """Selects a high-DR Tier 2 authority buffer destination with weighted distribution.
-    
+
     Weights:
     - 40% GitHub Pages (DR 96)
     - 30% Dev.to (DR 91)
@@ -307,7 +306,7 @@ def extract_target_article_context(url: str, use_proxy: bool = False) -> dict[st
                 for c_item in comment_items:
                     # Check for inline anchors within comment prose
                     anchors = c_item.find_all("a", href=True)
-                    if any(a["href"].startswith("http") and not urlparse(url).netloc in a["href"] for a in anchors):
+                    if any(a["href"].startswith("http") and urlparse(url).netloc not in a["href"] for a in anchors):
                         result["has_inline_comment_links"] = True
                         break
 
@@ -476,6 +475,7 @@ def submit_wordpress_comment(
         logger.info(f"Target is protected by {target_info.get('captcha_type')}. Routing to Track 2 (Autonomous Headless Browser Agent)...")
         try:
             import asyncio
+
             from agents.browser_comment_agent import execute_browser_comment_injection
 
             browser_res = asyncio.run(
@@ -559,6 +559,7 @@ def submit_wordpress_comment(
                 logger.info(f"Headless submission got HTTP {resp.status_code}. Handing off to Autonomous Browser Agent (Track 2)...")
                 try:
                     import asyncio
+
                     from agents.browser_comment_agent import execute_browser_comment_injection
 
                     browser_res = asyncio.run(
@@ -617,7 +618,7 @@ def log_injection_to_supabase(
         logger.info(f"[DRY-RUN] Would log to Supabase: {target_url} -> {status}")
         return
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     record = {
         "source_slug": tool_info.get("slug", pillar),
         "target_platform": f"wordpress_{method}",
@@ -674,7 +675,7 @@ def execute_wordpress_injection(
     tool_info = get_target_tool(pillar)
 
     logger.info("=" * 60)
-    logger.info(f"STARTING WORDPRESS INJECTION PIPELINE")
+    logger.info("STARTING WORDPRESS INJECTION PIPELINE")
     logger.info(f" Target URL     : {target_url}")
     logger.info(f" Pillar         : {pillar.upper()}")
     logger.info(f" Persona        : {persona['name']} ({persona['title']})")
@@ -685,7 +686,7 @@ def execute_wordpress_injection(
     # 1. Scrape target context, check comments, check captcha, check honeypots
     context = extract_target_article_context(target_url, use_proxy=use_proxy)
     if context.get("is_comments_closed"):
-        logger.warning(f"Target article comments are closed. Aborting injection.")
+        logger.warning("Target article comments are closed. Aborting injection.")
         return {"status": "comments_closed", "success": False, "target": target_url}
 
     context["pillar"] = pillar

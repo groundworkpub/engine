@@ -1224,7 +1224,7 @@ def main() -> None:
                 from roundup_generator import PILLAR_CONFIG, publish_roundup
 
             if args.all_pillars:
-                results = [publish_roundup(p, dry_run=args.dry_run) for p in PILLAR_CONFIG.keys()]
+                results = [publish_roundup(p, dry_run=args.dry_run) for p in PILLAR_CONFIG]
                 print(json.dumps(results, indent=2))
             else:
                 res = publish_roundup(args.pillar, dry_run=args.dry_run)

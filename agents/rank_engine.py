@@ -4,9 +4,9 @@ Groundwork RankEngine 100 Evaluator (Python 3.12).
 Evaluates articles using the 100-point RankMath + AEO + Flesch Reading Ease model.
 """
 
-from dataclasses import dataclass, field
 import re
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -25,8 +25,8 @@ class RankReport:
     score: int
     grade: str
     flesch_reading_ease: float
-    tests: List[Dict[str, Any]] = field(default_factory=list)
-    recommendations: List[str] = field(default_factory=list)
+    tests: list[dict[str, Any]] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
 
 def count_syllables(word: str) -> int:
@@ -66,8 +66,8 @@ def evaluate_content(
     slug: str,
     content: str,
     focus_keyword: str,
-    has_answer_box: Optional[bool] = None,
-    has_citations: Optional[bool] = None,
+    has_answer_box: bool | None = None,
+    has_citations: bool | None = None,
 ) -> RankReport:
     kw = focus_keyword.lower().strip()
     t_clean = title.lower().strip()
@@ -78,8 +78,8 @@ def evaluate_content(
     words = [w for w in re.sub(r"[#*`_\[\]()]", "", content).split() if w]
     word_count = len(words)
 
-    tests: List[Dict[str, Any]] = []
-    recs: List[str] = []
+    tests: list[dict[str, Any]] = []
+    recs: list[str] = []
 
     # Category 1: Basic SEO (35 pts)
     kw_in_title = kw in t_clean

@@ -8,12 +8,10 @@ with automatic tiered failover and local caching.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import urllib.request
 from pathlib import Path
-from typing import Any
 
 import httpx
 

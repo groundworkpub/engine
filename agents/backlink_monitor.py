@@ -15,15 +15,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import httpx
+
 
 def _load_env_local() -> None:
     root_env = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env.local")
@@ -195,7 +194,7 @@ def main():
     conn.close()
 
     print(f"\nChecking health of {len(rows)} recent backlinks...\n")
-    for plat, live_url, tgt_url, anchor, st in rows:
+    for plat, live_url, tgt_url, anchor, _st in rows:
         health = check_backlink_health(live_url, tgt_url, anchor)
         status_icon = "✅" if health["http_status"] == 200 else f"❌ ({health['http_status']})"
         print(f"[{plat:<18}] {status_icon} | {live_url[:65]}...")

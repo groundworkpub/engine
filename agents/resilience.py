@@ -54,7 +54,7 @@ def _log_error(**event_kw: Any) -> None:
         logger.error("%s %s", event, event_kw, exc_info=event_kw.pop("exc_info", False))
 
 
-def resilient_task(func: F) -> F:
+def resilient_task[F: Callable[..., Any]](func: F) -> F:
     """Replace bare `except Exception` with structured logging.
 
     Usage::
@@ -83,7 +83,7 @@ def resilient_task(func: F) -> F:
     return wrapper  # type: ignore[return-value]
 
 
-def safe_api_call(func: F) -> F:
+def safe_api_call[F: Callable[..., Any]](func: F) -> F:
     """Best-effort wrapper: logs and swallows errors, returning a default.
 
     Intended for optional integrations (bing ping, webmention, satellite) that

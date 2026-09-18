@@ -7,12 +7,13 @@ links (HTTP 404/410), generates an academic courtesy pitch from Elena Vance, and
 opportunities in Supabase `outreach_prospects` with Telegram alerts to @gwelena_bot.
 """
 
+import argparse
+import json
+import logging
 import os
 import sys
-import json
 import time
-import logging
-import argparse
+
 import httpx
 from bs4 import BeautifulSoup
 
@@ -33,7 +34,7 @@ def load_env():
     """Load credentials from .env.local if present."""
     env_file = os.path.join(ROOT_DIR, ".env.local")
     if os.path.exists(env_file):
-        with open(env_file, "r", encoding="utf-8") as f:
+        with open(env_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("#") or "=" not in line:
@@ -49,7 +50,7 @@ def load_academic_seeds() -> list[dict]:
     seeds = []
     if os.path.exists(RESOURCES_PATH):
         try:
-            with open(RESOURCES_PATH, "r", encoding="utf-8") as f:
+            with open(RESOURCES_PATH, encoding="utf-8") as f:
                 data = json.load(f)
                 seeds.extend(data.get("academic_extensions", []))
         except Exception as e:
@@ -59,7 +60,7 @@ def load_academic_seeds() -> list[dict]:
     pool_file = os.path.join(ROOT_DIR, "docs", "seo", "dynamic_seeds_pool.json")
     if os.path.exists(pool_file):
         try:
-            with open(pool_file, "r", encoding="utf-8") as f:
+            with open(pool_file, encoding="utf-8") as f:
                 dyn_seeds = json.load(f)
                 for ds in dyn_seeds:
                     if not any(s.get("url") == ds.get("url") for s in seeds):
@@ -211,7 +212,7 @@ def record_snowball_seed(discovered_url: str, pillar: str):
     seeds_pool = []
     if os.path.exists(pool_file):
         try:
-            with open(pool_file, "r", encoding="utf-8") as f:
+            with open(pool_file, encoding="utf-8") as f:
                 seeds_pool = json.load(f)
         except Exception:
             seeds_pool = []
@@ -239,18 +240,18 @@ def calculate_semantic_score(anchor: str, topic: str, replacement_url: str) -> f
     """Calculate semantic relevance score (0.0 - 1.0) between broken link anchor and Groundwork asset."""
     clean_anchor = anchor.lower()
     asset_slug = replacement_url.split("/")[-1].replace("-", " ")
-    
+
     # Keyword overlap count
     words = [w for w in set(clean_anchor.split()) if len(w) > 3]
     if not words:
         return 0.50
     matches = sum(1 for w in words if w in asset_slug or w in topic.lower())
     ratio = matches / len(words)
-    
+
     # Boost if high-value technical terms match
     if any(k in clean_anchor for k in ["solar", "calculator", "payback", "tax credit", "insulation", "mortgage", "heat pump", "refinance"]):
         ratio = min(1.0, ratio + 0.35)
-        
+
     return round(max(0.60, min(0.95, ratio)), 2)
 
 def send_autonomous_resend_email(to_email: str, subject: str, body: str) -> bool:
@@ -309,7 +310,7 @@ def scan_seed_for_broken_links(seed: dict, max_links: int = 15, timeout: float =
 
             soup = BeautifulSoup(resp.text, "html.parser")
             anchors = soup.find_all("a", href=True)
-            
+
             outbound_urls = []
             for a in anchors:
                 href = a["href"]
@@ -344,7 +345,7 @@ def scan_seed_for_broken_links(seed: dict, max_links: int = 15, timeout: float =
                             "coordinator_contact": seed.get("coordinator_contact"),
                             "score": score
                         }
-                        
+
                         # Full-Autonomous Decision Matrix: score >= 0.85 dispatches directly
                         if score >= 0.85 and item.get("coordinator_contact"):
                             draft = generate_academic_pitch(item)

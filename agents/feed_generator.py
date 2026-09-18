@@ -40,7 +40,6 @@ def generate_rss_feed(articles: list[dict[str, Any]], digests: list[NewsItem]) -
         pillar = html.escape(dig.pillar.upper())
         link = f"{GH_PAGES_URL}/digest/{dig.slug}/"
         image_url = f"{GH_PAGES_URL}/digest/{dig.slug}/og.svg"
-        guid = f"digest-{dig.slug}"
 
         items_xml += f"""    <item>
       <title>{title}</title>

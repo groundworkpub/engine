@@ -8,14 +8,13 @@ follows redirects, and detects broken links, closed merchant landing pages
 Emits actionable telemetry and enables auto-healing via portal.gworky.com/go fallback gateway.
 """
 
-import sys
-import os
-import re
 import json
 import logging
-import urllib.request
+import os
+import re
+import sys
 import urllib.error
-from urllib.parse import urlparse
+import urllib.request
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -37,7 +36,7 @@ INACTIVE_INDICATORS = [
 def load_static_partners():
     """Extract partners from lib/monetization/affiliate.ts."""
     affiliate_path = os.path.join(os.path.dirname(__file__), "..", "lib", "monetization", "affiliate.ts")
-    with open(affiliate_path, "r", encoding="utf-8") as f:
+    with open(affiliate_path, encoding="utf-8") as f:
         content = f.read()
 
     # Regex parse partner definitions

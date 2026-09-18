@@ -31,20 +31,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
-import re
 import socket
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Any, Optional
-from urllib.parse import urljoin, urlparse
+from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+
 
 # Load environment
 def _load_env_local() -> None:
@@ -111,9 +110,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 try:
-    from dork_harvester import search_dork_cascade, decode_bing_url, scrape_tavily_search
+    from dork_harvester import decode_bing_url, scrape_tavily_search, search_dork_cascade
 except ImportError:
-    from agents.dork_harvester import search_dork_cascade, decode_bing_url, scrape_tavily_search
+    from agents.dork_harvester import decode_bing_url, scrape_tavily_search, search_dork_cascade
 
 
 def get_http_client() -> httpx.Client:
@@ -424,7 +423,7 @@ def verify_platform_availability(target_url: str, platform: str) -> bool:
 # ---------------------------------------------------------------------------
 # Fast Wayback Availability & Cleanliness Verification
 # ---------------------------------------------------------------------------
-def verify_wayback_cleanliness(domain: str) -> tuple[bool, str, int, Optional[str]]:
+def verify_wayback_cleanliness(domain: str) -> tuple[bool, str, int, str | None]:
     """Queries Archive.org Wayback Availability API for sub-second verification,
 
     followed by a sample snapshot audit for anti-spam keyword verification.
@@ -486,7 +485,7 @@ def log_node_to_supabase(
     platform: str,
     referring_url: str,
     wayback_note: str,
-    snapshot_url: Optional[str],
+    snapshot_url: str | None,
     recommended_action: str = "301_redirect",
 ) -> bool:
     """Logs the validated property to public.buffer_nodes (with fallback to link_injection_logs)."""
@@ -495,7 +494,7 @@ def log_node_to_supabase(
     if not supabase_url or not supabase_key:
         return False
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
 
     # 1. Primary Target: public.buffer_nodes
     buffer_record = {
@@ -641,7 +640,7 @@ def send_telegram_alert(
     platform: str,
     referring_url: str,
     wayback_note: str,
-    snapshot_url: Optional[str],
+    snapshot_url: str | None,
     recommended_action: str = "301_redirect",
 ) -> None:
     """Sends observational alert card with platform-specific 1-click claim/registration URLs."""
@@ -708,7 +707,7 @@ def send_telegram_alert(
 def hunt_zombies(
     pillar: str = "money",
     platform: str = "all",
-    crawl_url: Optional[str] = None,
+    crawl_url: str | None = None,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
     """Runs the multi-platform zombie and dropped domain hunting pipeline."""

@@ -185,7 +185,7 @@ def generate_article_html(
   <meta name="description" content="{excerpt}">
   <link rel="canonical" href="{canonical}">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
-  
+
   <meta property="og:title" content="{title}">
   <meta property="og:description" content="{excerpt}">
   <meta property="og:url" content="{canonical}">
@@ -196,7 +196,7 @@ def generate_article_html(
   <meta property="og:image:height" content="630">
   <meta property="article:published_time" content="{now_iso}">
   <meta property="article:section" content="{pillar_label}">
-  
+
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{title}">
   <meta name="twitter:description" content="{excerpt}">
@@ -239,29 +239,29 @@ def generate_article_html(
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.8; padding-top: 64px; }}
-    
+
     .site-header {{ position: fixed; top: 0; left: 0; right: 0; background: rgba(10, 25, 47, 0.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 1000; }}
     .header-inner {{ max-width: 1040px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; }}
     .brand-logo {{ color: #FFFFFF; text-decoration: none; font-size: 1.05rem; display: flex; align-items: center; gap: 6px; }}
     .logo-mark {{ color: var(--accent); }}
-    
+
     .header-nav {{ display: flex; gap: 8px; align-items: center; }}
     .nav-link {{ color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; padding: 4px 10px; border-radius: 6px; transition: all 0.2s; }}
     .nav-link:hover, .nav-link.active {{ color: #FFFFFF; background: rgba(255, 255, 255, 0.06); }}
     .gworky-link {{ color: var(--accent) !important; border: 1px solid rgba(16, 185, 129, 0.25); }}
     .reading-progress-bar {{ height: 2px; background: var(--accent); width: 0%; transition: width 0.1s ease-out; }}
-    
+
     .container {{ max-width: 820px; margin: 2rem auto; background: var(--card); padding: 2.5rem; border-radius: 12px; border: 1px solid var(--border); }}
-    
+
     .breadcrumbs {{ font-size: 0.82rem; color: var(--muted); margin-bottom: 1.2rem; display: flex; gap: 6px; align-items: center; }}
     .breadcrumbs a {{ color: var(--muted); text-decoration: none; }}
     .breadcrumbs a:hover {{ color: var(--accent); }}
-    
+
     .badge {{ display: inline-block; background: rgba(16, 185, 129, 0.1); color: var(--accent); font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; padding: 0.25rem 0.75rem; border-radius: 4px; text-transform: uppercase; margin-bottom: 0.8rem; }}
     h1 {{ color: var(--heading); font-size: 2.15rem; line-height: 1.3; margin-bottom: 1rem; font-family: Georgia, serif; font-weight: normal; }}
-    
+
     .article-meta {{ display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }}
-    
+
     .takeaway-box {{ background: rgba(16, 185, 129, 0.05); border-left: 3px solid var(--accent); border-radius: 6px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; }}
     .takeaway-box h4 {{ color: #FFFFFF; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; font-weight: 600; }}
     .takeaway-box p {{ font-size: 1rem; color: var(--text); margin-bottom: 0; line-height: 1.6; }}
@@ -281,7 +281,7 @@ def generate_article_html(
     .next-card {{ text-align: right; }}
     .nav-dir {{ font-size: 0.75rem; color: var(--accent); text-transform: uppercase; font-weight: 600; }}
     .nav-title {{ color: #FFFFFF; font-size: 0.9rem; font-weight: 500; line-height: 1.4; }}
-    
+
     .footer {{ margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); text-align: center; }}
     .footer a {{ color: var(--text); text-decoration: none; }}
     .footer a:hover {{ color: var(--accent); }}
@@ -388,7 +388,7 @@ def generate_news_digest_html(
   <meta name="description" content="{desc}">
   <link rel="canonical" href="{GH_PAGES_URL}/digest/{slug}/">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
-  
+
   <meta property="og:title" content="{title}">
   <meta property="og:description" content="{desc}">
   <meta property="og:type" content="article">
@@ -431,35 +431,35 @@ def generate_news_digest_html(
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.8; padding-top: 64px; }}
-    
+
     .site-header {{ position: fixed; top: 0; left: 0; right: 0; background: rgba(10, 25, 47, 0.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 1000; }}
     .header-inner {{ max-width: 1040px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; }}
     .brand-logo {{ color: #FFFFFF; text-decoration: none; font-size: 1.05rem; display: flex; align-items: center; gap: 6px; }}
     .logo-mark {{ color: var(--accent); }}
-    
+
     .header-nav {{ display: flex; gap: 8px; align-items: center; }}
     .nav-link {{ color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; padding: 4px 10px; border-radius: 6px; transition: all 0.2s; }}
     .nav-link:hover, .nav-link.active {{ color: #FFFFFF; background: rgba(255, 255, 255, 0.06); }}
     .gworky-link {{ color: var(--accent) !important; border: 1px solid rgba(16, 185, 129, 0.25); }}
-    
+
     .container {{ max-width: 820px; margin: 2rem auto; background: var(--card); padding: 2.5rem; border-radius: 12px; border: 1px solid var(--border); }}
     .breadcrumbs {{ font-size: 0.82rem; color: var(--muted); margin-bottom: 1.2rem; display: flex; gap: 6px; align-items: center; }}
     .breadcrumbs a {{ color: var(--muted); text-decoration: none; }}
     .breadcrumbs a:hover {{ color: var(--accent); }}
-    
+
     .badge {{ display: inline-block; background: rgba(16, 185, 129, 0.1); color: var(--accent); font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; padding: 0.25rem 0.75rem; border-radius: 4px; text-transform: uppercase; margin-bottom: 0.8rem; }}
     h1 {{ color: var(--heading); font-size: 1.95rem; line-height: 1.35; margin-bottom: 0.8rem; font-family: Georgia, serif; font-weight: normal; }}
     .source-meta {{ color: var(--muted); font-size: 0.85rem; margin-bottom: 1.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border); }}
-    
+
     .synthesis-card {{ background: var(--card-alt); border: 1px solid var(--border); padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 1.05rem; }}
-    
+
     .study-pagination {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 3rem 0 1rem; }}
     .nav-card {{ background: var(--card-alt); border: 1px solid var(--border); padding: 1.2rem; border-radius: 8px; text-decoration: none; display: flex; flex-direction: column; gap: 4px; transition: all 0.2s; }}
     .nav-card:hover {{ border-color: var(--accent); }}
     .next-card {{ text-align: right; }}
     .nav-dir {{ font-size: 0.75rem; color: var(--accent); text-transform: uppercase; font-weight: 600; }}
     .nav-title {{ color: #FFFFFF; font-size: 0.9rem; font-weight: 500; line-height: 1.4; }}
-    
+
     .footer {{ margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); text-align: center; }}
     .footer a {{ color: var(--text); text-decoration: none; }}
     .footer a:hover {{ color: var(--accent); }}
@@ -590,13 +590,13 @@ def generate_index_html(
   <link rel="canonical" href="{SITE_URL if filter_pillar == 'all' else f'{SITE_URL}/{filter_pillar}'}">
   <link rel="alternate" type="application/rss+xml" title="Groundwork RSS Feed" href="{GH_PAGES_URL}/feed.xml" />
   <meta name="robots" content="index, follow, max-image-preview:large">
-  
+
   <meta property="og:title" content="{page_heading} — Groundwork">
   <meta property="og:description" content="Clear, evidence-backed guides and decision calculators.">
   <meta property="og:image" content="{GH_PAGES_URL}/og.svg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  
+
   <style>
     :root {{
       --bg: #0A192F;
@@ -610,22 +610,22 @@ def generate_index_html(
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Georgia, serif; background: var(--bg); color: var(--text); line-height: 1.7; padding-top: 64px; }}
-    
+
     .site-header {{ position: fixed; top: 0; left: 0; right: 0; background: rgba(10, 25, 47, 0.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); z-index: 1000; }}
     .header-inner {{ max-width: 1040px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; }}
     .brand-logo {{ color: #FFFFFF; text-decoration: none; font-size: 1.05rem; display: flex; align-items: center; gap: 6px; }}
     .logo-mark {{ color: var(--accent); }}
-    
+
     .header-nav {{ display: flex; gap: 8px; align-items: center; }}
     .nav-link {{ color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; padding: 4px 10px; border-radius: 6px; transition: all 0.2s; }}
     .nav-link:hover, .nav-link.active {{ color: #FFFFFF; background: rgba(255, 255, 255, 0.06); }}
     .gworky-link {{ color: var(--accent) !important; border: 1px solid rgba(16, 185, 129, 0.25); }}
-    
+
     .container {{ max-width: 960px; margin: 2rem auto; padding: 0 1.25rem; }}
     .top-header {{ margin-bottom: 2rem; }}
     h1 {{ color: var(--heading); font-size: 2.2rem; margin-bottom: 0.5rem; font-family: Georgia, serif; font-weight: normal; }}
     .lead {{ color: var(--muted); font-size: 1.05rem; max-width: 680px; line-height: 1.6; margin-bottom: 1rem; }}
-    
+
     /* Control Toolbar */
     .toolbar {{ background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin-bottom: 2rem; }}
     .search-input {{ width: 100%; background: #0A192F; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; color: #FFFFFF; font-size: 0.95rem; outline: none; margin-bottom: 0.8rem; transition: border-color 0.2s; }}
@@ -634,14 +634,14 @@ def generate_index_html(
     .filter-pill {{ background: #0A192F; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.85rem; font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.2s; text-decoration: none; }}
     .filter-pill:hover {{ color: var(--heading); border-color: var(--accent); }}
     .filter-pill.active {{ background: var(--accent); color: #0A192F; border-color: var(--accent); }}
-    
+
     /* Cards */
     .study-card {{ background: var(--card); padding: 1.25rem 1.5rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid var(--border); transition: border-color 0.2s; }}
     .study-card:hover {{ border-color: rgba(16, 185, 129, 0.35); }}
     .card-pill {{ font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; display: inline-block; }}
     .pill-study {{ background: rgba(255, 255, 255, 0.06); color: var(--accent); }}
     .pill-digest {{ background: rgba(16, 185, 129, 0.1); color: var(--accent); }}
-    
+
     footer {{ margin-top: 4rem; padding: 2rem 0; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: 0.85rem; }}
     footer a {{ color: var(--accent); text-decoration: none; }}
 
@@ -716,7 +716,7 @@ def generate_index_html(
         const cardType = card.getAttribute('data-type') || '';
 
         const matchesQuery = query === '' || searchData.includes(query);
-        const matchesPillar = currentPillar === 'all' 
+        const matchesPillar = currentPillar === 'all'
           || (currentPillar === 'digest' && cardType === 'digest')
           || cardPillar === currentPillar;
 
@@ -790,7 +790,7 @@ def generate_html_sitemap(articles: list[dict[str, Any]], news_digests: list[New
   <div class="container">
     <h1>Groundwork Directory</h1>
     <p style="color: #8892B0; margin-bottom: 2rem; font-size: 0.95rem;">Directory of published guides, calculators, and briefs from <a href="{SITE_URL}">Groundwork</a>.</p>
-    
+
     {''.join(p_sections.values())}
     {digest_section}
 

@@ -8,13 +8,12 @@ Implements:
 4. Persistent Search Intelligence Graph.
 """
 
-from dataclasses import dataclass, field
 import json
-from pathlib import Path
-import re
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional, Set
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 # IPTC Media Topics Canonical Mappings
 IPTC_PILLAR_MAP = {
@@ -50,7 +49,7 @@ IPTC_PILLAR_MAP = {
     },
 }
 
-PILLAR_COMPETITORS: Dict[str, List[str]] = {
+PILLAR_COMPETITORS: dict[str, list[str]] = {
     "money": ["bankrate", "nerdwallet", "smartasset", "investopedia", "biggerpockets"],
     "body": ["examine", "healthline", "labdoor", "peter attia", "huberman"],
     "home": ["energysage", "bob vila", "this old house", "rewiring america"],
@@ -85,7 +84,7 @@ def _get_proxy_opener():
     return urllib.request.build_opener()
 
 
-def fetch_google_suggestions(query: str, timeout: int = 5) -> List[str]:
+def fetch_google_suggestions(query: str, timeout: int = 5) -> list[str]:
     """Queries Google Autocomplete API for real search queries with DataImpulse proxy support."""
     encoded = urllib.parse.quote(query.strip())
     url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={encoded}"
@@ -101,7 +100,7 @@ def fetch_google_suggestions(query: str, timeout: int = 5) -> List[str]:
     return []
 
 
-def fetch_youtube_suggestions(query: str, timeout: int = 5) -> List[str]:
+def fetch_youtube_suggestions(query: str, timeout: int = 5) -> list[str]:
     """Queries YouTube Autocomplete API for high-intent video & visual queries."""
     encoded = urllib.parse.quote(query.strip())
     url = f"https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q={encoded}"
@@ -117,10 +116,10 @@ def fetch_youtube_suggestions(query: str, timeout: int = 5) -> List[str]:
     return []
 
 
-def expand_alphabet_soup(seed_phrase: str, letters: Optional[str] = None, surface: str = "google") -> List[str]:
+def expand_alphabet_soup(seed_phrase: str, letters: str | None = None, surface: str = "google") -> list[str]:
     """Recursively expands a seed query across the alphabet (a-z) on Google or YouTube."""
     chars = letters or "abcdefghijklmnopqrstuvwxyz"
-    results: Set[str] = set()
+    results: set[str] = set()
     fetcher = fetch_youtube_suggestions if surface == "youtube" else fetch_google_suggestions
 
     # Base seed suggestions
@@ -137,7 +136,7 @@ def expand_alphabet_soup(seed_phrase: str, letters: Optional[str] = None, surfac
     return sorted(list(results))
 
 
-def classify_query_pillar(query: str) -> Dict[str, str]:
+def classify_query_pillar(query: str) -> dict[str, str]:
     """Maps a query to the best-matching Groundwork pillar and IPTC concept."""
     q_lower = query.lower()
     best_pillar = "money"
@@ -158,7 +157,7 @@ def classify_query_pillar(query: str) -> Dict[str, str]:
     }
 
 
-def score_information_gain(query: str) -> Dict[str, Any]:
+def score_information_gain(query: str) -> dict[str, Any]:
     """
     Evaluates Information Gain potential according to Google's Patent model:
     - High score: Interactive calculation, break-even comparison, primary datasets.
@@ -192,13 +191,13 @@ def score_information_gain(query: str) -> Dict[str, Any]:
 
 
 def mine_pillar_keywords(
-    seed_queries: List[str],
+    seed_queries: list[str],
     max_suggestions_per_seed: int = 15,
-    surfaces: Optional[List[str]] = None,
-) -> List[DiscoveredQuery]:
+    surfaces: list[str] | None = None,
+) -> list[DiscoveredQuery]:
     """Executes multi-surface mining across Google & YouTube and clusters queries into structured entities."""
-    discovered: List[DiscoveredQuery] = []
-    seen: Set[str] = set()
+    discovered: list[DiscoveredQuery] = []
+    seen: set[str] = set()
     active_surfaces = surfaces or ["google", "youtube"]
 
     for seed in seed_queries:
@@ -231,10 +230,10 @@ def mine_pillar_keywords(
 
 def mine_competitor_comparison_keywords(
     max_competitors_per_pillar: int = 3,
-    surfaces: Optional[List[str]] = None,
-) -> List[DiscoveredQuery]:
+    surfaces: list[str] | None = None,
+) -> list[DiscoveredQuery]:
     """Generates competitor alternative, comparison, and calculator switch queries across 5 pillars."""
-    competitor_seeds: List[str] = []
+    competitor_seeds: list[str] = []
     for pillar, comps in PILLAR_COMPETITORS.items():
         for comp in comps[:max_competitors_per_pillar]:
             competitor_seeds.append(f"{comp} vs gworky")
@@ -244,7 +243,7 @@ def mine_competitor_comparison_keywords(
     return mine_pillar_keywords(competitor_seeds, max_suggestions_per_seed=8, surfaces=surfaces)
 
 
-def persist_discovered_keywords(queries: List[DiscoveredQuery], output_path: str = "agents/output/keyword-graph.json") -> None:
+def persist_discovered_keywords(queries: list[DiscoveredQuery], output_path: str = "agents/output/keyword-graph.json") -> None:
     """Saves discovered search intelligence into JSON format for Scribe, Video Shorts, and Sitemaps."""
     out_file = Path(output_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)

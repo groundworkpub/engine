@@ -19,8 +19,8 @@ import argparse
 import io
 import logging
 import os
-import sys
 from typing import Any
+
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 from supabase import create_client
@@ -113,7 +113,7 @@ def render_og_image(title: str, pillar: str, read_time: int = 5) -> bytes:
     font_title = get_font(52, bold=True)
     max_title_width = OG_WIDTH - 160  # 60px padding on left and 100px on right
     title_lines = wrap_text(title, font_title, max_title_width, draw)
-    
+
     # Cap to max 3 lines with ellipsis
     if len(title_lines) > 3:
         title_lines = title_lines[:3]

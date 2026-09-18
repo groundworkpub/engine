@@ -165,10 +165,7 @@ def validate_video_format(video_path: Path, title: str) -> tuple[bool, str]:
                     f"Duration Violation: Shorts duration is {dur:.1f}s (exceeds 60s limit). Cannot enter Shorts feed."
                 )
             # Ensure #Shorts tag is in title
-            if "#Shorts" not in title and "#shorts" not in title:
-                clean_title = f"{title[:80]} #Shorts"
-            else:
-                clean_title = title
+            clean_title = f"{title[:80]} #Shorts" if "#Shorts" not in title and "#shorts" not in title else title
             return True, clean_title
         else:
             # Master / Longform Invariant: MUST be horizontal

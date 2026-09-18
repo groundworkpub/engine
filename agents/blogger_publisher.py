@@ -24,13 +24,12 @@ import logging
 import os
 import re
 import sys
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
 
 # Load environment
 def _load_env_local() -> None:
@@ -66,7 +65,7 @@ def load_fleet_config() -> dict[str, Any]:
     return {}
 
 
-def get_service_account_credentials() -> Optional[dict[str, Any]]:
+def get_service_account_credentials() -> dict[str, Any] | None:
     """Loads Google Service Account JSON from environment or file."""
     raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if raw_json:
@@ -116,9 +115,9 @@ def publish_post_to_blogger(
     blog_id: str,
     title: str,
     content_html: str,
-    labels: Optional[list[str]] = None,
+    labels: list[str] | None = None,
     is_draft: bool = False,
-    credentials_info: Optional[dict[str, Any]] = None,
+    credentials_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Inserts and publishes a post to a Google Blogger blog."""
     creds_data = credentials_info or get_service_account_credentials()
@@ -170,7 +169,7 @@ def log_blogger_post_to_supabase(
     if not supabase_url or not supabase_key:
         return False
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     record = {
         "source_slug": f"blogger-{pillar}-{post_id}",
         "target_platform": "blogger",

@@ -151,7 +151,7 @@ class EconomicIntelligenceEngine:
         try:
             content = affiliate_ts.read_text(encoding="utf-8")
             blocks = re.findall(r'"([^"]+)":\s*\{\s*slug:\s*"([^"]+)",\s*name:\s*"([^"]+)",\s*merchant:\s*"([^"]+)",[^}]+?pillar:\s*"([^"]+)"', content, re.DOTALL)
-            for key, slug, name, merchant, pillar in blocks:
+            for _key, slug, name, merchant, pillar in blocks:
                 partners.append({
                     "slug": slug,
                     "name": name,
@@ -236,7 +236,7 @@ class EconomicIntelligenceEngine:
         best_partner_match_count = 0
 
         for partner in self.affiliate_partners:
-            partner_pillar = partner.get("pillar") or ""
+            partner.get("pillar") or ""
             partner_name = (partner.get("name") or "").lower()
             partner_merchant = (partner.get("merchant") or "").lower()
             partner_slug = partner.get("slug") or ""

@@ -18,12 +18,12 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
 
 # Load environment
 def _load_env_local() -> None:

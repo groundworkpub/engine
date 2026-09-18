@@ -443,7 +443,7 @@ async def handle_update(client: httpx.AsyncClient, update: dict[str, Any], api_b
                             "parse_mode": "HTML"
                         }
                     )
-                    
+
                     # Run poster via subprocess on background worker thread
                     async def run_publish():
                         poster_script = Path(__file__).resolve().parent.parent / ".agents" / "skills" / "forum-growth-copilot" / "scripts" / "poster.py"

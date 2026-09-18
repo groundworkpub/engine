@@ -33,14 +33,13 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
-from typing import Any, Optional
-from urllib.parse import urlparse
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
+
 
 # Load environment
 def _load_env_local() -> None:
@@ -225,7 +224,7 @@ def compile_daily_pillar_digest(pillar: str, items: list[dict[str, Any]]) -> tup
         {idx}. {item['title']}
       </h2>
       <p style="font-size: 0.825rem; color: #64748b; margin-bottom: 0.75rem;">
-        <strong>Agency:</strong> {source} | <strong>Published:</strong> {item.get('pub_date', 'Recent Release')} | 
+        <strong>Agency:</strong> {source} | <strong>Published:</strong> {item.get('pub_date', 'Recent Release')} |
         <a href="{item['link']}" target="_blank" rel="noopener" style="color: #0284c7; text-decoration: none;">View Official Release ↗</a>
       </p>
       <div style="font-size: 0.95rem; line-height: 1.6; color: #334155;">
@@ -302,7 +301,7 @@ def log_syndication_to_supabase(
         return False
 
     tool = PILLAR_TOOLS.get(pillar, PILLAR_TOOLS["money"])
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
 
     record = {
         "source_slug": f"buffer-{pillar}-digest-{int(time.time())}",

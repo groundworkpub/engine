@@ -5,7 +5,6 @@ Purges specific URLs on Cloudflare Zone 67e2be0fcddb82637428c64471050fd8
 whenever an article is published, updated, or unpublished.
 """
 
-import json
 import logging
 import os
 import sys
@@ -15,6 +14,7 @@ import httpx
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from dotenv import load_dotenv
+
 load_dotenv(PROJECT_ROOT / ".env.local")
 
 logger = logging.getLogger("edge_purge")

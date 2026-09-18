@@ -15,14 +15,15 @@ Functionality:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import re
 import sys
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -55,7 +56,7 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 CANONICAL_DOMAIN = "gworky.com"
 
 
-def get_supabase_config() -> Tuple[str, str]:
+def get_supabase_config() -> tuple[str, str]:
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL", "https://keflumlrmggffyrsrmlk.supabase.co")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     return url.rstrip("/"), key
@@ -75,7 +76,7 @@ def send_telegram_alert(message: str) -> None:
         "disable_web_page_preview": True,
     }
 
-    for attempt in range(4):
+    for _attempt in range(4):
         try:
             with httpx.Client(timeout=10.0) as client:
                 res = client.post(telegram_url, json=payload)
@@ -91,7 +92,7 @@ def send_telegram_alert(message: str) -> None:
             time.sleep(2)
 
 
-def check_target_page_for_live_backlink(target_url: str, proxy: Optional[str] = None) -> Tuple[bool, Optional[str], bool]:
+def check_target_page_for_live_backlink(target_url: str, proxy: str | None = None) -> tuple[bool, str | None, bool]:
     """
     Crawls the target page publicly to verify if a Groundwork link is live.
     Returns (is_live, matched_anchor_text, is_dofollow).
@@ -150,7 +151,7 @@ def run_comment_verification_crawler(dry_run: bool = False) -> int:
     now_utc = datetime.now(UTC)
 
     # 1. Fetch pending records from link_injection_logs
-    records_to_check: List[Dict[str, Any]] = []
+    records_to_check: list[dict[str, Any]] = []
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(
@@ -174,10 +175,8 @@ def run_comment_verification_crawler(dry_run: bool = False) -> int:
 
         created_dt = None
         if created_at_str:
-            try:
+            with contextlib.suppress(Exception):
                 created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-            except Exception:
-                pass
 
         age_hours = (now_utc - created_dt).total_seconds() / 3600 if created_dt else 12.0
         logger.info(f"Auditing comment target ({age_hours:.1f}h old): {target_url}")

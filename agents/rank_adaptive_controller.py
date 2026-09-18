@@ -30,9 +30,9 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 # Auto-load .env.local
 _root = Path(__file__).resolve().parent.parent
@@ -143,7 +143,7 @@ class RankAdaptiveController:
         now = time.time()
         earliest_session_time = now
         try:
-            with open(log_file, "r", encoding="utf-8") as f:
+            with open(log_file, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         total_sessions += 1
@@ -174,7 +174,7 @@ class RankAdaptiveController:
 
         return limit
 
-    def fetch_gsc_performance(self, days: int = 28) -> List[Dict[str, Any]]:
+    def fetch_gsc_performance(self, days: int = 28) -> list[dict[str, Any]]:
         """Queries Google Search Console Search Analytics API using the service account."""
         gsc_b64 = os.environ.get("GSC_SERVICE_ACCOUNT_JSON_B64")
         if not gsc_b64:
@@ -250,7 +250,7 @@ class RankAdaptiveController:
             logger.error(f"[-] GSC query error: {e}. Using fallback benchmark pool.")
             return self._fallback_opportunities()
 
-    def _fallback_opportunities(self) -> List[Dict[str, Any]]:
+    def _fallback_opportunities(self) -> list[dict[str, Any]]:
         """High-ROI target opportunities across Groundwork's 5 pillars and regional state pSEO tools."""
         return [
             {
@@ -303,9 +303,9 @@ class RankAdaptiveController:
             },
         ]
 
-    def triage_opportunities(self, gsc_rows: List[Dict[str, Any]]) -> List[TargetOpportunity]:
+    def triage_opportunities(self, gsc_rows: list[dict[str, Any]]) -> list[TargetOpportunity]:
         """Triages queries into striking distance, computes sigmoidal target sessions, and partitions A/B cohorts."""
-        opportunities: List[TargetOpportunity] = []
+        opportunities: list[TargetOpportunity] = []
 
         for row in gsc_rows:
             query = row["query"]
@@ -382,7 +382,7 @@ class RankAdaptiveController:
         opportunities.sort(key=lambda o: (0 if o.category == "striking_distance" else 1, -o.impressions))
         return opportunities
 
-    async def execute_batch(self, max_sessions: Optional[int] = None, dwell_seconds: Optional[int] = None) -> Dict[str, Any]:
+    async def execute_batch(self, max_sessions: int | None = None, dwell_seconds: int | None = None) -> dict[str, Any]:
         """Executes a governed batch of simulation sessions respecting ramp-up limits and circuit breakers."""
         now = time.time()
         if now < self.circuit_breaker_until:
@@ -481,7 +481,7 @@ class RankAdaptiveController:
         logger.info(f"🏁 Batch Finished: {sessions_run} sessions ({successful} OK, {failed} Failed)")
         return summary
 
-    def _dispatch_telegram_alert(self, opp: TargetOpportunity, res: Dict[str, Any]) -> None:
+    def _dispatch_telegram_alert(self, opp: TargetOpportunity, res: dict[str, Any]) -> None:
         """Sends rich telemetry notification to Telegram @gwelena_bot."""
         if not self.telegram_bot_token:
             return
@@ -510,7 +510,7 @@ class RankAdaptiveController:
                 "parse_mode": "Markdown",
             }).encode("utf-8")
             req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=5):
                 pass
         except Exception as te:
             logger.debug(f"Telegram notification skipped: {te}")
@@ -534,7 +534,7 @@ class RankAdaptiveController:
                 "parse_mode": "Markdown",
             }).encode("utf-8")
             req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=5):
                 pass
         except Exception:
             pass

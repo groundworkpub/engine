@@ -26,7 +26,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("cut_test_validator")
@@ -52,7 +52,7 @@ def _load_env_local() -> None:
 _load_env_local()
 
 
-def check_direct_answer(content: str) -> Tuple[bool, str]:
+def check_direct_answer(content: str) -> tuple[bool, str]:
     """Check 1: Opening 250 words must contain a direct answer (BLUF) or callout."""
     first_chunk = content[:1500]
 
@@ -78,18 +78,17 @@ def check_direct_answer(content: str) -> Tuple[bool, str]:
     return False, f"Missing concise Direct Answer (BLUF) in opening passage (first paragraph has {first_p_words} words)."
 
 
-def check_accountability_desk(content: str, metadata: Dict[str, Any] | None = None) -> Tuple[bool, str]:
+def check_accountability_desk(content: str, metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
     """Check 2: Provenance, Fellow, Peer Reviewer, or Domain Taxonomy."""
     # Metadata check (Supabase author/reviewer)
-    if metadata:
-        if metadata.get("author_id") or metadata.get("reviewer_id"):
-            return True, "Accountability desk verified via metadata (Author/Reviewer)."
+    if metadata and (metadata.get("author_id") or metadata.get("reviewer_id")):
+        return True, "Accountability desk verified via metadata (Author/Reviewer)."
 
     # In Groundwork, ProvenanceTrustBar is rendered by Next.js layout for all articles
     return True, "Next.js ProvenanceTrustBar layout renders verified Fellow and Reviewer custody."
 
 
-def check_fourth_wall_anti_slop(content: str) -> Tuple[bool, str]:
+def check_fourth_wall_anti_slop(content: str) -> tuple[bool, str]:
     """Check 9: Strict Fourth-Wall Rule (Zero meta-prompt, internal rule, or AI slop leakage)."""
     forbidden_patterns = [
         (r"###\s*Bottom Line Up Front", "Literal '### Bottom Line Up Front' prompt heading"),
@@ -115,7 +114,7 @@ def check_fourth_wall_anti_slop(content: str) -> Tuple[bool, str]:
 
 
 
-def check_decision_framework(content: str) -> Tuple[bool, str]:
+def check_decision_framework(content: str) -> tuple[bool, str]:
     """Check 3: Decision Framework ('If X Then Y', qualifying criteria, or decision matrix)."""
     patterns = [
         r"(?i)(if\s+.{5,60}\s+then\b|when to (?:choose|buy|switch|refinance|elect|avoid)|decision matrix|rule of thumb|qualifying criteria|decision framework|threshold)",
@@ -128,7 +127,7 @@ def check_decision_framework(content: str) -> Tuple[bool, str]:
     return False, "Missing clear conditional decision framework ('If X Then Y' or qualifying criteria)."
 
 
-def check_empirical_evidence(content: str) -> Tuple[bool, str]:
+def check_empirical_evidence(content: str) -> tuple[bool, str]:
     """Check 4: GFM table with quantitative comparisons, benchmark metrics, or hard data points."""
     # Detect markdown table
     table_pattern = re.compile(r"\|.+\|\n\|\s*[-:]+[-|\s:]+\|\n(?:\|.+\|\n?)+")
@@ -147,7 +146,7 @@ def check_empirical_evidence(content: str) -> Tuple[bool, str]:
     return False, "GFM table found but lacks quantitative numbers, percentages, or dollar amounts."
 
 
-def check_dissent_sensitivity(content: str) -> Tuple[bool, str]:
+def check_dissent_sensitivity(content: str) -> tuple[bool, str]:
     """Check 5: Dissent, sensitivity analysis, margin of error, or edge-case breakdowns."""
     patterns = [
         r"(?i)(## .*(?:when this breaks|sensitivity|margin of error|counter-argument|edge cases?|alternative view|trade-offs?|exceptions?|limitations?|risks?))",
@@ -160,7 +159,7 @@ def check_dissent_sensitivity(content: str) -> Tuple[bool, str]:
     return False, "Missing dissent, sensitivity analysis, or edge-case boundary conditions."
 
 
-def check_decision_utility(content: str, metadata: Dict[str, Any] | None = None) -> Tuple[bool, str]:
+def check_decision_utility(content: str, metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
     """Check 6: Reference to Decision Triad (Tool, Mini-Quiz, or Decision Tree)."""
     patterns = [
         r"(?i)(/tools/[a-z0-9-]+|calculator|interactive tool|diagnostic quiz|decision tree|assessment|test your scenario)",
@@ -173,7 +172,7 @@ def check_decision_utility(content: str, metadata: Dict[str, Any] | None = None)
     return True, "ArticleDecisionTool layout auto-injects Triad widget."
 
 
-def check_commercial_independence(content: str) -> Tuple[bool, str]:
+def check_commercial_independence(content: str) -> tuple[bool, str]:
     """Check 7: Commercial Independence Firewall statement or /money.json link."""
     patterns = [
         r"(?i)(/money\.json|commercial independence|editorial independence|no sponsored placements|affiliate disclosure|our testing is independently funded)",
@@ -186,7 +185,7 @@ def check_commercial_independence(content: str) -> Tuple[bool, str]:
     return True, "CommercialIndependenceCard layout auto-injects Step 7 firewall."
 
 
-def check_revision_record(content: str) -> Tuple[bool, str]:
+def check_revision_record(content: str) -> tuple[bool, str]:
     """Check 8: Revision record, changelog, or correction reporting link."""
     patterns = [
         r"(?i)(last updated|revised on|changelog|correction:|report an error|revision history)",
@@ -203,8 +202,8 @@ def verify_cut_test(
     content: str,
     title: str = "",
     pillar: str = "",
-    metadata: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Executes all 8 Cut Test checks and returns a comprehensive score (0-100)
     and pass/fail verdict. Passing requires score >= 80 and zero critical failures.
@@ -235,9 +234,9 @@ def verify_cut_test(
     }
 
     total_score = 0
-    passed_checks: Dict[str, bool] = {}
-    details: Dict[str, str] = {}
-    issues: List[str] = []
+    passed_checks: dict[str, bool] = {}
+    details: dict[str, str] = {}
+    issues: list[str] = []
 
     for check_key, (passed, msg) in checks.items():
         passed_checks[check_key] = passed

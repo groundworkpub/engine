@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -296,7 +295,7 @@ Drop your questions and quotes below. Let's crunch the math!"""
 Here is what the actual unvarnished cost breakdown looks like behind the contractor invoice:
 
 ### 1. Wholesale Equipment Cost (~$4,800 – $6,500)
-For a quality 16–18 SEER2 variable-capacity inverter heat pump with matched air handler (e.g., Bosch IDS, Mitsubishi, or Carrier Comfort series), contractor wholesale cost from distributors is roughly **$4,800 to $6,500**. 
+For a quality 16–18 SEER2 variable-capacity inverter heat pump with matched air handler (e.g., Bosch IDS, Mitsubishi, or Carrier Comfort series), contractor wholesale cost from distributors is roughly **$4,800 to $6,500**.
 
 ### 2. Fair Labor Hours & Billable Rate (~$2,400 – $3,600)
 A standard direct change-out requires **2 certified technicians for 1 to 1.5 days (16 to 24 total man-hours)**.

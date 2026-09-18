@@ -8,13 +8,13 @@ Enforces Rule 2.5 (Zero-Mock Verification):
 4. Semantic Relevance & Authority Scoring (0.00 - 1.00).
 """
 
-import os
-import re
-import time
 import logging
+import re
 import subprocess
+import time
+from typing import TypedDict
 from urllib.parse import urlparse
-from typing import TypedDict, Any
+
 import httpx
 
 logger = logging.getLogger("outreach_verifier")
@@ -220,7 +220,7 @@ def verify_prospect(
     Enforces Rule 2.5: Zero-Mock. Rejects any non-resolving or dead targets.
     """
     domain = extract_domain(domain_or_url)
-    
+
     # 1. Email syntax and domain extraction
     email_valid, email_domain = validate_email_syntax_and_domain(email)
     if not email_valid:

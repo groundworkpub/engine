@@ -12,14 +12,11 @@ Generates:
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
 import logging
 import os
 import re
 import subprocess
 import sys
-import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -200,7 +197,7 @@ class MegaPodcastCompiler:
             mins = int((current_time % 3600) // 60)
             secs = int(current_time % 60)
             timestamp_str = f"{hrs:02d}:{mins:02d}:{secs:02d}" if hrs > 0 else f"{mins:02d}:{secs:02d}"
-            
+
             clean_title = ep.title.replace("&amp;", "&")
             line = f"{timestamp_str} - [{ep.pillar.upper()}] {clean_title}\n"
             chapters_text += line
@@ -213,7 +210,7 @@ class MegaPodcastCompiler:
             current_time += ep.duration_sec
 
         description_file = self.output_dir / "youtube_mega_description.txt"
-        
+
         # Format compact chapters to ensure total description stays safely within YouTube's 5000-char limit
         compact_chapters_text = "00:00 - Master Briefing\n"
         for c in chapters_data:
@@ -301,7 +298,7 @@ class MegaPodcastCompiler:
         Uses Apple VideoToolbox hardware acceleration if available for ultra-fast render.
         """
         logger.info(f"Rendering 16:9 landscape mega video to {output_mp4}...")
-        
+
         cover_png = str(self.output_dir / "landscape_mega_cover.png")
         self.generate_mega_cover_artwork(cover_png, is_vertical=False)
 
@@ -359,7 +356,7 @@ class MegaPodcastCompiler:
 
         for idx, ep in enumerate(episodes[:num_shorts]):
             short_dest = self.output_dir / f"short_{idx+1}_{ep.pillar}.mp4"
-            
+
             filter_complex = (
                 "[1:a]compand,showwaves=s=880x280:mode=line:colors=0x34d399[wave];"
                 "[0:v]scale=1080:1920[bg];"
@@ -443,7 +440,7 @@ def main():
     args = parser.parse_args()
 
     compiler = MegaPodcastCompiler()
-    
+
     # 1. Fetch live episodes
     episodes = compiler.fetch_feed_episodes()
     if not episodes:
@@ -456,7 +453,7 @@ def main():
 
     # 3. Render 16:9 Landscape Mega Video
     output_video = str(compiler.output_dir / "groundwork_1hour_mega_briefing.mp4")
-    
+
     if args.render_full or not os.path.exists(output_video):
         logger.info("Executing full 1-hour master rendering...")
         compiler.render_landscape_mega_video(master_mp3, output_video, duration_limit=None)
@@ -491,7 +488,7 @@ def main():
         for idx, s_path in enumerate(shorts):
             p_name = Path(s_path).stem.split("_")[-1].capitalize()
             s_title = f"Groundwork Micro Briefing: {p_name} Insight ({idx+1}/3) #Shorts"
-            
+
             ref_link = mega_video_url or "https://youtu.be/channel"
             s_desc = (
                 f"Full 1-hour master breakdown: {ref_link}\n\n"

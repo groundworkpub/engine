@@ -25,12 +25,12 @@ import logging
 import os
 import random
 import re
-import sys
 import time
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
 
 # Load environment
 def _load_env_local() -> None:
@@ -110,8 +110,8 @@ def log_to_supabase(
     anchor_text: str,
     tool_url: str,
     http_code: int = 200,
-    comment_id: Optional[str] = None,
-    screenshot_path: Optional[str] = None,
+    comment_id: str | None = None,
+    screenshot_path: str | None = None,
 ) -> bool:
     """Logs the browser-executed injection event directly to Supabase link_injection_logs."""
     supabase_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
@@ -157,8 +157,8 @@ def send_telegram_telemetry(
     persona_name: str,
     tool_info: dict[str, str],
     status: str,
-    comment_id: Optional[str],
-    screenshot_path: Optional[str],
+    comment_id: str | None,
+    screenshot_path: str | None,
 ) -> None:
     """Emits pure observational telemetry to Telegram without interactive buttons."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -193,8 +193,8 @@ def send_telegram_telemetry(
 async def execute_browser_comment_injection(
     target_url: str,
     pillar: str = "money",
-    comment_text: Optional[str] = None,
-    parent_comment_id: Optional[str] = None,
+    comment_text: str | None = None,
+    parent_comment_id: str | None = None,
     headless: bool = True,
 ) -> dict[str, Any]:
     """
@@ -209,10 +209,10 @@ async def execute_browser_comment_injection(
     # If comment_text not provided, synthesize link-free Phase 1 copy
     if not comment_text:
         comment_text = (
-            f"The comparative figures outlined in this breakdown reflect a critical shift in real-world yields. "
-            f"When evaluating long-term asset depreciations and cost allocations, factoring in both inflation-adjusted "
-            f"benchmarks and localized variance yields significantly tighter predictability across multi-year cycles. "
-            f"Appreciate the granular data breakdown presented here."
+            "The comparative figures outlined in this breakdown reflect a critical shift in real-world yields. "
+            "When evaluating long-term asset depreciations and cost allocations, factoring in both inflation-adjusted "
+            "benchmarks and localized variance yields significantly tighter predictability across multi-year cycles. "
+            "Appreciate the granular data breakdown presented here."
         )
 
     artifacts_dir = os.path.join(

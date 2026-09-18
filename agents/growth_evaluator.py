@@ -11,15 +11,15 @@ Evaluates multi-horizon cohorts (T+7, T+14) for dispatched growth actions:
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import logging
 import os
 import re
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from dotenv import load_dotenv
 import httpx
+from dotenv import load_dotenv
 from supabase import Client, create_client
 
 # Ensure agents directory is in path
@@ -93,7 +93,7 @@ def evaluate_cohort(
 ) -> list[dict[str, Any]]:
     """Evaluate actions from the specified cohort horizon (7 or 14 days ago)."""
     days = 7 if checkpoint == "t7" else 14
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     target_start = now - timedelta(days=days + 1)
     target_end = now - timedelta(days=days - 1)
 
@@ -288,7 +288,7 @@ def evaluate_outreach_prospects(supabase: Client, dry_run: bool = False) -> list
             "target_asset": target_asset,
             "is_live": is_live,
             "is_dofollow": is_dofollow,
-            "measured_at": datetime.now(timezone.utc).isoformat()
+            "measured_at": datetime.now(UTC).isoformat()
         }
 
         if is_live:
@@ -299,7 +299,7 @@ def evaluate_outreach_prospects(supabase: Client, dry_run: bool = False) -> list
                     supabase.table("outreach_prospects").update({
                         "link_secured": True,
                         "status": "done",
-                        "updated_at": datetime.now(timezone.utc).isoformat()
+                        "updated_at": datetime.now(UTC).isoformat()
                     }).eq("id", p["id"]).execute()
 
                     # 2. Log outcome in growth_outcomes

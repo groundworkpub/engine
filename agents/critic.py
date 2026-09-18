@@ -99,7 +99,7 @@ def get_existing_hashes(supabase: Any) -> set[str]:
 
 def check_cannibalization_risk(title: str, pillar: str, supabase: Any | None = None) -> tuple[bool, str | None]:
     """Check Jaccard token similarity against recent indexed articles in the same pillar.
-    
+
     If similarity >= 0.65, returns (True, existing_canonical_slug) to prevent keyword cannibalization.
     """
     if not supabase or not title:

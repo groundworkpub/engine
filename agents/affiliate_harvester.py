@@ -5,11 +5,10 @@ Dispatches across the modular AffiliateAdapterRegistry (ClickBank, Awin, and plu
 filters products with strict E-E-A-T & Anti-Slop gates, and synchronizes verified offers into Supabase.
 """
 
-import os
-import sys
 import argparse
 import logging
-from typing import List
+import os
+import sys
 
 # Ensure repository root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -32,8 +31,8 @@ def load_env_file():
 
 load_env_file()
 
-from agents.affiliate_adapters.registry import registry
 from agents.affiliate_adapters.base import AffiliateProductDTO
+from agents.affiliate_adapters.registry import registry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("affiliate_harvester")
@@ -49,7 +48,7 @@ def get_supabase_client():
     return create_client(url, key)
 
 
-def harvest_all_offers(pillar: str = None, limit_per_adapter: int = 10) -> List[AffiliateProductDTO]:
+def harvest_all_offers(pillar: str = None, limit_per_adapter: int = 10) -> list[AffiliateProductDTO]:
     """Query all configured modular adapters and aggregate compliant offers."""
     adapters = registry.get_configured()
     if not adapters:
@@ -57,7 +56,7 @@ def harvest_all_offers(pillar: str = None, limit_per_adapter: int = 10) -> List[
         # Fall back to testing with all adapters
         adapters = registry.get_all()
 
-    all_offers: List[AffiliateProductDTO] = []
+    all_offers: list[AffiliateProductDTO] = []
     for adapter in adapters:
         logger.info(f"Harvesting offers from network: {adapter.network_name} (pillar={pillar or 'ALL'})")
         try:
@@ -71,7 +70,7 @@ def harvest_all_offers(pillar: str = None, limit_per_adapter: int = 10) -> List[
     return all_offers
 
 
-def sync_to_supabase(offers: List[AffiliateProductDTO], dry_run: bool = False) -> int:
+def sync_to_supabase(offers: list[AffiliateProductDTO], dry_run: bool = False) -> int:
     """Upsert harvested affiliate offers into public.affiliate_links."""
     if not offers:
         logger.info("No offers to sync.")

@@ -5,7 +5,6 @@ Calculates link equity distribution, PageRank scores, and Trust Ratio guards (TF
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
 
 
 @dataclass
@@ -18,12 +17,12 @@ class AuthorityNode:
 
 
 def calculate_internal_pagerank(
-    nodes: List[str],
-    edges: List[Tuple[str, str]],
+    nodes: list[str],
+    edges: list[tuple[str, str]],
     damping_factor: float = 0.85,
     max_iterations: int = 50,
     tolerance: float = 1e-6,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Computes internal PageRank distribution across platform URLs.
     PR(u) = (1 - d) / N + d * sum(PR(v) / L(v)) for all v linking to u.
@@ -33,11 +32,11 @@ def calculate_internal_pagerank(
         return {}
 
     # Initialize PageRank uniformly
-    pr: Dict[str, float] = {node: 1.0 / n for node in nodes}
+    pr: dict[str, float] = {node: 1.0 / n for node in nodes}
 
     # Map out-links and in-links
-    out_links: Dict[str, Set[str]] = {node: set() for node in nodes}
-    in_links: Dict[str, Set[str]] = {node: set() for node in nodes}
+    out_links: dict[str, set[str]] = {node: set() for node in nodes}
+    in_links: dict[str, set[str]] = {node: set() for node in nodes}
 
     for src, dst in edges:
         if src in out_links and dst in in_links:
@@ -47,7 +46,7 @@ def calculate_internal_pagerank(
     base = (1.0 - damping_factor) / n
 
     for _ in range(max_iterations):
-        new_pr: Dict[str, float] = {}
+        new_pr: dict[str, float] = {}
         diff = 0.0
 
         for node in nodes:
@@ -70,7 +69,7 @@ def calculate_internal_pagerank(
     return {k: round((v / total) * 100.0, 4) for k, v in pr.items()}
 
 
-def validate_trust_ratio(trust_flow: float, citation_flow: float) -> Tuple[bool, float, str]:
+def validate_trust_ratio(trust_flow: float, citation_flow: float) -> tuple[bool, float, str]:
     """
     Validates link quality via Trust Ratio (TR = TF / CF).
     - TR >= 0.50: Optimal quality (safe for indexing).

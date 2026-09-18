@@ -1,11 +1,12 @@
+import contextlib
 import json
 import logging
-import os
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
 import httpx
 from dotenv import load_dotenv
 
@@ -73,10 +74,8 @@ def run_mass_drip_ping(domain: str = "gworky.com", batch_size: int = 15, dry_run
     # Load state
     state = {"cursor": 0, "successful_pings": [], "last_run": None}
     if STATE_FILE.exists():
-        try:
+        with contextlib.suppress(Exception):
             state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
 
     cursor = state.get("cursor", 0)
     batch = all_urls[cursor : cursor + batch_size]

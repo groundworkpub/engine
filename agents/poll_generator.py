@@ -9,12 +9,10 @@ Upserts into `public.community_polls`.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
-import hashlib
 import logging
 import os
-import re
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from dotenv import load_dotenv
@@ -93,7 +91,7 @@ def generate_polls_for_pillars(
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     pillars_to_run = [target_pillar] if target_pillar and target_pillar in PILLARS else PILLARS
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     week_str = now.strftime("%Y-w%W")
     expires_at = (now + timedelta(days=7)).isoformat()
 

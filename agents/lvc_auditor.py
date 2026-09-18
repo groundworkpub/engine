@@ -13,12 +13,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import math
 import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -32,9 +31,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from agents.cut_test_validator import verify_cut_test
 from agents.density import COMPILED_STAT_PATTERNS
 from agents.llm_router import call_llm_json
-from agents.cut_test_validator import verify_cut_test
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("lvc_auditor")
@@ -97,16 +96,16 @@ class DimensionScore(BaseModel):
 
 
 class AuditResult(BaseModel):
-    target_url: Optional[str] = None
-    target_slug: Optional[str] = None
+    target_url: str | None = None
+    target_slug: str | None = None
     overall_quality_score: float = Field(ge=0.0, le=100.0)
     verdict: Literal["PASS", "CONDITIONAL_PASS", "REJECT", "CRITICAL_MFA_REJECT"]
     estimated_fluff_percentage: float = Field(ge=0.0, le=100.0)
     information_gain_classification: Literal["HIGH_NOVELTY", "MODERATE", "COMMODITY_REDUNDANT"]
-    dimension_breakdown: List[DimensionScore]
-    critical_flaws: List[CriticalFlaw]
-    structural_pruning_targets: List[str] = Field(default_factory=list, description="Explicit list of sections/subheadings to discard entirely")
-    data_injection_directives: List[str] = Field(default_factory=list, description="Empirical artifacts required to attain passing score")
+    dimension_breakdown: list[DimensionScore]
+    critical_flaws: list[CriticalFlaw]
+    structural_pruning_targets: list[str] = Field(default_factory=list, description="Explicit list of sections/subheadings to discard entirely")
+    data_injection_directives: list[str] = Field(default_factory=list, description="Empirical artifacts required to attain passing score")
 
 
 # =====================================================================
@@ -132,11 +131,7 @@ def is_verifiable_sentence(sentence: str) -> bool:
         r"\b(?:Publication \d+|Section \d+|Regulation [A-Z]|Form 10-K)\b",
         r"\b(?:study|trial|survey|benchmark|dataset|census)\b.*?\b(?:found|measured|reported|showed|analyzed)\b",
     ]
-    for cp in citation_patterns:
-        if re.search(cp, sentence, re.IGNORECASE):
-            return True
-
-    return False
+    return any(re.search(cp, sentence, re.IGNORECASE) for cp in citation_patterns)
 
 
 def compute_nlp_heuristics(text: str) -> dict[str, float]:

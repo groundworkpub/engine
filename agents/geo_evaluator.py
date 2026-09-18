@@ -264,7 +264,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.eval_file:
-        with open(args.eval_file, "r", encoding="utf-8") as f:
+        with open(args.eval_file, encoding="utf-8") as f:
             data = json.load(f)
             answers = data.get("answers", [])
             query = data.get("query", args.query or "sample query")

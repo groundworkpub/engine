@@ -22,6 +22,7 @@ Single Source of Truth: docs/research/seo.md (§3 Module C) & AGENTS.md §2.12
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
@@ -31,9 +32,9 @@ import sys
 import time
 import urllib.parse
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 # Auto-load .env.local
 _root = Path(__file__).resolve().parent.parent
@@ -56,8 +57,6 @@ try:
     )
 except ImportError:
     from agents.browser_stealth import (
-        AD_BLOCK_DOMAINS,
-        ANALYTICS_DOMAINS,
         build_stealth_script,
         domain_is_blocked,
         stealth_launch_args,
@@ -71,7 +70,7 @@ logging.basicConfig(
 )
 
 # ── Target Competitors to Pogo-Stick Against (per Pillar) ─────────────────────
-COMPETITOR_BENCHMARKS: Dict[str, List[str]] = {
+COMPETITOR_BENCHMARKS: dict[str, list[str]] = {
     "money": [
         "bankrate.com", "nerdwallet.com", "smartasset.com", "investopedia.com",
         "fool.com", "creditkarma.com", "thebalance.com", "lendingtree.com"
@@ -121,7 +120,7 @@ class GhostPersona:
 
 
 # Balanced Tier-1 Personas (~55% Mobile, ~45% Desktop across US, UK, AU)
-TIER1_PERSONAS: List[GhostPersona] = [
+TIER1_PERSONAS: list[GhostPersona] = [
     # US Mobile (Pixel 8 Pro - Android 14)
     GhostPersona(
         name="Elena_Mobile_US",
@@ -222,11 +221,11 @@ class BézierMouse:
 
     @staticmethod
     def generate_path(
-        start: Tuple[float, float],
-        end: Tuple[float, float],
+        start: tuple[float, float],
+        end: tuple[float, float],
         num_points: int = 25,
         jitter_std: float = 1.5,
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """Generates a cubic Bézier curve with deceleration and Gaussian jitter."""
         p0 = start
         p3 = end
@@ -248,7 +247,7 @@ class BézierMouse:
         p1 = (p0[0] + dx * 0.3 + perp_x * offset1, p0[1] + dy * 0.3 + perp_y * offset1)
         p2 = (p0[0] + dx * 0.7 + perp_x * offset2, p0[1] + dy * 0.7 + perp_y * offset2)
 
-        path: List[Tuple[float, float]] = []
+        path: list[tuple[float, float]] = []
         for i in range(num_points):
             # Ease in-out parameter t
             fraction = i / (num_points - 1)
@@ -279,7 +278,7 @@ class BézierMouse:
         return path
 
     @staticmethod
-    async def move_along_path(page: Any, start: Tuple[float, float], end: Tuple[float, float], steps: int = 25) -> None:
+    async def move_along_path(page: Any, start: tuple[float, float], end: tuple[float, float], steps: int = 25) -> None:
         """Executes smooth mouse movement along the Bézier curve."""
         path = BézierMouse.generate_path(start, end, num_points=steps)
         for x, y in path:
@@ -293,7 +292,7 @@ def calculate_gaussian_click_offset(
     box_width: float,
     box_height: float,
     sigma_ratio: float = 0.15,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Calculates click coordinates using 2D Gaussian offset from element center.
 
     Clamped within element bounding box to prevent miss-clicks.
@@ -320,7 +319,7 @@ def calculate_lognormal_dwell(mu: float = 4.17, sigma: float = 0.55, min_dwell: 
     return round(max(min_dwell, min(max_dwell, raw_dwell)), 1)
 
 
-def classify_chaos_behavior(random_seed: Optional[int] = None) -> str:
+def classify_chaos_behavior(random_seed: int | None = None) -> str:
     """The 8% Chaos Factor classifier:
 
     - 5% distracted_bounce: lands, scrolls abruptly, leaves in 3-8s.
@@ -345,18 +344,18 @@ def classify_chaos_behavior(random_seed: Optional[int] = None) -> str:
 class PersonaVault:
     """Manages persistent browser profiles (storage_state, cookies, client_id) for Returning Visitors."""
 
-    def __init__(self, vault_dir: Optional[Path] = None):
+    def __init__(self, vault_dir: Path | None = None):
         self.vault_dir = vault_dir or (_root / "data" / "ghost_profiles")
         self.vault_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_or_create_profile(self, returning: bool = False, geo_region: str = "US") -> Tuple[GhostPersona, Optional[Path], str]:
+    def get_or_create_profile(self, returning: bool = False, geo_region: str = "US") -> tuple[GhostPersona, Path | None, str]:
         """Resolves persona and optional existing storage_state path.
 
         Returns (persona, storage_state_path, profile_id).
         """
         existing_profiles = list(self.vault_dir.glob("*.json"))
         # Filter for non-expired profiles matching geo
-        valid_returning: List[Path] = []
+        valid_returning: list[Path] = []
         now = time.time()
         for p in existing_profiles:
             try:
@@ -382,7 +381,7 @@ class PersonaVault:
         logger.info(f"✨ PersonaVault: Created New Visitor profile '{profile_id}' ({persona.name})")
         return persona, None, profile_id
 
-    def save_profile_state(self, profile_id: str, state_data: Dict[str, Any]) -> Path:
+    def save_profile_state(self, profile_id: str, state_data: dict[str, Any]) -> Path:
         """Persists storage_state to vault JSON."""
         target_file = self.vault_dir / f"{profile_id}.json"
         with open(target_file, "w", encoding="utf-8") as f:
@@ -452,17 +451,17 @@ class GhostJourneyEngine:
 
     def __init__(
         self,
-        proxy_url: Optional[str] = None,
+        proxy_url: str | None = None,
         allow_analytics: bool = True,
         engine: str = "playwright",
-        vault_dir: Optional[Path] = None,
+        vault_dir: Path | None = None,
     ):
         self.proxy_url = proxy_url
         self.allow_analytics = allow_analytics
         self.engine = engine
         self.vault = PersonaVault(vault_dir=vault_dir)
 
-    def _resolve_proxy(self, geo: str = "us", session_id: Optional[str] = None) -> Optional[str]:
+    def _resolve_proxy(self, geo: str = "us", session_id: str | None = None) -> str | None:
         """Resolves active residential proxy with sticky session pinning."""
         if self.proxy_url:
             return self.proxy_url
@@ -500,7 +499,7 @@ class GhostJourneyEngine:
         min_dwell_seconds: int = 45,
         max_dwell_seconds: int = 140,
         is_returning: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Executes the complete triangulated Ghost User journey."""
         # 1. Identity & Session Setup
         geo = "US"
@@ -515,7 +514,7 @@ class GhostJourneyEngine:
 
         # 2. Behavioral Classifier & Chaos Factor
         behavior_mode = classify_chaos_behavior()
-        telemetry: Dict[str, Any] = {
+        telemetry: dict[str, Any] = {
             "session_id": f"ghost_{uuid.uuid4().hex[:10]}",
             "profile_id": profile_id,
             "keyword": target_keyword,
@@ -549,13 +548,13 @@ class GhostJourneyEngine:
             return telemetry
 
         async with async_playwright() as p:
-            launch_kwargs: Dict[str, Any] = {
+            launch_kwargs: dict[str, Any] = {
                 "headless": True,
                 "args": stealth_launch_args(),
             }
             if effective_proxy:
                 parsed_p = urllib.parse.urlsplit(effective_proxy)
-                proxy_dict: Dict[str, str] = {"server": f"{parsed_p.scheme}://{parsed_p.hostname}:{parsed_p.port}"}
+                proxy_dict: dict[str, str] = {"server": f"{parsed_p.scheme}://{parsed_p.hostname}:{parsed_p.port}"}
                 if parsed_p.username:
                     proxy_dict["username"] = urllib.parse.unquote(parsed_p.username)
                 if parsed_p.password:
@@ -565,7 +564,7 @@ class GhostJourneyEngine:
             browser = await p.chromium.launch(**launch_kwargs)
 
             # Context creation (with storage_state if returning visitor)
-            context_kwargs: Dict[str, Any] = {
+            context_kwargs: dict[str, Any] = {
                 "user_agent": persona.user_agent,
                 "viewport": {"width": persona.viewport_width, "height": persona.viewport_height},
                 "locale": persona.accept_language.split(",")[0],
@@ -633,7 +632,6 @@ class GhostJourneyEngine:
                 await page.keyboard.press("Enter")
 
                 # Wait for SERP results or bot challenge without throwing unhandled timeout
-                serp_loaded = False
                 for _ in range(20):  # poll up to 10s
                     await asyncio.sleep(0.5)
                     curr_url = page.url
@@ -641,7 +639,6 @@ class GhostJourneyEngine:
                         break
                     try:
                         if await page.locator("#search, div.g, div[data-sokoban-container]").count() > 0:
-                            serp_loaded = True
                             break
                     except Exception:
                         pass
@@ -655,7 +652,7 @@ class GhostJourneyEngine:
                     # Graceful fallback: Navigate directly to Groundwork with simulated Google organic search referer
                     encoded_q = urllib.parse.quote_plus(target_keyword)
                     google_ref = f"{persona.google_tld}/url?sa=t&rct=j&q={encoded_q}&esrc=s&source=web&url={urllib.parse.quote_plus(target_url)}"
-                    logger.info(f"[*] Navigating directly to Groundwork with organic search referer...")
+                    logger.info("[*] Navigating directly to Groundwork with organic search referer...")
                     await page.goto(target_url, referer=google_ref, wait_until="domcontentloaded", timeout=30000)
 
                 # ── PHASE 3: Competitor Pogo-Sticking (Striking Distance) ─────
@@ -700,7 +697,7 @@ class GhostJourneyEngine:
                             telemetry["interactions"].append("pogo_bounce_executed")
 
                     # ── PHASE 4: Groundwork Target Discovery & Click ───────────────
-                    logger.info(f"[*] Locating Groundwork target on SERP...")
+                    logger.info("[*] Locating Groundwork target on SERP...")
                     gworky_link = page.locator("a[href*='gworky.com']").first
                     found_gworky = False
 
@@ -721,10 +718,8 @@ class GhostJourneyEngine:
                     if found_gworky:
                         logger.info("[+] Groundwork result visible on SERP! Clicking with Gaussian offset...")
                         await HumanBehavior.click_with_gaussian_offset(page, gworky_link)
-                        try:
+                        with contextlib.suppress(Exception):
                             await page.wait_for_load_state("domcontentloaded", timeout=20000)
-                        except Exception:
-                            pass
                     else:
                         logger.info("[-] Groundwork not on SERP page 1. Direct navigation with search referer...")
                         encoded_q = urllib.parse.quote_plus(target_keyword)
@@ -827,7 +822,7 @@ class GhostJourneyEngine:
         self._record_telemetry(telemetry)
         return telemetry
 
-    async def _interact_with_calculator(self, page: Any, telemetry: Dict[str, Any]) -> None:
+    async def _interact_with_calculator(self, page: Any, telemetry: dict[str, Any]) -> None:
         """Deeply interacts with calculator sliders, scenario buttons, and accordions."""
         try:
             # 1. Range sliders manipulation
@@ -864,7 +859,7 @@ class GhostJourneyEngine:
         except Exception as ex:
             logger.debug("Calculator interaction skipped: %s", ex)
 
-    async def _interact_with_article(self, page: Any, telemetry: Dict[str, Any]) -> None:
+    async def _interact_with_article(self, page: Any, telemetry: dict[str, Any]) -> None:
         """Simulates authentic article reading behaviors (text selection, copy link, internal navigation)."""
         try:
             # 1. 30% chance of text selection (simulating copy/highlight)
@@ -906,7 +901,7 @@ class GhostJourneyEngine:
         except Exception as ex:
             logger.debug("Article interaction skipped: %s", ex)
 
-    def _record_telemetry(self, telemetry: Dict[str, Any]) -> None:
+    def _record_telemetry(self, telemetry: dict[str, Any]) -> None:
         """Appends session to local JSONL and syncs to Supabase."""
         # 1. Local JSONL log
         log_file = _root / "logs" / "ghost_journeys.jsonl"
@@ -953,7 +948,7 @@ class GhostJourneyEngine:
                 },
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=5):
                 pass
         except Exception:
             pass

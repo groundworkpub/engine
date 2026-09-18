@@ -18,13 +18,10 @@ import argparse
 import json
 import logging
 import os
-import random
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from typing import Any
 
 import httpx
 
@@ -55,20 +52,19 @@ logger = logging.getLogger("offpage_orchestrator")
 
 # Import subsystem modules
 try:
+    from blogger_publisher import get_service_account_credentials, publish_post_to_blogger
+    from buffer_syndicator import execute_buffer_syndication
+    from comment_verifier import run_comment_verification_crawler
     from dork_harvester import run_dork_harvest_pipeline
     from wordpress_injector import execute_wordpress_injection
-    from comment_verifier import run_comment_verification_crawler
     from zombie_hunter import hunt_zombies
-    from buffer_syndicator import execute_buffer_syndication
-    from blogger_publisher import get_service_account_credentials, publish_post_to_blogger
 except ImportError as e:
     logger.error(f"Subsystem import failure: {e}")
+    from agents.buffer_syndicator import execute_buffer_syndication
+    from agents.comment_verifier import run_comment_verification_crawler
     from agents.dork_harvester import run_dork_harvest_pipeline
     from agents.wordpress_injector import execute_wordpress_injection
-    from agents.comment_verifier import run_comment_verification_crawler
     from agents.zombie_hunter import hunt_zombies
-    from agents.buffer_syndicator import execute_buffer_syndication
-    from agents.blogger_publisher import get_service_account_credentials, publish_post_to_blogger
 
 ALL_PILLARS = ["money", "home", "body", "tech", "life"]
 
@@ -79,7 +75,7 @@ def get_supabase_config() -> tuple[str, str]:
     return url.rstrip("/"), key
 
 
-def send_unified_telegram_digest(summary: Dict[str, Any]) -> None:
+def send_unified_telegram_digest(summary: dict[str, Any]) -> None:
     """Dispatches a single comprehensive observational telemetry card to Telegram."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_FOUNDER_CHAT_ID")
@@ -120,7 +116,7 @@ def send_unified_telegram_digest(summary: Dict[str, Any]) -> None:
         logger.warning(f"Failed to dispatch Telegram digest: {e}")
 
 
-def step_harvest_intake(pillar: str, dry_run: bool = False) -> Dict[str, int]:
+def step_harvest_intake(pillar: str, dry_run: bool = False) -> dict[str, int]:
     """Runs dork harvesting and zombie hunting to replenish queue."""
     logger.info(f"--- [STAGE 1] INTAKE & HARVESTING (Pillar: {pillar.upper()}) ---")
     intake_stats = {"prospects_enqueued": 0, "zombies_found": 0}
@@ -153,7 +149,7 @@ def step_throttled_injection(
     limit: int = 2,
     pacing_seconds: int = 5,
     dry_run: bool = False,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Fetches queued targets from Supabase and executes Two-Phase Progressive Seeding."""
     logger.info(f"--- [STAGE 2] THROTTLED INJECTION (Pillar: {pillar.upper()}) ---")
     stats = {"attempted": 0, "live": 0, "moderated": 0, "failed": 0}
@@ -243,7 +239,7 @@ def run_orchestrator(
     limit_per_pillar: int = 1,
     pacing_seconds: int = 2,
     dry_run: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Runs the complete off-page authority engine cycle."""
     start_time = time.time()
     pillars = ALL_PILLARS if pillar == "all" else [pillar]

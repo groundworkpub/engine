@@ -21,9 +21,7 @@ import csv
 import json
 import logging
 import os
-import shutil
 import subprocess
-import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,12 +64,12 @@ FLAGSHIP_SPECS = {
     current_monthly_rate = (current_rate / 100) / 12
     new_monthly_rate = (new_rate / 100) / 12
     n_months = 360
-    
+
     current_pmt = loan_balance * (current_monthly_rate * (1 + current_monthly_rate)**n_months) / ((1 + current_monthly_rate)**n_months - 1)
     new_pmt = loan_balance * (new_monthly_rate * (new_monthly_rate + 1)**n_months) / ((new_monthly_rate + 1)**n_months - 1)
     monthly_savings = current_pmt - new_pmt
     total_costs = closing_costs + points_cost
-    
+
     breakeven_months = round(total_costs / monthly_savings, 1) if monthly_savings > 0 else float('inf')
     return {
         "monthly_savings_usd": round(monthly_savings, 2),
@@ -100,10 +98,10 @@ FLAGSHIP_SPECS = {
         "cli_formula": """def compute_solar_battery_payback(annual_kwh_usage, system_kw, battery_kwh, blend_import_rate, avg_export_rate):
     solar_kwh_gen = system_kw * 1550 # Avg annual kWh generation per installed kW
     self_consumption_ratio = min(0.85, 0.45 + (battery_kwh / (system_kw * 4)))
-    
+
     self_consumed_kwh = solar_kwh_gen * self_consumption_ratio
     exported_kwh = solar_kwh_gen - self_consumed_kwh
-    
+
     annual_value = (self_consumed_kwh * blend_import_rate) + (exported_kwh * avg_export_rate)
     net_installed_cost = (system_kw * 2800) + (battery_kwh * 950) # Post-30% ITC estimate
     payback_years = round(net_installed_cost / annual_value, 2) if annual_value > 0 else float('inf')
@@ -133,7 +131,7 @@ FLAGSHIP_SPECS = {
     vial_mcg = vial_mg * 1000
     concentration_mcg_per_ml = vial_mcg / bac_water_ml
     dose_ml = desired_dose_mcg / concentration_mcg_per_ml
-    
+
     # Standard U-100 insulin syringe: 1 mL = 100 units
     units_to_draw = round(dose_ml * 100, 1)
     doses_per_vial = round(vial_mcg / desired_dose_mcg, 1)
@@ -163,7 +161,7 @@ FLAGSHIP_SPECS = {
     annual_gas_cost = (annual_miles / mpg) * gas_price_gallon
     annual_ev_charging = (annual_miles / 100) * kwh_per_100_miles * electricity_kwh_rate
     annual_fuel_delta = annual_gas_cost - annual_ev_charging
-    
+
     # 5-Year net savings factoring insurance and scheduled maintenance offsets
     maintenance_savings_annual = 450
     net_annual_savings = annual_fuel_delta + maintenance_savings_annual - ev_premium_insurance
@@ -192,7 +190,7 @@ FLAGSHIP_SPECS = {
         "cli_formula": """def compute_llm_monthly_cost(monthly_requests, avg_input_tokens, avg_output_tokens, input_price_per_m, output_price_per_m):
     total_input_tokens = monthly_requests * avg_input_tokens
     total_output_tokens = monthly_requests * avg_output_tokens
-    
+
     input_cost = (total_input_tokens / 1_000_000) * input_price_per_m
     output_cost = (total_output_tokens / 1_000_000) * output_price_per_m
     return {
@@ -226,8 +224,8 @@ def build_github_repo_bundle(pillar: str, spec: dict[str, Any], temp_dir: Path) 
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22011566-blue.svg)](https://doi.org/10.5281/zenodo.22011566)
 [![Live Interactive Web Engine](https://img.shields.io/badge/Web_App-gworky.com%2Ftools%2F{spec['slug']}-emerald?style=for-the-badge)]({SITE_URL}/tools/{spec['slug']})
 
-> **Official Research Tool by Groundwork ({SITE_URL})**  
-> Lead Researcher: **{spec['author']}**  
+> **Official Research Tool by Groundwork ({SITE_URL})**
+> Lead Researcher: **{spec['author']}**
 > Empirical Decision Model & Statutory Benchmark Data (2026 Edition)
 
 ---
@@ -235,10 +233,10 @@ def build_github_repo_bundle(pillar: str, spec: dict[str, Any], temp_dir: Path) 
 ## 📌 Executive Summary (BLUF)
 {spec['summary']}
 
-To test dynamic interactive scenarios with verified zero-advertising interference and complete client-side execution, access the production calculation engine at:  
+To test dynamic interactive scenarios with verified zero-advertising interference and complete client-side execution, access the production calculation engine at:
 👉 **[{SITE_URL}/tools/{spec['slug']}]({SITE_URL}/tools/{spec['slug']})**
 
-For empirical head-to-head methodology comparisons:  
+For empirical head-to-head methodology comparisons:
 👉 **[{SITE_URL}/compare/{spec['compare_slug']}]({SITE_URL}/compare/{spec['compare_slug']})**
 
 ---
@@ -306,12 +304,12 @@ def main():
     parser = argparse.ArgumentParser(description="{spec['title']}")
     parser.add_argument("--sample", action="store_true", help="Execute calculation with default verified 2026 baseline")
     args = parser.parse_args()
-    
+
     print("============================================================")
     print(" {spec['title'].upper()}")
     print(" Groundwork Open Research Engine ({SITE_URL})")
     print("============================================================\\n")
-    
+
     # Run test
     print("Executing calculation model with empirical sample parameters...")
     print("Interactive web interface available at: {SITE_URL}/tools/{spec['slug']}\\n")
@@ -414,11 +412,11 @@ def deploy_huggingface_dataset(pillar: str, spec: dict[str, Any], dry_run: bool 
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            
+
             # Dataset JSON
             json_file = tmp_path / "data.json"
             json_file.write_text(json.dumps(spec["benchmarks"], indent=2), encoding="utf-8")
-            
+
             # YAML Card README
             readme = f"""---
 language:
@@ -587,7 +585,7 @@ def execute_infiltrator_for_pillar(pillar: str, dry_run: bool = True) -> dict[st
 
     with tempfile.TemporaryDirectory() as tmp:
         temp_dir = Path(tmp)
-        
+
         # 1. GitHub Organization Repo (DA 96)
         repo_dir = build_github_repo_bundle(pillar, spec, temp_dir)
         gh_url = deploy_github_org_repo(repo_dir, spec["repo_name"], dry_run=dry_run)

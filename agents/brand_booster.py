@@ -30,7 +30,6 @@ import logging
 import os
 import random
 import sys
-import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -203,7 +202,6 @@ class BrandKeywordBooster:
     ) -> tuple[int, str]:
         """Executes HTTP GET using a resilient 4-tier egress fallback cascade."""
         import httpx
-        import urllib.parse
 
         # Tier 1: Direct Stealth ($0 USD, 0 MB DataImpulse)
         try:
@@ -331,7 +329,7 @@ class BrandKeywordBooster:
 
     async def run(self, limit: int = 15, pillar: str | None = None) -> None:
         """Main execution loop for brand query volume seeding across multi-engine mix."""
-        logger.info(f"🚀 Starting Brand Keyword Booster (Mode: HYBRID MULTI-ENGINE)")
+        logger.info("🚀 Starting Brand Keyword Booster (Mode: HYBRID MULTI-ENGINE)")
 
         query = self.supabase.table("articles").select("id, slug, title, pillar").eq("status", "published")
         if pillar:

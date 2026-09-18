@@ -15,14 +15,16 @@ Adheres to AGENTS.md:
 - SSOT: Tracks deduplication via public.satellite_syndications table in Supabase
 """
 
-import os
-import sys
-import json
-import re
 import argparse
-import urllib.request
+import json
+import os
+import re
+import sys
 import urllib.parse
+import urllib.request
 from html.parser import HTMLParser
+from typing import Any, Dict, List, Optional, Tuple
+
 # Ensure project root is in sys.path for internal imports
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -43,7 +45,7 @@ def load_env(path: str = ".env.local") -> None:
     """Load key-value pairs from .env.local without external dotenv dependency."""
     if not os.path.exists(path):
         return
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -546,7 +548,7 @@ class SatelliteSyndicationEngine:
         """
         cur.execute(query)
         cols = [desc[0] for desc in cur.description]
-        all_articles = [dict(zip(cols, row)) for row in cur.fetchall()]
+        all_articles = [dict(zip(cols, row, strict=False)) for row in cur.fetchall()]
 
         # Filter against satellite_syndications table with per-channel quota
         pending = []
@@ -554,7 +556,7 @@ class SatelliteSyndicationEngine:
 
         for art in all_articles:
             target_channel = self.route_channel(art["pillar"], art.get("title", ""))
-            
+
             # Check if channel already hit its max_per_channel cap
             if channel_counts.get(target_channel, 0) >= max_per_channel:
                 continue

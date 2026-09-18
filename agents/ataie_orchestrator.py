@@ -24,7 +24,6 @@ Features:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
@@ -33,9 +32,9 @@ import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
@@ -103,7 +102,7 @@ class TitaniumSessionManager:
         self.interaction_count: int = 0
         self.max_session_duration: float = random.uniform(900.0, 1500.0)  # 15-25 minutes
         self.max_interactions: int = random.randint(4, 7)  # 4-7 multi-page steps
-        self.cooldown_blacklist: Dict[str, float] = {}  # session_id -> cooldown_expiry
+        self.cooldown_blacklist: dict[str, float] = {}  # session_id -> cooldown_expiry
         self.rotate_session(reason="initial_spawn")
 
     @property
@@ -146,7 +145,7 @@ class TitaniumSessionManager:
         logger.warning("⛔ [Titanium Cooldown] Blacklisted %s for 300s (Reason: %s)", self._session_id, reason)
         self.rotate_session(reason=f"cooldown_{reason}")
 
-    def get_chrome131_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
+    def get_chrome131_headers(self, referer: str | None = None) -> dict[str, str]:
         """Generates authentic Chrome 131 Complete Client Profile with macOS platform encodings."""
         headers = {
             "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
@@ -228,9 +227,9 @@ class SmartAdaptiveEgressRouter:
         method: str,
         url: str,
         sensitive: bool = False,
-        headers: Optional[Dict[str, str]] = None,
-        json_data: Optional[Any] = None,
-        data: Optional[Any] = None,
+        headers: dict[str, str] | None = None,
+        json_data: Any | None = None,
+        data: Any | None = None,
         timeout: float = 15.0,
     ) -> Any:
         """Executes a request using curl_cffi Chrome 131 or httpx with automatic residential escalation."""
@@ -295,7 +294,7 @@ class SmartAdaptiveEgressRouter:
         try:
             with self.get_client(force_proxy=use_proxy_initial, timeout=timeout) as client:
                 res = client.request(method, url, headers=merged_headers, json=json_data, data=data)
-                
+
                 # Check for rate-limiting or anti-bot challenge
                 is_blocked = res.status_code in (403, 429, 503) or (
                     "cf-mitigated" in res.headers or "just a moment..." in res.text.lower()
@@ -359,7 +358,7 @@ class HybridSafetyGate:
             f"• <b>Vector:</b> {vector_name}\n"
             f"• <b>Target Count:</b> {batch_size} units\n"
             f"• <b>Execution Mode:</b> {'LIVE' if self.live_mode else 'DRY-RUN'}\n"
-            f"• <b>Timestamp:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"• <b>Timestamp:</b> {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"<i>Execution proceeding under ATAIE Master Safety Invariant.</i>"
         )
@@ -389,7 +388,7 @@ class AtaieRunRecord:
     mode: str
     execution_time_seconds: float
     created_at: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AtaiePersistenceLedger:
@@ -429,11 +428,11 @@ class AtaiePersistenceLedger:
             self._save_local_json(data)
             logger.info("Run audit logged to local JSON ledger: %s", self.fallback_file)
 
-    def _save_local_json(self, data: Dict[str, Any]) -> None:
+    def _save_local_json(self, data: dict[str, Any]) -> None:
         entries = []
         if self.fallback_file.exists():
             try:
-                with open(self.fallback_file, "r", encoding="utf-8") as f:
+                with open(self.fallback_file, encoding="utf-8") as f:
                     entries = json.load(f)
                     if not isinstance(entries, list):
                         entries = []
@@ -446,7 +445,7 @@ class AtaiePersistenceLedger:
         with open(self.fallback_file, "w", encoding="utf-8") as f:
             json.dump(entries, f, indent=2)
 
-    def get_recent_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_runs(self, limit: int = 10) -> list[dict[str, Any]]:
         """Retrieves recent campaign runs from Supabase or local JSON."""
         if self.supabase_client:
             try:
@@ -464,7 +463,7 @@ class AtaiePersistenceLedger:
 
         if self.fallback_file.exists():
             try:
-                with open(self.fallback_file, "r", encoding="utf-8") as f:
+                with open(self.fallback_file, encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, list):
                         return list(reversed(data))[:limit]
@@ -511,7 +510,7 @@ class VectorEngine:
         self.gate = gate
 
     # ── Vector 01: Dangling CNAME Scanner ─────────────────────────────────────
-    def scan_dangling_cnames(self, subdomains: List[str]) -> List[Dict[str, Any]]:
+    def scan_dangling_cnames(self, subdomains: list[str]) -> list[dict[str, Any]]:
         """Scans candidate subdomains for dangling cloud provider signatures (S3, Vercel, CF)."""
         results = []
         logger.info("Vector 01: Auditing %d candidate subdomains for dangling CNAMEs...", len(subdomains))
@@ -553,7 +552,7 @@ class VectorEngine:
         return results
 
     # ── Vector 02: Wildcard DNS & Edge Redirect Manifest ──────────────────────
-    def generate_redirect_manifest(self, pairs: List[Tuple[str, str]], output_format: str = "lua") -> str:
+    def generate_redirect_manifest(self, pairs: list[tuple[str, str]], output_format: str = "lua") -> str:
         """Generates OpenResty Lua or Cloudflare Worker KV mapping rules."""
         logger.info("Vector 02: Generating redirect manifest for %d route pairs...", len(pairs))
         if output_format == "lua":
@@ -629,8 +628,8 @@ class VectorEngine:
 
     # ── Vector 03b: Organic NavBoost Google Search Simulation ─────────────────
     def run_navboost_simulation(
-        self, queries: List[str], dwell_seconds: int = 120, target_domain: str = "gworky.com"
-    ) -> List[Dict[str, Any]]:
+        self, queries: list[str], dwell_seconds: int = 120, target_domain: str = "gworky.com"
+    ) -> list[dict[str, Any]]:
         """Simulates authentic Google organic search queries and dwell-time clickthroughs."""
         import urllib.parse
         self.gate.check_execution_permission(len(queries), "Vector 03b: NavBoost Organic Simulation")
@@ -659,7 +658,7 @@ class VectorEngine:
                 # 2. Simulate organic dwell session
                 simulated_dwell = dwell_seconds if self.gate.live_mode else min(dwell_seconds, 2)
                 logger.info("Visiting organic target %s (Dwelling for %ds)...", target_url, simulated_dwell)
-                
+
                 dest_res = self.router.adaptive_request(
                     "GET",
                     target_url,
@@ -695,19 +694,19 @@ class VectorEngine:
     def run_controlled_chaos_journey(
         self,
         article_slug: str,
-        tool_slug: Optional[str] = None,
+        tool_slug: str | None = None,
         pillar: str = "home",
         base_url: str = "https://gworky.com",
         real_time: bool = False,
         dwell_scale: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Simulates an authentic human multi-page session with Gaussian dwell variance.
         Follows Article (BLUF) -> Interactive Tool -> Pillar Hub progression.
         Guarantees sticky residential proxy retention (15-30m) and zero artificial pogo-sticking.
         """
         self.gate.check_execution_permission(1, "Vector 03c: Controlled Chaos Journey")
-        
+
         # 1. Controlled Chaos: Determine Session Depth & Gaussian Dwell
         chaos_roll = random.random()
         # 10% natural high-dwell single-page exit, 70% deep 2-3 pages, 20% broad 4 pages
@@ -751,7 +750,7 @@ class VectorEngine:
                 idx + 1, len(steps), step_name, url, target_dwell, actual_dwell,
                 "REAL-TIME" if is_real_time else "ACCELERATED-TEST"
             )
-            
+
             try:
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
@@ -764,7 +763,7 @@ class VectorEngine:
                 time.sleep(actual_dwell)
                 total_target_dwell += target_dwell
                 total_actual_dwell += actual_dwell
-                
+
                 journey_log.append({
                     "step": idx + 1,
                     "name": step_name,
@@ -814,13 +813,13 @@ class VectorEngine:
     def run_titanium_journey(
         self,
         article_slug: str,
-        tool_slug: Optional[str] = None,
+        tool_slug: str | None = None,
         pillar: str = "home",
         base_url: str = "https://gworky.com",
         use_headless_interactive: bool = True,
         real_time: bool = False,
         dwell_scale: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Simulates an authentic human multi-page session using Chrome 131 Complete Client Hints,
         dynamic sticky residential proxy lifecycles, and optional Playwright bezier mouse/scroll interaction.
@@ -868,13 +867,13 @@ class VectorEngine:
                             user_agent=self.router.titanium.get_chrome131_headers()["user-agent"]
                         )
                         page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                        
+
                         # Human smooth scroll
                         for _ in range(random.randint(2, 4)):
                             s_delta = random.randint(200, 450)
                             page.evaluate(f'window.scrollBy({{top: {s_delta}, behavior: "smooth"}})')
                             time.sleep(0.25 if not is_real_time else random.uniform(1.0, 2.5))
-                        
+
                         # Quadratic Bezier mouse movement
                         sx, sy = random.randint(100, 300), random.randint(100, 300)
                         ex, ey = random.randint(500, 800), random.randint(400, 700)
@@ -976,7 +975,7 @@ class VectorEngine:
         return summary
 
     # ── Vector 06: Programmatic Entity Backfilling (SPO Graph) ────────────────
-    def run_entity_backfilling(self, pillar: str = "all") -> Dict[str, Any]:
+    def run_entity_backfilling(self, pillar: str = "all") -> dict[str, Any]:
         """Extracts Subject-Predicate-Object triplets and updates Schema.org linked data."""
         logger.info("Vector 06: Executing Entity SPO Triplet Backfill for pillar: %s", pillar)
         try:
@@ -1015,7 +1014,7 @@ class VectorEngine:
     # ── Vector 07: Headless WordPress REST Ingestion ──────────────────────────
     def run_wordpress_arbitrage(
         self, pillar: str, limit: int = 5, safe_harbor_only: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Probes and submits contextual comments via WordPress REST API."""
         self.gate.check_execution_permission(limit, "Vector 07: WordPress REST Arbitrage")
         logger.info("Vector 07: Executing WordPress REST Ingestion (Pillar: %s, Limit: %d)", pillar, limit)
@@ -1044,7 +1043,7 @@ class VectorEngine:
             return {"status": "error", "error": str(e)}
 
     # ── Vector 08: Decay Asset & Dead Script Hunter ───────────────────────────
-    def hunt_decay_external_scripts(self, seed_urls: List[str]) -> List[Dict[str, Any]]:
+    def hunt_decay_external_scripts(self, seed_urls: list[str]) -> list[dict[str, Any]]:
         """Scans authority pages for external scripts and checks if the asset domain is dead (NXDOMAIN)."""
         logger.info("Vector 08: Scanning %d authority pages for dead external script assets...", len(seed_urls))
         findings = []
@@ -1078,7 +1077,7 @@ class VectorEngine:
         return findings
 
     # ── Vector 10: Export RFC 9727 API Catalog ────────────────────────────────
-    def export_rfc9727_catalog(self) -> Dict[str, Any]:
+    def export_rfc9727_catalog(self) -> dict[str, Any]:
         """Generates standard IETF RFC 9727 API discovery catalog."""
         logger.info("Vector 10: Generating RFC 9727 API Discovery Catalog...")
         catalog = {
@@ -1102,7 +1101,7 @@ class VectorEngine:
                     "endpoints": [{"url": "https://gworky.com/api/v1/tools/refinance-calc", "methods": ["POST"]}],
                 },
             ],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
         out_file = _root / "public" / ".well-known" / "api-catalog"
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1125,13 +1124,13 @@ class AtaieOrchestrator:
         self.ledger = AtaiePersistenceLedger()
         self.engine = VectorEngine(router=self.router, gate=self.gate)
 
-    def run_full_campaign(self, pillar: str = "money", limit: int = 5) -> Dict[str, Any]:
+    def run_full_campaign(self, pillar: str = "money", limit: int = 5) -> dict[str, Any]:
         """Executes a coordinated multi-vector attack campaign."""
         start_time = time.time()
         run_id = f"ataie_run_{int(start_time)}_{uuid.uuid4().hex[:6]}"
         logger.info("🚀 [ATAIE v2.0] LAUNCHING MULTI-VECTOR CAMPAIGN (Run ID: %s, Pillar: %s)", run_id, pillar)
 
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "run_id": run_id,
             "pillar": pillar,
             "mode": "LIVE" if self.gate.live_mode else "DRY-RUN",
@@ -1161,7 +1160,7 @@ class AtaieOrchestrator:
             error_count=0 if v7_res.get("status") == "success" else 1,
             mode="live" if self.gate.live_mode else "dry-run",
             execution_time_seconds=duration,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             metadata=summary,
         )
         self.ledger.record_run(record)
@@ -1173,13 +1172,13 @@ class AtaieOrchestrator:
     def run_titanium_journey(
         self,
         article_slug: str,
-        tool_slug: Optional[str] = None,
+        tool_slug: str | None = None,
         pillar: str = "home",
         base_url: str = "https://gworky.com",
         use_headless_interactive: bool = True,
         real_time: bool = False,
         dwell_scale: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Executes Titanium journey and records run in persistence ledger."""
         res = self.engine.run_titanium_journey(
             article_slug=article_slug,
@@ -1200,7 +1199,7 @@ class AtaieOrchestrator:
             error_count=0 if res.get("status") == "success" else 1,
             mode="live" if self.gate.live_mode else "dry-run",
             execution_time_seconds=dwell_meta.get("elapsed_wall_clock_seconds", 0.0),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             metadata=res,
         )
         self.ledger.record_run(record)

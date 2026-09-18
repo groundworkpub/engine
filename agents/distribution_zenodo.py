@@ -74,12 +74,9 @@ def _sanitize_pdf(text: str) -> str:
         "\u2014": " - ",
         "\u2013": "-",
         "\u2022": "-",
-        "•": "-",
         "·": "-",
         "\u2026": "...",
         "\u00a0": " ",
-        "–": "-",
-        "—": " - ",
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -89,8 +86,9 @@ def _sanitize_pdf(text: str) -> str:
 def compile_academic_pdf(article: dict[str, Any], pub_date: str) -> bytes:
     """Compile an article into a searchable academic IMRAD PDF for Google Scholar."""
     try:
-        from fpdf import FPDF
         import io
+
+        from fpdf import FPDF
 
         pdf = FPDF(format="A4")
         pdf.set_auto_page_break(auto=True, margin=18)
@@ -286,7 +284,7 @@ class ZenodoEngine:
         # 2. Upload academic PDF and preprint markdown artifact to bucket
         if bucket_url:
             slug = article.get("slug", f"record-{deposit_id}")
-            
+
             # Compile searchable academic PDF (IMRAD format for Google Scholar)
             pdf_bytes = compile_academic_pdf(article, pub_date)
             if pdf_bytes:

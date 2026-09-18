@@ -8,14 +8,12 @@ personalized zero-cost interactive embed widget proposals.
 Saves prospects to Supabase `outreach_prospects` with Telegram alerts to @gwelena_bot.
 """
 
+import argparse
+import logging
 import os
 import sys
-import json
-import time
-import logging
-import argparse
+
 import httpx
-from bs4 import BeautifulSoup
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
@@ -145,7 +143,7 @@ def load_env():
     """Load credentials from .env.local if present."""
     env_file = os.path.join(ROOT_DIR, ".env.local")
     if os.path.exists(env_file):
-        with open(env_file, "r", encoding="utf-8") as f:
+        with open(env_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("#") or "=" not in line:

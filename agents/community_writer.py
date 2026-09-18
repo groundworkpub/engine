@@ -83,16 +83,16 @@ Banks charge contractors an 18% to 26% dealer fee to buy that loan. On a $19,000
 def validate_anti_slop(text: str) -> tuple[bool, list[str]]:
     """Checks generated text for robotic slop patterns and forbidden keywords."""
     issues = []
-    
+
     # 1. Check forbidden words
     for pat in FORBIDDEN_WORDS:
         if re.search(pat, text, re.IGNORECASE):
             issues.append(f"Forbidden word pattern matched: {pat}")
-            
+
     # 2. Check for robotic markdown header patterns (e.g. ### 1., ### 2.)
     if re.search(r"###\s*\d+\.", text):
         issues.append("Robotic numbered headers detected (e.g. '### 1.')")
-        
+
     # 3. Check for corporate essay conclusions
     if re.search(r"###\s*(Conclusion|Summary|Verdict|Takeaway)", text, re.IGNORECASE):
         issues.append("Corporate essay conclusion header detected")
@@ -151,7 +151,7 @@ Return JSON:
             elif "```" in clean:
                 clean = clean.split("```")[1].split("```")[0].strip()
             data = json.loads(clean, strict=False)
-            
+
             is_valid, issues = validate_anti_slop(data.get("body", "") + " " + data.get("title", ""))
             if is_valid:
                 logger.info(f"Generated clean anti-slop Reddit draft: '{data.get('title')}'")
@@ -193,7 +193,7 @@ Return only the text."""
         {"role": "user", "content": prompt}
     ]
 
-    for attempt in range(2):
+    for _attempt in range(2):
         res = call_llm(messages, response_format="text", max_tokens=600)
         clean = res.strip().strip('"')
         is_valid, issues = validate_anti_slop(clean)
@@ -202,7 +202,7 @@ Return only the text."""
         logger.warning(f"Quora draft failed anti-slop check: {issues}. Retrying...")
         messages.append({"role": "assistant", "content": res})
         messages.append({"role": "user", "content": f"Fix these issues: {issues}. Be direct, gritty, and conversational like an experienced trades insider."})
-        
+
     return (
         f"The dirty secret behind {context_data.get('quote', '$18,000–$22,000')} quotes for {topic} is rarely the equipment or the labor. It's the financing fee.\n\n"
         f"Distributor equipment costs on these systems run {context_data.get('wholesale', '$4,800–$6,200')}, and two skilled techs can complete the swap in two days ({context_data.get('labor', '~$2,800 labor')}). "

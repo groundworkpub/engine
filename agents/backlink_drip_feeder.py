@@ -12,11 +12,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
 import sys
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -129,7 +129,7 @@ def run_drip_feed(limit: int = 5, dry_run: bool = False) -> list[dict[str, Any]]
             ts = datetime.fromisoformat(s.get("submitted_at", "")).replace(tzinfo=UTC)
         except (ValueError, TypeError):
             continue
-        if last_submitted.get(s["id"], None) is None or ts > last_submitted[s["id"]]:
+        if last_submitted.get(s["id"]) is None or ts > last_submitted[s["id"]]:
             last_submitted[s["id"]] = ts
 
     eligible = []
@@ -174,7 +174,7 @@ def run_drip_feed(limit: int = 5, dry_run: bool = False) -> list[dict[str, Any]]
 
         # Log to Supabase if table exists
         if supabase:
-            try:
+            with contextlib.suppress(Exception):
                 supabase.table("backlink_submissions").insert({
                     "target_name": name,
                     "dr": dr,
@@ -183,8 +183,6 @@ def run_drip_feed(limit: int = 5, dry_run: bool = False) -> list[dict[str, Any]]
                     "status": "success",
                     "created_at": datetime.now(UTC).isoformat(),
                 }).execute()
-            except Exception:
-                pass
 
     if not dry_run:
         state["last_run"] = datetime.now(UTC).isoformat()
