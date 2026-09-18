@@ -20,6 +20,7 @@ from agents.edge_purge import purge_urls
 from agents.eval_tracer import OpikTracer
 from agents.headroom_compressor import HeadroomCompressor
 from agents.humanizer import HUMAN_SCORE_THRESHOLD, EditorialHumanizer
+from agents.intel_context import match_intel, render_intel_block
 from agents.prompts.catalog import get_full_system_prompt
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -1092,6 +1093,11 @@ You MUST weave 1 to 2 natural, contextual internal markdown links to relevant cl
 {cluster_bullets}
 """
 
+        intel_block = ""
+        intel_row = match_intel(pillar, title=item.get("title", ""), slug=item.get("slug", ""), url=url)
+        if intel_row:
+            intel_block = render_intel_block(intel_row)
+
         user_prompt = f"""Synthesize an original, empirical research and decision analysis for Groundwork platform based on the following primary findings.
 
 Pillar: {pillar}
@@ -1103,6 +1109,7 @@ Source findings and primary data points:
 {compressed_source}
 ---
 {cluster_prompt_section}
+{intel_block}
 MANDATORY BLUF LEAD INVARIANT:
 The first narrative paragraph directly under the title MUST be a crisp, standalone 40-60 word Bottom Line Up Front (BLUF) direct answer answering the reader's core decision dilemma with explicit numbers, percentages, or timeframes.
 

@@ -13,6 +13,7 @@ Dual Telemetry:
 """
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -122,14 +123,99 @@ MODIFIERS = {
 
 # ─── PHASE 1: SEED EXPANSION ──────────────────────────────────────────────────
 
+def _load_intel_assets() -> tuple[list[dict[str, Any]], dict[tuple[str, str], dict[str, Any]]]:
+    """Loads content-silo-manifest + target-intel research artifacts.
+
+    Returns (clusters, intel_by_pillar_keyword). Resilient to absence —
+    falls back to the hardcoded PILLAR_SEEDS when either file is missing.
+    """
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    clusters: list[dict[str, Any]] = []
+    intel: list[dict[str, Any]] = []
+
+    manifest_path = os.path.join(root_dir, "data", "content-silo-manifest.json")
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+        cluster_list = manifest.get("clusters", []) if isinstance(manifest, dict) else []
+        clusters = [c for c in cluster_list if isinstance(c, dict)]
+    except Exception as e:
+        logger.warning("content-silo-manifest.json unavailable (%s); falling back to PILLAR_SEEDS.", e)
+
+    intel_path = os.path.join(root_dir, "data", "target-intel.json")
+    try:
+        with open(intel_path, encoding="utf-8") as f:
+            intel_data = json.load(f)
+        if isinstance(intel_data, dict):
+            intel_data = [v for v in intel_data.values() if isinstance(v, dict)]
+        intel = [r for r in intel_data if isinstance(r, dict)] if isinstance(intel_data, list) else []
+    except Exception as e:
+        logger.warning("target-intel.json unavailable (%s); intel enrichment skipped.", e)
+
+    intel_by_key = {
+        (r.get("pillar", ""), (r.get("keyword") or "").lower().strip()): r
+        for r in intel
+        if r.get("keyword")
+    }
+    if clusters:
+        logger.info("Phase 1: Loaded %d content-silo clusters (+%d intel enrichments).", len(clusters), len(intel_by_key))
+    return clusters, intel_by_key
+
+
 def expand_seeds(pillars: list[str] | None = None) -> list[dict[str, Any]]:
-    """Expands seeds into multi-dimensional keyword variations."""
+    """Expands seeds into multi-dimensional keyword variations.
+
+    Seed SSOT is data/content-silo-manifest.json (46 P0/P1 clusters), enriched
+    with verified SEO intel from data/target-intel.json. Hardcoded
+    PILLAR_SEEDS remain as fallback / additive modifiers for slugs the
+    manifest does not cover yet.
+    """
     selected_pillars = pillars or list(PILLAR_SEEDS.keys())
     expanded: list[dict[str, Any]] = []
+    cluster_slugs: set[str] = set()
+
+    clusters, intel_by_key = _load_intel_assets()
+    for cluster in clusters:
+        pillar = cluster.get("pillar") or "money"
+        if pillars and pillar not in pillars:
+            continue
+        query = (cluster.get("target_keyword") or "").strip()
+        if not query:
+            continue
+        slug = cluster.get("slug") or ""
+        if slug:
+            cluster_slugs.add(slug)
+
+        row: dict[str, Any] = {
+            "pillar": pillar,
+            "query": query,
+            "intent": cluster.get("intent") or "informational",
+            "base_slug": slug,
+            "dimension": "core",
+            "priority": cluster.get("priority") or "P1",
+            "volume_estimate": cluster.get("volume_estimate"),
+            "kd_estimate": cluster.get("kd_estimate"),
+            "source": "manifest",
+        }
+        intel = intel_by_key.get((pillar, query.lower()))
+        if intel:
+            row["intel"] = True
+            row["serp_source"] = intel.get("serp_source")
+            row["suggest"] = (intel.get("suggest") or [])[:12]
+            silhouette = intel.get("silhouette") or {}
+            row["blindspots"] = (silhouette.get("blindspots") or [])[:20]
+            row["coverage_score"] = silhouette.get("coverage_score")
+            gsc = intel.get("gsc") or {}
+            row["gsc_position"] = gsc.get("position")
+            row["gsc_impressions"] = gsc.get("impressions")
+        expanded.append(row)
 
     for pillar in selected_pillars:
         seeds = PILLAR_SEEDS.get(pillar, [])
         for seed in seeds:
+            if seed["base_slug"] in cluster_slugs:
+                continue
+
             # 1. Base query
             expanded.append({
                 "pillar": pillar,
@@ -137,6 +223,7 @@ def expand_seeds(pillars: list[str] | None = None) -> list[dict[str, Any]]:
                 "intent": seed["intent"],
                 "base_slug": seed["base_slug"],
                 "dimension": "core",
+                "source": "pseo",
             })
 
             # 2. Scenario permutations
@@ -147,6 +234,7 @@ def expand_seeds(pillars: list[str] | None = None) -> list[dict[str, Any]]:
                     "intent": seed["intent"],
                     "base_slug": seed["base_slug"],
                     "dimension": "persona",
+                    "source": "pseo",
                 })
 
             # 3. Attribute permutations
@@ -157,6 +245,7 @@ def expand_seeds(pillars: list[str] | None = None) -> list[dict[str, Any]]:
                     "intent": seed["intent"],
                     "base_slug": seed["base_slug"],
                     "dimension": "attribute",
+                    "source": "pseo",
                 })
 
     logger.info("Phase 1: Expanded into %d candidate queries.", len(expanded))

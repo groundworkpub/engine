@@ -52,6 +52,11 @@ try:
 except ImportError:  # direct script execution without package context
     from llm_router import call_llm  # type: ignore[no-redef]
 
+try:
+    from agents.intel_context import match_intel, render_intel_block
+except ImportError:  # direct script execution without package context
+    from intel_context import match_intel, render_intel_block  # type: ignore[no-redef]
+
 
 def _load_env_local() -> None:
     env_path = Path(__file__).resolve().parent.parent / ".env.local"
@@ -118,7 +123,9 @@ def build_refresh_messages(title: str, content: str) -> list[dict[str, str]]:
     ]
 
 
-def build_full_rewrite_messages(title: str, content: str, pillar: str = "money", slug: str = "") -> list[dict[str, str]]:
+def build_full_rewrite_messages(
+    title: str, content: str, pillar: str = "money", slug: str = "", intel_block: str = ""
+) -> list[dict[str, str]]:
     """Prompt enforcing The 8-Step Working Sequence for full scratch rewrites. Pure."""
     desk = FELLOWSHIP_DESKS.get(pillar, FELLOWSHIP_DESKS["money"])["name"]
     system = (
@@ -152,6 +159,10 @@ def build_full_rewrite_messages(title: str, content: str, pillar: str = "money",
     user = (
         f"Perform a complete scratch rewrite of this article titled \"{title}\" (pillar: {pillar}).\n\n"
         f"Original seed context and claims to verify, correct, and expand:\n{content}\n\n"
+    )
+    if intel_block:
+        user += f"{intel_block}\n\n"
+    user += (
         "Return ONLY the full rewritten markdown body, no introductory or concluding commentary."
     )
     return [
@@ -465,7 +476,11 @@ def run_scan(limit: int = 5, dry_run: bool = False, prefer_provider: str = "groq
         )
 
         if is_full_rewrite:
-            messages = build_full_rewrite_messages(article["title"], article["content"], pillar=pillar, slug=slug)
+            intel_block = ""
+            intel_row = match_intel(pillar, title=article.get("title", ""), slug=slug)
+            if intel_row:
+                intel_block = render_intel_block(intel_row)
+            messages = build_full_rewrite_messages(article["title"], article["content"], pillar=pillar, slug=slug, intel_block=intel_block)
         else:
             messages = build_refresh_messages(article["title"], article["content"])
 
