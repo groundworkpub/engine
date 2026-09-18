@@ -198,7 +198,7 @@ jobs:
     name: Organic Engagement Simulator (Agent 6)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.event.schedule == '0 */4 * * *' || github.event_name == 'workflow_dispatch'
+    if: false # Decommissioned per Rule §2.5 Anti-Mock invariant (archived and preserved)
 
     steps:
       - name: Checkout
