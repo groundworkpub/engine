@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout media repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: groundworkpub/media
           token: ${{ secrets.GH_PAT_MEDIA || secrets.GITHUB_TOKEN }}
