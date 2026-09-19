@@ -1,9 +1,8 @@
 name: "YouTube Watch-Time Booster & Shorts Loop Engine"
+# ARCHIVED 2026-09-19: disabled schedule due to missing traffic_cli module.
+# Use workflow_dispatch to trigger manually once the module is restored.
 
 on:
-  schedule:
-    # 24/7 Cloud Autonomy: Runs every 3 hours across 6 parallel shards (~144 Watch-Hours / day)
-    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       concurrency:
@@ -11,7 +10,7 @@ on:
         required: false
         default: "2"
       watch_duration:
-        description: "Watch time duration in seconds (e.g. 600 for 10m, 1200 for 20m)"
+        description: "Watch time duration in seconds"
         required: false
         default: "1200"
       funnel_mode:
@@ -55,23 +54,18 @@ jobs:
           pip install playwright requests pillow supabase httpx
           playwright install --with-deps chromium
 
-      - name: Run YouTube Watch-Time Booster (Multi-Source Funnel, 144p, AI Cognitive Synthesis)
+      - name: Run YouTube Watch-Time Booster
         env:
           DATAIMPULSE_HOST: ${{ secrets.DATAIMPULSE_HOST }}
           DATAIMPULSE_LOGIN: ${{ secrets.DATAIMPULSE_LOGIN }}
           DATAIMPULSE_PASSWORD: ${{ secrets.DATAIMPULSE_PASSWORD }}
           DATAIMPULSE_PORT: ${{ secrets.DATAIMPULSE_PORT }}
-          TEXTBEE_API_KEY: ${{ secrets.TEXTBEE_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_GLOBAL_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_API_KEY }}
-          CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || secrets.TELEGRAM_FOUNDER_CHAT_ID }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          echo "🚀 Shard ${{ matrix.runner_shard }}: Starting Omni-Automation Watch Engine on GitHub Actions ($0 Free Tier)..."
+          echo "Shard ${{ matrix.runner_shard }}: Starting Watch Engine..."
           python master_orchestrator.py auto \
             --concurrency ${{ github.event.inputs.concurrency || 2 }} \
             --watch-duration ${{ github.event.inputs.watch_duration || 1200 }}
