@@ -452,7 +452,7 @@ class GhostJourneyEngine:
     def __init__(
         self,
         proxy_url: str | None = None,
-        allow_analytics: bool = True,
+        allow_analytics: bool = False,
         engine: str = "playwright",
         vault_dir: Path | None = None,
     ):

@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from browser_stealth import build_stealth_script
+from browser_stealth import build_stealth_script, domain_is_blocked
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,17 @@ class BrowserRuntime:
                 timezone_id=persona.timezone_id,
                 color_scheme=persona.color_scheme,
             )
+
+            # Strict isolation: Abort analytics, tracker, and ad network requests
+            async def _isolate_route(route: Any) -> None:
+                url = route.request.url
+                if domain_is_blocked(url, allow_analytics=False, allow_secondary=False):
+                    await route.abort("blockedbyclient")
+                else:
+                    await route.continue_()
+
+            await context.route("**/*", _isolate_route)
+
             # Inject persona-aware CDP stealth script (fingerprint matrix sync:
             # WebGL vendor/renderer, navigator.platform, hardware, canvas noise)
             await context.add_init_script(
@@ -217,6 +228,14 @@ class BrowserRuntime:
 
         async with AsyncCamoufox(**cf_kwargs) as browser:
             page = await browser.new_page()
+            async def _isolate_route(route: Any) -> None:
+                url = route.request.url
+                if domain_is_blocked(url, allow_analytics=False, allow_secondary=False):
+                    await route.abort("blockedbyclient")
+                else:
+                    await route.continue_()
+
+            await page.route("**/*", _isolate_route)
             try:
                 yield page
             finally:
