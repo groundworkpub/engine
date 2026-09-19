@@ -3,8 +3,10 @@
 agents/awin_join_merchants.py — Programmatic Awin Merchant Application Automator
 
 Submits professional, high-approval partnership applications ("Join Programme")
-to target solar and home battery manufacturers (EcoFlow, BLUETTI, Jackery, BougeRV, ALLPOWERS)
+to target merchants across all 5 Groundwork pillars (Home, Money, Body, Tech, Life)
 using authenticated headless Chrome session.
+
+Updated 2026-09-19: expanded from 5 solar brands to 17 brands across all pillars.
 """
 
 import asyncio
@@ -28,19 +30,71 @@ PUBLISHER_ID = os.getenv("AWIN_PUBLISHER_ID", "")
 AWIN_EMAIL = os.getenv("AWIN_EMAIL", os.getenv("AWIN_USER", ""))
 AWIN_PASSWORD = os.getenv("AWIN_PASSWORD", os.getenv("AWIN_PASS", ""))
 
+# ---------------------------------------------------------------------------
+# Target Merchants — 5-Pillar Coverage
+# NOTE: MIDs are sourced from Awin catalogue; script validates via profile page
+# before applying. Invalid MIDs will be skipped with a warning.
+# ---------------------------------------------------------------------------
 TARGET_MERCHANTS = [
-    {"mid": "59181", "name": "EcoFlow", "niche": "Solar & Battery Storage"},
-    {"mid": "59271", "name": "BLUETTI US", "niche": "Solar & Battery Storage"},
-    {"mid": "59183", "name": "Jackery US", "niche": "Portable Power & Solar"},
-    {"mid": "52765", "name": "BougeRV", "niche": "Off-grid Solar & Portable Fridges"},
-    {"mid": "40342", "name": "ALLPOWERS (US & CA)", "niche": "Solar Generators & Panels"},
+    # --- HOME: Solar & Energy Storage ---
+    {"mid": "59181", "name": "EcoFlow",              "niche": "Solar & Battery Storage",   "pillar": "home"},
+    {"mid": "59271", "name": "BLUETTI US",            "niche": "Solar & Battery Storage",   "pillar": "home"},
+    {"mid": "59183", "name": "Jackery US",            "niche": "Portable Power & Solar",    "pillar": "home"},
+    {"mid": "52765", "name": "BougeRV",               "niche": "Off-grid Solar",            "pillar": "home"},
+    {"mid": "40342", "name": "ALLPOWERS (US & CA)",   "niche": "Solar Generators & Panels", "pillar": "home"},
+    # --- HOME: Security ---
+    {"mid": "21003", "name": "Ring",                  "niche": "Smart Home Security",       "pillar": "home"},
+    {"mid": "23439", "name": "SimpliSafe",            "niche": "Home Security Systems",     "pillar": "home"},
+    # --- MONEY: Personal Finance ---
+    {"mid": "10718", "name": "NerdWallet",            "niche": "Personal Finance",          "pillar": "money"},
+    {"mid": "5261",  "name": "Experian",              "niche": "Credit Monitoring",         "pillar": "money"},
+    # --- BODY: Health & Wellness ---
+    {"mid": "26688", "name": "Hims & Hers",           "niche": "Telehealth & Wellness",     "pillar": "body"},
+    {"mid": "21695", "name": "Noom",                  "niche": "Weight Management",         "pillar": "body"},
+    # --- TECH: Privacy & Security ---
+    {"mid": "15907", "name": "NordVPN",               "niche": "VPN & Online Privacy",      "pillar": "tech"},
+    {"mid": "7093",  "name": "ExpressVPN",            "niche": "VPN Services",              "pillar": "tech"},
+    {"mid": "32765", "name": "1Password",             "niche": "Password Management",       "pillar": "tech"},
+    # --- LIFE: Legal & Travel ---
+    {"mid": "8442",  "name": "LegalZoom",             "niche": "Legal Services",            "pillar": "life"},
+    {"mid": "9234",  "name": "Booking.com",           "niche": "Travel",                    "pillar": "life"},
+    {"mid": "18801", "name": "KAYAK",                 "niche": "Travel Search",             "pillar": "life"},
 ]
 
-SOLAR_PITCH_MESSAGE = """Groundwork (https://gworky.com) is an independent digital research and consumer utility platform serving homeowners and educated professionals aged 35–48 across the United States, United Kingdom, and Australia.
+# ---------------------------------------------------------------------------
+# Pillar-Specific Pitch Messages (Rule §2.1 — data-backed, active voice, no guru energy)
+# ---------------------------------------------------------------------------
+PITCH_MESSAGES: dict[str, str] = {
+    "home": """Groundwork (https://gworky.com) is an independent research and consumer utility platform for homeowners aged 35–48 across the US, UK, and Australia.
 
-We produce comprehensive residential energy evaluations, interactive solar battery payback calculators, and off-grid power comparisons. We plan to feature your brand contextually within our flagship Solar Battery & Energy Storage research guides and interactive simulation tools, connecting high-intent homeowners directly with vetted hardware solutions.
+We publish hands-on hardware evaluations, interactive solar battery payback calculators, and off-grid power system comparisons with verified third-party cost data. Our Solar & Home Energy section draws readers actively researching residential energy upgrades — buyers at the bottom of the purchase funnel.
 
-All promotional placements adhere strictly to high editorial standards, transparent FTC/ASA-compliant disclosures, and zero-spam practices. We look forward to a productive, long-term partnership with your team."""
+We plan to feature your brand in our Solar Battery & Energy Storage research guides and home security comparison tools, with FTC/ASA-compliant sponsored disclosures and zero-spam editorial standards. We look forward to a long-term partnership.""",
+
+    "money": """Groundwork (https://gworky.com) is an independent consumer finance research platform serving adults 35–48 across the US, UK, and Australia.
+
+We produce evidence-based personal finance guides, interactive debt payoff calculators, and insurance comparison tools cross-referenced against CFPB and Federal Reserve data. Our /money pillar covers credit monitoring, mortgage refinancing, investing, and debt management — attracting high-intent readers actively making financial decisions.
+
+We plan to contextually feature your brand within our credit, personal finance, and insurance research guides, with transparent FTC-compliant affiliate disclosures. No spam, no fabricated testimonials.""",
+
+    "body": """Groundwork (https://gworky.com) is an independent health and wellness research platform for adults 35–48 in the US, UK, and Australia.
+
+We publish evidence-based guides on preventive health, telehealth services, weight management, and longevity, cross-referenced against peer-reviewed research and clinical data. Our readers are health-conscious adults researching real solutions — not general wellness browsing.
+
+We plan to feature your brand within our telehealth comparison and health optimization research guides, with clear editorial context, evidence-backed claims, and FTC/ASA-compliant affiliate disclosures.""",
+
+    "tech": """Groundwork (https://gworky.com) is an independent technology research platform for decision-makers aged 35–48 across the US, UK, and Australia.
+
+We publish rigorous comparisons of privacy tools, password managers, VPN services, and productivity software, informed by independent technical audits and user security threat models. Our /tech pillar attracts professionals actively evaluating and purchasing digital security products.
+
+We plan to contextually feature your product within our VPN and digital security comparison guides, with transparent FTC-compliant disclosures and no misleading claims.""",
+
+    "life": """Groundwork (https://gworky.com) is an independent life decisions research platform serving adults 35–48 across the US, UK, and Australia.
+
+We publish practical guides on legal services, career transitions, travel planning, and major life decisions — with verified cost comparisons and first-person research. Our /life pillar covers legal document preparation, travel search, and career tools, attracting readers actively planning significant purchases.
+
+We plan to contextually feature your service within our legal guide and travel comparison tools, with FTC/ASA-compliant affiliate disclosures and editorial integrity standards.""",
+}
 
 
 async def ensure_authenticated(page):
@@ -88,8 +142,11 @@ async def ensure_authenticated(page):
 async def apply_to_merchant(page, merchant):
     mid = merchant["mid"]
     name = merchant["name"]
+    pillar = merchant.get("pillar", "home")
+    pitch = PITCH_MESSAGES.get(pillar, PITCH_MESSAGES["home"])
+
     logger.info("--------------------------------------------------")
-    logger.info("Processing application for: [%s] %s", mid, name)
+    logger.info("Processing application for: [%s] %s (pillar: %s)", mid, name, pillar)
 
     profile_url = f"https://ui.awin.com/awin/affiliate/{PUBLISHER_ID}/merchant-profile/{mid}"
     await page.goto(profile_url, timeout=35000, wait_until="domcontentloaded")
@@ -99,11 +156,15 @@ async def apply_to_merchant(page, merchant):
     page_text = await page.locator("body").inner_text()
     if "(Joined)" in page_text:
         logger.info("✓ Already JOINED with [%s] %s!", mid, name)
-        return {"mid": mid, "name": name, "status": "already_joined"}
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "already_joined"}
 
     if "(Pending)" in page_text:
         logger.info("⏳ Application already PENDING for [%s] %s.", mid, name)
-        return {"mid": mid, "name": name, "status": "already_pending"}
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "already_pending"}
+
+    if "Page Not Found" in page_text or "404" in page.url:
+        logger.warning("⚠ Merchant profile not found for MID [%s] %s — skipping.", mid, name)
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "mid_not_found"}
 
     # Find the Join Programme trigger button (can be span, div, a, or button)
     join_trigger = page.locator('text="Join Programme"').first
@@ -112,7 +173,7 @@ async def apply_to_merchant(page, merchant):
     except Exception:
         logger.warning("Join trigger button not found for [%s] %s. Current URL: %s", mid, name, page.url)
         await page.screenshot(path=f"scratch/awin_join_{mid}_not_found.png")
-        return {"mid": mid, "name": name, "status": "trigger_not_found"}
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "trigger_not_found"}
 
     logger.info("Clicking 'Join Programme' for [%s] %s...", mid, name)
     await join_trigger.click()
@@ -130,16 +191,16 @@ async def apply_to_merchant(page, merchant):
     except Exception:
         pass
 
-    # 2. Fill Message Textarea
+    # 2. Fill Message Textarea with pillar-specific pitch
     try:
         msg_textarea = page.locator('textarea, textarea[name="message"], div[contenteditable="true"]').first
         await msg_textarea.wait_for(state="visible", timeout=6000)
-        logger.info("Filling pitch message...")
-        await msg_textarea.fill(SOLAR_PITCH_MESSAGE)
+        logger.info("Filling %s pitch message...", pillar)
+        await msg_textarea.fill(pitch)
         await page.wait_for_timeout(500)
     except Exception as e:
         logger.error("Failed to fill message textarea: %s", e)
-        return {"mid": mid, "name": name, "status": "textarea_error"}
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "textarea_error"}
 
     # 3. Check Terms and Conditions Checkbox
     try:
@@ -160,15 +221,17 @@ async def apply_to_merchant(page, merchant):
         await page.wait_for_timeout(4000)
         await page.screenshot(path=f"scratch/awin_join_submitted_{mid}.png")
         logger.info("✓ Application submitted for [%s] %s!", mid, name)
-        return {"mid": mid, "name": name, "status": "submitted"}
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "submitted"}
     except Exception as e:
         logger.error("Failed to click submit button: %s", e)
-        return {"mid": mid, "name": name, "status": "submit_error"}
+        return {"mid": mid, "name": name, "pillar": pillar, "status": "submit_error"}
 
 
 async def main():
-    logger.info("Starting Batch Solar Merchant Applications on Awin...")
+    logger.info("Starting Batch Merchant Applications on Awin — %d targets across 5 pillars...", len(TARGET_MERCHANTS))
     results = []
+
+    Path("scratch").mkdir(exist_ok=True)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch_persistent_context(
@@ -204,10 +267,17 @@ async def main():
         if resp.status_code == 200:
             pending_programmes = resp.json()
             logger.info("Total Pending Programmes on Awin: %d", len(pending_programmes))
-            for p in pending_programmes:
-                logger.info("  ⏳ [%s] %s", p.get("id"), p.get("name"))
+            for prog in pending_programmes:
+                logger.info("  ⏳ [%s] %s", prog.get("id"), prog.get("name"))
     except Exception as e:
         logger.warning("API check exception: %s", e)
+
+    # Summary
+    by_status: dict[str, list] = {}
+    for r in results:
+        by_status.setdefault(r["status"], []).append(f"[{r['mid']}] {r['name']}")
+    for status, items in by_status.items():
+        logger.info("  %s: %d — %s", status, len(items), ", ".join(items))
 
     output_path = Path("scratch/awin_join_results.json")
     output_path.write_text(json.dumps(results, indent=2))
