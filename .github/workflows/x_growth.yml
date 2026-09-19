@@ -1,12 +1,8 @@
 name: X Growth Ops
+# ARCHIVED 2026-09-19: disabled schedule due to x.com ERR_TIMED_OUT in headless CI environment.
+# Use workflow_dispatch to trigger manually with a valid session cookie.
 
 on:
-  schedule:
-    # Reply cycles inside US active windows (ET = UTC-4)
-    - cron: "30 16 * * *" # 12:30 ET daily
-    - cron: "30 23 * * *" # 19:30 ET daily
-    # Discovery + follows, Saturdays only
-    - cron: "0 17 * * 6" # 13:00 ET Sat
   workflow_dispatch:
     inputs:
       cycle:
@@ -67,7 +63,7 @@ jobs:
           CYCLE="${{ github.event.inputs.cycle }}"
           if [ "$CYCLE" != "discover" ]; then CYCLE="replies"; fi
           FLAGS=""
-          if [ "${{ github.event.inputs.live }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ github.event.inputs.live }}" = "true" ]; then
             FLAGS="--live"
           fi
           PYTHONPATH=agents python agents/x_ops.py "--$CYCLE" $FLAGS
