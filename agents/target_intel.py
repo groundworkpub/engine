@@ -60,6 +60,42 @@ from agents.gsc_manager import get_gsc_access_token  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("target_intel")
 
+
+def compute_opportunity_metrics(volume: int | None, kd: float | None, intent: str | None) -> tuple[float, str]:
+    """Computes Opportunity Score and 4-quadrant classification (Volume x KD x Intent).
+
+    Formula: Opportunity Score = log10(Volume + 10) / (KD_effective + 0.08)^1.2 * Intent_Multiplier
+    Quadrants:
+      - holy_grail: Volume >= 800 and KD <= 0.40 (High Volume, Low KD)
+      - quick_win: Volume < 800 and KD <= 0.35 (Low/Mid Volume, Low KD)
+      - battleground: Volume >= 800 and KD > 0.40 (High Volume, High KD)
+      - trap: Volume < 800 and KD > 0.35 (Low Volume, High KD)
+    """
+    vol = max(10, volume or 100)
+    kd_val = max(0.0, min(1.0, (kd / 100.0) if kd and kd > 1.0 else (kd or 0.50)))
+
+    intent_norm = (intent or "").lower()
+    if any(k in intent_norm for k in ("tool", "calc")):
+        intent_mult = 1.3
+    elif any(k in intent_norm for k in ("commercial", "transactional", "roi", "cost")):
+        intent_mult = 1.2
+    else:
+        intent_mult = 1.0
+
+    score = (math.log10(vol + 10) / math.pow(kd_val + 0.08, 1.2)) * intent_mult
+    score = round(score, 2)
+
+    if vol >= 800 and kd_val <= 0.40:
+        quadrant = "holy_grail"
+    elif kd_val <= 0.35:
+        quadrant = "quick_win"
+    elif vol >= 800:
+        quadrant = "battleground"
+    else:
+        quadrant = "trap"
+
+    return score, quadrant
+
 MANIFEST = ROOT / "data" / "content-silo-manifest.json"
 OUTPUT = ROOT / "data" / "target-intel.json"
 GSC_SITE = "sc-domain:gworky.com"
@@ -282,12 +318,26 @@ def _silhouette(
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
-async def analyze_targets(clusters: list[dict[str, Any]], dry_run: bool, limit: int) -> list[dict[str, Any]]:
-    # Prune to P0/P1 by default, honor --limit, always keep cornerstones unlocked.
-    prioritized = sorted(
-        clusters,
-        key=lambda c: (0 if c.get("priority") in ("P0", "P1") else 1, -(c.get("volume_estimate") or 0)),
-    )[: max(limit, 3)]
+async def analyze_targets(
+    clusters: list[dict[str, Any]],
+    dry_run: bool,
+    limit: int,
+    detect_sv_kd: bool = True,
+    pillar_filter: str | None = None,
+    sync_manifest: bool = False,
+) -> list[dict[str, Any]]:
+    # Optional pillar filter
+    if pillar_filter:
+        clusters = [c for c in clusters if (c.get("pillar") or "").lower() == pillar_filter.lower()]
+
+    # Limit selection: if limit >= len(clusters), evaluate all; else sort by priority/volume
+    if limit and limit >= len(clusters):
+        prioritized = clusters
+    else:
+        prioritized = sorted(
+            clusters,
+            key=lambda c: (0 if c.get("priority") in ("P0", "P1") else 1, -(c.get("volume_estimate") or 0)),
+        )[: max(limit, 3)]
 
     _load_env_local()
     token: str | None = None
@@ -299,8 +349,9 @@ async def analyze_targets(clusters: list[dict[str, Any]], dry_run: bool, limit: 
     egress_proxy = _resolve_egress_proxy()
     sem = asyncio.Semaphore(3)
     report: list[dict[str, Any]] = []
+
     for i, cluster in enumerate(prioritized, 1):
-        kw = cluster["target_keyword"]
+        kw = cluster.get("target_keyword") or cluster.get("keyword") or cluster.get("title") or ""
         landing = f"{cluster.get('slug', '')} {cluster.get('primary_tool', '')}"
         logger.info("[%d/%d] %s", i, len(prioritized), kw)
 
@@ -310,17 +361,59 @@ async def analyze_targets(clusters: list[dict[str, Any]], dry_run: bool, limit: 
         if not competitors:
             competitors = await asyncio.to_thread(scrape_tavily_search, kw, 8)
             serp_source = "tavily" if competitors else "none"
+
         suggest = await _fetch_google_suggest(kw, egress_proxy, sem)
         silhouette = _silhouette(kw, competitors, landing, suggest) if (competitors or suggest) else {
             "blindspots": [], "coverage_score": None, "suggested_h2": [],
         }
 
+        # Live SV and KD detection
+        vol_est = cluster.get("volume_estimate")
+        kd_est = cluster.get("kd_estimate")
+        kd_band = cluster.get("kd_band", "unknown")
+        kd_effective = None
+        sv_data = None
+        kd_data = None
+
+        if detect_sv_kd:
+            try:
+                from agents.sv_kd_detector import analyze_keyword
+
+                res = await asyncio.to_thread(analyze_keyword, kw)
+                if res:
+                    sv_obj = res.get("sv") or {}
+                    kd_obj = res.get("kd") or {}
+                    if sv_obj.get("estimate"):
+                        vol_est = sv_obj["estimate"]
+                    sv_data = sv_obj
+                    if kd_obj.get("kd_100") is not None:
+                        kd_est = kd_obj["kd_100"]
+                    kd_band = kd_obj.get("kd_band", "unknown")
+                    kd_effective = kd_obj.get("kd_effective", kd_obj.get("kd"))
+                    kd_data = kd_obj
+            except Exception as e:
+                logger.warning("sv_kd_detector error on '%s': %s", kw, e)
+
+        # Compute Opportunity Score (Volume x KD x Intent) & Quadrant
+        opp_score, quadrant = compute_opportunity_metrics(vol_est, kd_est, cluster.get("intent"))
+
+        # Synchronize in-memory cluster values
+        cluster["volume_estimate"] = vol_est
+        cluster["kd_estimate"] = kd_est
+        cluster["kd_band"] = kd_band
+        cluster["opportunity_score"] = opp_score
+        cluster["quadrant"] = quadrant
+
         report.append({
             "keyword": kw,
             "pillar": cluster.get("pillar"),
             "intent": cluster.get("intent"),
-            "volume_estimate": cluster.get("volume_estimate"),
-            "kd_estimate": cluster.get("kd_estimate"),
+            "volume_estimate": vol_est,
+            "kd_estimate": kd_est,
+            "kd_band": kd_band,
+            "kd_effective": kd_effective,
+            "opportunity_score": opp_score,
+            "quadrant": quadrant,
             "slug": cluster.get("slug"),
             "tool": cluster.get("primary_tool"),
             "gsc": gap,
@@ -328,29 +421,48 @@ async def analyze_targets(clusters: list[dict[str, Any]], dry_run: bool, limit: 
             "suggest": suggest,
             "silhouette": silhouette,
             "top_competitors": [c["url"] for c in competitors[:5]],
+            "sv_meta": sv_data,
+            "kd_meta": kd_data,
         })
         await _throttle(1, base_ms=250)
 
-    report.sort(key=lambda r: (r["silhouette"].get("coverage_score") is None, r["gsc"]["impressions"], r["volume_estimate"] or 0), reverse=True)
+    # Sort report by Opportunity Score descending
+    report.sort(key=lambda r: (r.get("opportunity_score") or 0.0), reverse=True)
+
+    if sync_manifest and not dry_run and MANIFEST.exists():
+        try:
+            raw_manifest = json.loads(MANIFEST.read_text("utf-8"))
+            if isinstance(raw_manifest, dict) and "clusters" in raw_manifest:
+                raw_manifest["clusters"] = clusters
+            else:
+                raw_manifest = clusters
+            MANIFEST.write_text(json.dumps(raw_manifest, indent=2, ensure_ascii=False) + "\n", "utf-8")
+            logger.info("Synchronized updated estimates to %s", MANIFEST)
+        except Exception as e:
+            logger.error("Failed to sync manifest: %s", e)
+
     return report
 
 
 def _print_report(report: list[dict[str, Any]]) -> None:
-    print("\n=== TARGET INTEL REPORT (target-driven: GSC gap + licensed SERP/suggest + TF-IDF) ===")
-    for r in report:
-        g = r["gsc"]
-        s = r["silhouette"]
-        pos = f"#{g['position']}" if g["position"] else "unranked"
-        sug = r.get("suggest") or []
-        print(
-            f"[{r['pillar'].upper():5}] {r['keyword']:<42} "
-            f"vol~{r['volume_estimate'] or '?':>7} kd~{r['kd_estimate'] or '?':>3} "
-            f"gsc {g['impressions']:>5}impr {g['clicks']}clk {pos} | {r.get('serp_source', 'none')}"
-        )
-        if s.get("coverage_score") is not None:
-            print(f"      coverage={s['coverage_score']:.2f} blindspots={', '.join(s['blindspots'][:8])}")
-        if sug:
-            print(f"      suggest={', '.join(sug[:5])}")
+    print("\n" + "=" * 92)
+    print(" 4-QUADRANT OPPORTUNITY MATRIX (VOLUME × KD BALANCED)")
+    print("=" * 92)
+    print(f"{'#':<3} | {'PILLAR':<5} | {'KEYWORD':<36} | {'SV':>5} | {'KD':>4} | {'BAND':<8} | {'SCORE':>6} | {'QUADRANT':<12}")
+    print("-" * 92)
+
+    for i, r in enumerate(report, 1):
+        sv = str(r["volume_estimate"]) if r["volume_estimate"] else "?"
+        kd = f"{r['kd_estimate']:.0f}" if r["kd_estimate"] is not None else "?"
+        band = r.get("kd_band") or "unknown"
+        score = f"{r.get('opportunity_score', 0):.1f}"
+        quad = (r.get("quadrant") or "trap").upper()
+        pillar = (r.get("pillar") or "misc")[:5].upper()
+        kw = r["keyword"][:36]
+        print(f"{i:<3} | {pillar:<5} | {kw:<36} | {sv:>5} | {kd:>4} | {band:<8} | {score:>6} | {quad:<12}")
+
+    print("=" * 92)
+    print("Quadrants: HOLY_GRAIL (High Vol / Low KD) | QUICK_WIN (Low Vol / Low KD) | BATTLEGROUND (High Vol / High KD) | TRAP")
     print()
 
 
@@ -364,7 +476,15 @@ async def main_async(args: argparse.Namespace) -> int:
         logger.error("Malformed manifest: expected 'clusters' array")
         return 2
 
-    report = await analyze_targets(clusters, dry_run=args.dry_run, limit=args.limit)
+    detect_sv_kd = not args.no_sv_kd
+    report = await analyze_targets(
+        clusters,
+        dry_run=args.dry_run,
+        limit=args.limit,
+        detect_sv_kd=detect_sv_kd,
+        pillar_filter=args.pillar,
+        sync_manifest=args.sync_manifest,
+    )
     _print_report(report)
 
     if args.dry_run:
@@ -375,9 +495,12 @@ async def main_async(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Target-driven intelligence engine (GSC gap + TF-IDF silhouette).")
-    parser.add_argument("--limit", type=int, default=8, help="Number of targets to analyze (default 8, cornerstones always included).")
+    parser = argparse.ArgumentParser(description="Target-driven intelligence engine (GSC gap + TF-IDF silhouette + SV/KD Matrix).")
+    parser.add_argument("--limit", type=int, default=46, help="Number of targets to analyze (default 46 for all clusters).")
     parser.add_argument("--dry-run", action="store_true", help="Print report without writing target-intel.json.")
+    parser.add_argument("--sync-manifest", action="store_true", help="Update data/content-silo-manifest.json with live SV/KD estimates.")
+    parser.add_argument("--pillar", type=str, default=None, help="Filter analysis to a specific pillar (money, home, tech, life, body).")
+    parser.add_argument("--no-sv-kd", action="store_true", help="Skip live SV/KD detection and rely on existing values.")
     args = parser.parse_args()
     try:
         return asyncio.run(main_async(args))
