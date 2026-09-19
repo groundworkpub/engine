@@ -1,0 +1,114 @@
+name: Affiliate Feeds & Partner Sync Cron
+
+# Single Source of Truth: Automated affiliate product feeds & partner sync for Groundwork
+# This workflow runs in groundworkpub/engine (public repo, unlimited free minutes)
+# and pushes the updated public/data/feeds/curated_products.json to groundworkpub/media.
+
+on:
+  schedule:
+    # Run twice daily at 00:00 UTC and 12:00 UTC
+    - cron: "0 0,12 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: affiliate-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-affiliate-feeds:
+    name: Sync Awin Feeds & Partner Status to Media Repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout media repository
+        uses: actions/checkout@v4
+        with:
+          repository: groundworkpub/media
+          token: ${{ secrets.GH_PAT_MEDIA || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          ref: main
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install python-dotenv httpx
+
+      - name: Ingest Awin Darwin Product Feeds
+        env:
+          AWIN_API_KEY: ${{ secrets.AWIN_API_KEY }}
+          AWIN_PUBLISHER_ID: ${{ secrets.AWIN_PUBLISHER_ID || '3081079' }}
+        run: |
+          if [ -z "$AWIN_API_KEY" ]; then
+            echo "AWIN_API_KEY secret not found in engine repo, skipping Awin feed ingest."
+          else
+            python agents/awin_feed_ingest.py
+          fi
+
+      - name: Check Rakuten Partner Approvals
+        env:
+          RAKUTEN_CLIENT_ID: ${{ secrets.RAKUTEN_CLIENT_ID }}
+          RAKUTEN_CLIENT_SECRET: ${{ secrets.RAKUTEN_CLIENT_SECRET }}
+          RAKUTEN_SID: ${{ secrets.RAKUTEN_SID || '4752883' }}
+        run: |
+          if [ -n "$RAKUTEN_CLIENT_ID" ] && [ -n "$RAKUTEN_CLIENT_SECRET" ]; then
+            python agents/rakuten_client.py || true
+          fi
+
+      - name: Check for data changes
+        id: git_diff
+        run: |
+          git status --porcelain public/data/feeds/curated_products.json
+          if [ -n "$(git status --porcelain public/data/feeds/curated_products.json)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push updated product feeds
+        if: steps.git_diff.outputs.changed == 'true'
+        run: |
+          git config user.name "Groundwork Engine Bot"
+          git config user.email "bot@gworky.com"
+          git add public/data/feeds/curated_products.json
+          git commit -m "chore(monetization): auto-update curated affiliate product feeds [skip ci]"
+          git push origin main
+
+      - name: Purge Cloudflare Edge Cache for curated_products.json
+        if: steps.git_diff.outputs.changed == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID || '67e2be0fcddb82637428c64471050fd8' }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "Cloudflare token not set, skipping cache purge."
+            exit 0
+          fi
+          curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"files":["https://gworky.com/data/feeds/curated_products.json"]}'
+
+      - name: Send Telegram notification
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_FOUNDER_CHAT_ID: ${{ secrets.TELEGRAM_FOUNDER_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_FOUNDER_CHAT_ID" ]; then
+            echo "Telegram credentials not set, skipping notification."
+            exit 0
+          fi
+          STATUS="${{ job.status }}"
+          CHANGED="${{ steps.git_diff.outputs.changed }}"
+          MESSAGE="🛒 <b>Groundwork Affiliate Sync</b>%0AStatus: <b>${STATUS}</b>%0AProducts Updated: <b>${CHANGED}</b>%0ARef: <code>groundworkpub/media:main</code>"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_FOUNDER_CHAT_ID}" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=HTML"
