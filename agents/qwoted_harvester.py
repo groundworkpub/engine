@@ -55,54 +55,61 @@ def harvest_media_opportunities(limit: int = 5) -> list[dict[str, Any]]:
     """Harvests and scores live journalist queries matching Groundwork decision engines."""
     logger.info("Scanning public media opportunities & journalist feeds...")
 
-    # Algolia & Live feed simulated ingest with dynamic matching
-    opportunities = [
-        {
-            "id": "opp-bi-mortgage-2026",
-            "outlet": "Business Insider",
-            "dr": 92,
-            "topic": "When is refinancing a mortgage worth the closing costs in 2026?",
-            "category": "personal finance",
-            "tool_title": "Mortgage Refinance Break-Even Engine",
-            "tool_url": f"{SITE_URL}/tools/mortgage-refinance-calculator",
-        },
-        {
-            "id": "opp-mw-heatpump-ira",
-            "outlet": "MarketWatch",
-            "dr": 92,
-            "topic": "Evaluating Heat Pump ROI with IRA 25C tax credits vs fossil fuel heating",
-            "category": "clean energy",
-            "tool_title": "Heat Pump & Electrification ROI Calculator",
-            "tool_url": f"{SITE_URL}/tools/heat-pump-roi-calculator",
-        },
-        {
-            "id": "opp-hl-bmr-tdee",
-            "outlet": "Healthline",
-            "dr": 89,
-            "topic": "How accurately does BMR predict total daily caloric expenditure for active adults?",
-            "category": "health & nutrition",
-            "tool_title": "BMR & TDEE Metabolic Engine",
-            "tool_url": f"{SITE_URL}/tools/bmr-tdee-calculator",
-        },
-        {
-            "id": "opp-tc-llm-economics",
-            "outlet": "TechCrunch",
-            "dr": 93,
-            "topic": "Calculating LLM token economics: When does fine-tuning beat prompt engineering at scale?",
-            "category": "enterprise tech",
-            "tool_title": "LLM Token Cost Calculator",
-            "tool_url": f"{SITE_URL}/tools/llm-token-cost-calculator",
-        },
-        {
-            "id": "opp-cnet-solar-battery",
-            "outlet": "CNET",
-            "dr": 93,
-            "topic": "Does NEM 3.0 make standalone solar obsolete without battery storage?",
-            "category": "home energy",
-            "tool_title": "NEM 3.0 Solar & Battery Payback Sizer",
-            "tool_url": f"{SITE_URL}/tools/nem3-solar-battery-payback",
-        },
-    ]
+    opportunities: list[dict[str, Any]] = []
+
+    # 1. Supabase outreach_prospects check
+    try:
+        from core.database_intel import DatabaseIntel
+        db = DatabaseIntel()
+        if db.client:
+            res = db.client.table("outreach_prospects").select("*").eq("source_type", "journalist").limit(limit).execute()
+            if res.data:
+                for row in res.data:
+                    url = row.get("url", "")
+                    pillar = row.get("pillar", "money")
+                    matched_tool = TOOL_MAPPINGS.get(pillar, ("Groundwork Research Desk", f"{SITE_URL}/citations"))
+                    opportunities.append({
+                        "id": f"opp-{abs(hash(url)) % 1000000}",
+                        "outlet": "Public Media Request",
+                        "dr": 85,
+                        "topic": row.get("draft_outreach") or f"Journalist query on {pillar} economics",
+                        "category": pillar,
+                        "tool_title": matched_tool[0],
+                        "tool_url": matched_tool[1],
+                        "url": url,
+                    })
+    except Exception as exc:
+        logger.warning(f"Supabase outreach_prospects check skipped: {exc}")
+
+    # 2. Dynamic synthesis from keyword telemetry if prospects table is empty
+    if not opportunities:
+        telemetry_file = REPO_ROOT / "reports" / "telemetry" / "telemetry_latest.json"
+        if telemetry_file.exists():
+            try:
+                data = json.loads(telemetry_file.read_text(encoding="utf-8"))
+                top_tracked = data.get("agenticFlywheel", {}).get("topTrackedRankings", [])
+                for idx, rank_item in enumerate(top_tracked[:limit]):
+                    kw = rank_item.get("keyword", "")
+                    if not kw:
+                        continue
+                    # Match tool
+                    tool_key = "mortgage"
+                    for k in TOOL_MAPPINGS:
+                        if k in kw.lower():
+                            tool_key = k
+                            break
+                    tool_title, tool_url = TOOL_MAPPINGS[tool_key]
+                    opportunities.append({
+                        "id": f"opp-telemetry-{idx+1:03d}",
+                        "outlet": "Media Wire Ingestion",
+                        "dr": 88,
+                        "topic": f"Expert commentary & mathematical breakdown for: {kw.capitalize()} in 2026",
+                        "category": "personal finance" if "mortgage" in kw else "technology & living",
+                        "tool_title": tool_title,
+                        "tool_url": tool_url,
+                    })
+            except Exception as exc:
+                logger.warning(f"Telemetry journalist opportunities fallback skipped: {exc}")
 
     selected = opportunities[:limit]
     out_file = Path("agents/output/harvested_opportunities.json")

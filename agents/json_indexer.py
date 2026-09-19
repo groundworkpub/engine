@@ -32,33 +32,48 @@ TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 
 def load_target_urls(json_path: str = "agents/output/backlink_targets.json") -> list[str]:
-    """Loads target URLs from a JSON manifest."""
+    """Loads target URLs from a JSON manifest or dynamically from Supabase published content."""
     p = Path(json_path)
-    if not p.exists():
-        logger.debug(f"JSON manifest {json_path} not found. Using default site routes.")
-        return [
-            f"{SITE_URL}/",
-            f"{SITE_URL}/money",
-            f"{SITE_URL}/body",
-            f"{SITE_URL}/home",
-            f"{SITE_URL}/life",
-            f"{SITE_URL}/tech",
-            f"{SITE_URL}/tools/mortgage-refinance-calculator",
-            f"{SITE_URL}/tools/heat-pump-roi-calculator",
-            f"{SITE_URL}/tools/compound-interest-calculator",
-        ]
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [str(u) for u in data if str(u).startswith("http")]
+            if isinstance(data, dict):
+                urls = data.get("urls") or data.get("injected_urls") or []
+                return [str(u) for u in urls if str(u).startswith("http")]
+        except Exception as exc:
+            logger.warning(f"Failed to parse {json_path}: {exc}")
+
+    urls = [
+        f"{SITE_URL}/",
+        f"{SITE_URL}/money",
+        f"{SITE_URL}/body",
+        f"{SITE_URL}/home",
+        f"{SITE_URL}/life",
+        f"{SITE_URL}/tech",
+    ]
 
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return [str(u) for u in data if str(u).startswith("http")]
-        if isinstance(data, dict):
-            urls = data.get("urls") or data.get("injected_urls") or []
-            return [str(u) for u in urls if str(u).startswith("http")]
-    except Exception as exc:
-        logger.warning(f"Failed to parse {json_path}: {exc}")
+        from core.database_intel import DatabaseIntel
+        db = DatabaseIntel()
+        if db.client:
+            res = (
+                db.client.table("articles")
+                .select("slug")
+                .eq("status", "published")
+                .order("published_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            if res.data:
+                for row in res.data:
+                    if row.get("slug"):
+                        urls.append(f"{SITE_URL}/article/{row['slug']}")
+    except Exception as e:
+        logger.warning(f"Supabase published articles lookup fallback: {e}")
 
-    return [f"{SITE_URL}/"]
+    return urls
 
 
 def ping_indexnow(urls: list[str] | None = None) -> bool:

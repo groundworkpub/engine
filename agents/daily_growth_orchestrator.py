@@ -142,11 +142,30 @@ def run_full_growth_cycle(dry_run: bool = False) -> dict[str, Any]:
     try:
         from agents.google_indexer import submit_batch_to_google
         if not dry_run:
-            target_pings = [
-                "https://gworky.com/",
-                "https://gworky.com/money",
-                "https://gworky.com/tools/mortgage-refinance-calculator",
-            ]
+            target_pings = ["https://gworky.com/"]
+            try:
+                from agents.core.database_intel import DatabaseIntel
+                db_intel = DatabaseIntel()
+                if db_intel.client:
+                    res = (
+                        db_intel.client.table("articles")
+                        .select("slug")
+                        .eq("status", "published")
+                        .order("published_at", desc=True)
+                        .limit(5)
+                        .execute()
+                    )
+                    if res.data:
+                        for row in res.data:
+                            if row.get("slug"):
+                                target_pings.append(f"https://gworky.com/article/{row['slug']}")
+            except Exception as dyn_err:
+                logger.warning(f"Dynamic articles indexing fallback: {dyn_err}")
+                target_pings.extend([
+                    "https://gworky.com/money",
+                    "https://gworky.com/tools/mortgage-refinance-calculator",
+                ])
+
             report["google_indexing"] = submit_batch_to_google(target_pings)
         else:
             report["google_indexing"] = [{"status": "dry_run"}]

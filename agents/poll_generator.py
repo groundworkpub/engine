@@ -103,29 +103,66 @@ def generate_polls_for_pillars(
         if not poll_def:
             continue
 
-        # Check if keyword_graph_nodes has trending topic for custom question
+        poll_question = poll_def["question"]
+        poll_options = poll_def["options"]
+
+        # Check if keyword_rankings or telemetry has trending topic for custom question
         try:
-            nodes_res = (
-                supabase.table("keyword_graph_nodes")
-                .select("keyword, degree, member_count")
-                .eq("pillar", pillar)
-                .order("degree", desc=True)
-                .limit(1)
+            kw_res = (
+                supabase.table("keyword_rankings")
+                .select("keyword, position")
+                .order("position", asc=True)
+                .limit(20)
                 .execute()
             )
-            if nodes_res.data and len(nodes_res.data) > 0:
-                top_kw = nodes_res.data[0].get("keyword")
+            if kw_res.data and len(kw_res.data) > 0:
+                pillar_keywords = {
+                    "money": ["mortgage", "refinance", "rate", "debt", "invest", "hysa"],
+                    "body": ["cardio", "tdee", "calorie", "heart", "health", "fat"],
+                    "home": ["solar", "heat pump", "furnace", "payback", "energy"],
+                    "life": ["retir", "delaware", "florida", "cost", "travel"],
+                    "tech": ["ai", "cursor", "software", "verbatim", "origin"],
+                }
+                valid_terms = pillar_keywords.get(pillar, [pillar])
+                for row in kw_res.data:
+                    kw_candidate = row.get("keyword", "")
+                    if any(term in kw_candidate.lower() for term in valid_terms) and len(kw_candidate) > 5:
+                        top_kw = kw_candidate
+                        break
                 if top_kw and len(top_kw) > 5:
-                    logger.info("Found top trending keyword for %s: '%s'", pillar, top_kw)
+                    logger.info("Found top trending keyword for %s: '%s'. Synthesizing poll...", pillar, top_kw)
+                    try:
+                        from core.llm_router import get_llm_router
+                        router = get_llm_router()
+                        poll_prompt = f"""You are the Community Engagement Editor at Groundwork.
+Create a sharp, single-choice decision poll for our audience (adults 35-48) centered on the trending topic: "{top_kw}".
+Pillar: {pillar}
+
+Format strictly as JSON:
+{{
+  "question": "Clear, engaging question under 15 words?",
+  "options": [
+    {{"id": "opt_1", "text": "Concrete stance / action 1", "votes": 0}},
+    {{"id": "opt_2", "text": "Concrete stance / action 2", "votes": 0}},
+    {{"id": "opt_3", "text": "Concrete stance / action 3", "votes": 0}}
+  ]
+}}
+"""
+                        res = router.call_llm_json(prompt=poll_prompt, system_prompt="You generate high-conversion decision polls.")
+                        if res and "question" in res and "options" in res and len(res["options"]) >= 2:
+                            poll_question = res["question"]
+                            poll_options = res["options"]
+                    except Exception as llm_err:
+                        logger.warning(f"LLM poll synthesis fallback: {llm_err}")
         except Exception:
             pass  # Fall back cleanly to canonical question
 
         poll_record = {
             "slug": slug,
             "pillar": pillar,
-            "question": poll_def["question"],
+            "question": poll_question,
             "description": f"Groundwork Community Consensus Benchmark — {pillar.capitalize()} Pillar ({week_str})",
-            "options": poll_def["options"],
+            "options": poll_options,
             "total_votes": 0,
             "is_active": True,
             "expires_at": expires_at,

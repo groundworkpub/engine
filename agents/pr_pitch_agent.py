@@ -23,42 +23,7 @@ logger = logging.getLogger("pr_pitch_agent")
 
 SITE_URL = os.getenv("NEXT_PUBLIC_SITE_URL", "https://gworky.com").rstrip("/")
 
-# Curated High-Intent Journalist Query Opportunities
-SAMPLE_JOURNALIST_QUERIES = [
-    {
-        "id": "qwoted-001",
-        "outlet": "Business Insider",
-        "reporter": "Senior Personal Finance Reporter",
-        "topic": "When is refinancing a mortgage worth the closing costs in 2026?",
-        "pillar": "money",
-        "deadline": "2026-09-05",
-        "matched_tool": "mortgage-refinance-calculator",
-        "tool_title": "Mortgage Refinance Break-Even Engine",
-        "tool_url": f"{SITE_URL}/tools/mortgage-refinance-calculator",
-    },
-    {
-        "id": "qwoted-002",
-        "outlet": "MarketWatch",
-        "reporter": "Energy & Real Estate Desk",
-        "topic": "Evaluating Heat Pump ROI with IRA 25C tax credits vs fossil fuel heating",
-        "pillar": "home",
-        "deadline": "2026-09-06",
-        "matched_tool": "heat-pump-roi-calculator",
-        "tool_title": "Heat Pump & Electrification ROI Calculator",
-        "tool_url": f"{SITE_URL}/tools/heat-pump-roi-calculator",
-    },
-    {
-        "id": "qwoted-003",
-        "outlet": "Healthline",
-        "reporter": "Longevity & Metabolism Writer",
-        "topic": "How accurately does BMR predict total daily caloric expenditure for active adults?",
-        "pillar": "body",
-        "deadline": "2026-09-07",
-        "matched_tool": "bmr-tdee-calculator",
-        "tool_title": "BMR & TDEE Metabolic Engine",
-        "tool_url": f"{SITE_URL}/tools/bmr-tdee-calculator",
-    },
-]
+
 
 
 def synthesize_journalist_pitch(query_item: dict[str, Any]) -> dict[str, str]:
@@ -149,7 +114,22 @@ def send_telegram_pitch_telemetry(pitch: dict[str, Any]) -> bool:
 
 def run_pitch_synthesis(queries: list[dict[str, Any]] | None = None, auto_dispatch: bool = False) -> list[dict[str, Any]]:
     """Synthesizes pitches for all active journalist opportunities and optionally dispatches them."""
-    active_queries = queries or SAMPLE_JOURNALIST_QUERIES
+    active_queries = queries
+    if not active_queries:
+        harvest_path = Path("agents/output/harvested_opportunities.json")
+        if harvest_path.exists():
+            try:
+                data = json.loads(harvest_path.read_text(encoding="utf-8"))
+                active_queries = data.get("opportunities", [])
+            except Exception:
+                pass
+        if not active_queries:
+            try:
+                from agents.qwoted_harvester import harvest_media_opportunities
+                active_queries = harvest_media_opportunities()
+            except Exception:
+                active_queries = []
+
     logger.info(f"Synthesizing PR pitches for {len(active_queries)} journalist opportunities...")
 
     pitches = []

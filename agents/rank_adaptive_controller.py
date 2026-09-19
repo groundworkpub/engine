@@ -251,57 +251,51 @@ class RankAdaptiveController:
             return self._fallback_opportunities()
 
     def _fallback_opportunities(self) -> list[dict[str, Any]]:
-        """High-ROI target opportunities across Groundwork's 5 pillars and regional state pSEO tools."""
-        return [
-            {
-                "query": "mortgage refinance calculator vs bankrate",
-                "page": "https://gworky.com/tools/mortgage-refinance-calculator",
-                "position": 7.4,
-                "impressions": 1420,
-                "clicks": 18,
-                "ctr": 0.012,
-            },
-            {
-                "query": "nem 3.0 solar battery payback calculator",
-                "page": "https://gworky.com/tools/nem-3-solar-battery-payback-calculator",
-                "position": 5.2,
-                "impressions": 2180,
-                "clicks": 42,
-                "ctr": 0.019,
-            },
-            {
-                "query": "heat pump savings calculator cold climate",
-                "page": "https://gworky.com/tools/heat-pump-savings-calculator",
-                "position": 8.8,
-                "impressions": 890,
-                "clicks": 9,
-                "ctr": 0.010,
-            },
-            {
-                "query": "texas mortgage escrow shortage calculator",
-                "page": "https://gworky.com/tools/mortgage-refinance-calculator/texas",
-                "position": 6.8,
-                "impressions": 540,
-                "clicks": 6,
-                "ctr": 0.011,
-            },
-            {
-                "query": "california nem 3.0 solar roi calculator",
-                "page": "https://gworky.com/tools/nem-3-solar-battery-payback-calculator/california",
-                "position": 9.1,
-                "impressions": 760,
-                "clicks": 7,
-                "ctr": 0.009,
-            },
-            {
-                "query": "body fat percentage calculator navy method",
-                "page": "https://gworky.com/tools/body-fat-calculator",
-                "position": 11.2,
-                "impressions": 1650,
-                "clicks": 14,
-                "ctr": 0.008,
-            },
-        ]
+        """Extracts high-ROI target opportunities from telemetry report or Supabase keyword rankings."""
+        telemetry_file = _root / "reports" / "telemetry" / "telemetry_latest.json"
+        if telemetry_file.exists():
+            try:
+                import json
+                data = json.loads(telemetry_file.read_text(encoding="utf-8"))
+                gsc_data = data.get("gsc", {})
+                opps = gsc_data.get("highPotentialOpportunities", [])
+                results = []
+                for opp in opps:
+                    q = opp.get("query", "")
+                    if not q:
+                        continue
+                    results.append({
+                        "query": q,
+                        "page": opp.get("page") or "https://gworky.com",
+                        "position": float(opp.get("position", 10.0)),
+                        "impressions": int(opp.get("impressions", 10)),
+                        "clicks": int(opp.get("clicks", 0)),
+                        "ctr": float(opp.get("ctrPercent", 0.0)) / 100.0,
+                    })
+                if results:
+                    return results
+            except Exception as exc:
+                logger.warning(f"Could not load GSC opportunities from telemetry: {exc}")
+
+        # Supabase keyword_rankings fallback
+        try:
+            res = self.supabase.table("keyword_rankings").select("keyword,position,domain").limit(20).execute()
+            if res.data:
+                return [
+                    {
+                        "query": row["keyword"],
+                        "page": f"https://{row.get('domain', 'gworky.com')}",
+                        "position": float(row.get("position", 10.0)),
+                        "impressions": 100,
+                        "clicks": 1,
+                        "ctr": 0.01,
+                    }
+                    for row in res.data
+                ]
+        except Exception:
+            pass
+
+        return []
 
     def triage_opportunities(self, gsc_rows: list[dict[str, Any]]) -> list[TargetOpportunity]:
         """Triages queries into striking distance, computes sigmoidal target sessions, and partitions A/B cohorts."""
@@ -358,10 +352,9 @@ class RankAdaptiveController:
                 )
             )
 
-        # Merge with Flagship & Regional State pSEO seeds (Dual Ingestion)
-        existing_queries = {o.query.lower() for o in opportunities}
-        for fb in self._fallback_opportunities():
-            if fb["query"].lower() not in existing_queries:
+        # If no opportunities qualified from GSC, utilize telemetry-derived high potential opportunities
+        if not opportunities:
+            for fb in self._fallback_opportunities():
                 cohort = partition_ab_cohort(fb["query"])
                 opportunities.append(
                     TargetOpportunity(

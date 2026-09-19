@@ -29,8 +29,11 @@ TARGET_MONITORED_PROGRAMS = {
 }
 
 def check_awin_programmes():
-    token = os.getenv("AWIN_OAUTH_TOKEN", "e4d0625e-89a7-4f21-9732-6e69406a690b")
-    pub_id = os.getenv("AWIN_PUBLISHER_ID", "3081079")
+    token = os.getenv("AWIN_OAUTH_TOKEN") or os.getenv("AWIN_API_TOKEN")
+    pub_id = os.getenv("AWIN_PUBLISHER_ID", "")
+    if not token or not pub_id:
+        logger.error("AWIN_OAUTH_TOKEN or AWIN_PUBLISHER_ID missing from environment")
+        return
 
     # 1. Fetch joined programmes
     joined_url = f"https://api.awin.com/publishers/{pub_id}/programmes?relationship=joined"

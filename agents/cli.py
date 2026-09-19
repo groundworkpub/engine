@@ -179,7 +179,7 @@ def run_interactive_menu(supabase: Any = None) -> None:
         print("\n" + "═" * 70)
         print("  🏛️  GROUNDWORK MASTER CONTROL CENTER (LOCAL OPERATIONS)")
         print("═" * 70)
-        print("  [1]  🌐 Open Localhost Web Dashboard (http://localhost:3000/dashboard)")
+        print("  [1]  🌐 Open Founder Master Cockpit (http://localhost:8080)")
         print("  [2]  📰 Run Content Production Pipeline (Scouter → Critic → Scribe)")
         print("  [3]  🔍 SEO Observer & Google Indexing Inspection")
         print("  [4]  📢 Herald Social Media Publisher (Bluesky / Pinterest / X)")
@@ -206,30 +206,30 @@ def run_interactive_menu(supabase: Any = None) -> None:
             break
 
         elif choice == "1":
-            print("\n🌐 Membuka Localhost Web Dashboard...")
-            url = "http://localhost:3000/dashboard"
+            print("\n🌐 Membuka Founder Master Cockpit (Port 8080)...")
+            url = "http://localhost:8080"
             server_ready = False
             try:
                 with httpx.Client(timeout=2.0) as client:
-                    resp = client.get("http://localhost:3000/api/health")
+                    resp = client.get("http://localhost:8080")
                     if resp.status_code == 200:
-                        print("  ✅ Next.js dev server aktif di port 3000.")
+                        print("  ✅ Founder Master Cockpit aktif di port 8080.")
                         server_ready = True
             except Exception:
                 pass
 
             if not server_ready:
-                print("  ⚡ Menyambungkan & menyalakan Next.js dev server di background...")
+                print("  ⚡ Menyalakan Groundwork Founder Cockpit di background (Port 8080)...")
                 subprocess.Popen(
-                    ["npm", "run", "dev"],
+                    [sys.executable, os.path.join(_current_dir, "dashboard.py")],
                     cwd=_project_root,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                time.sleep(3)
+                time.sleep(2)
 
             webbrowser.open(url)
-            print(f"  🚀 Dashboard dibuka di browser: {url}")
+            print(f"  🚀 Master Cockpit dibuka di browser: {url}")
 
         elif choice == "2":
             print("\n📰 CONTENT PRODUCTION PIPELINE")
@@ -677,7 +677,7 @@ def main() -> None:
             if args.dashboard:
                 import webbrowser
 
-                webbrowser.open("http://localhost:3000/dashboard/agents")
+                webbrowser.open("http://localhost:8080")
 
             targets = fetch_targets(supabase, limit=args.limit, specific_slug=args.slug)
             asyncio.run(
