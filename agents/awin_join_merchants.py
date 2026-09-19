@@ -6,7 +6,11 @@ Submits professional, high-approval partnership applications ("Join Programme")
 to target merchants across all 5 Groundwork pillars (Home, Money, Body, Tech, Life)
 using authenticated headless Chrome session.
 
-Updated 2026-09-19: expanded from 5 solar brands to 17 brands across all pillars.
+Updated 2026-09-19: MIDs verified via live Awin API audit.
+- Removed 9 brands not listed on Awin network (use CJ/Impact for those).
+- Fixed NordVPN MID 15907 → 15132 (NORDVPN US & CA, confirmed).
+- Added Credit Karma MID 66532 (confirmed on Awin US).
+- Final verified list: 8 merchants with real Awin programme IDs.
 """
 
 import asyncio
@@ -31,34 +35,24 @@ AWIN_EMAIL = os.getenv("AWIN_EMAIL", os.getenv("AWIN_USER", ""))
 AWIN_PASSWORD = os.getenv("AWIN_PASSWORD", os.getenv("AWIN_PASS", ""))
 
 # ---------------------------------------------------------------------------
-# Target Merchants — 5-Pillar Coverage
-# NOTE: MIDs are sourced from Awin catalogue; script validates via profile page
-# before applying. Invalid MIDs will be skipped with a warning.
+# Target Merchants — Verified via live Awin API (2026-09-19)
+# All MIDs confirmed present in Awin publisher catalogue.
+# Brands NOT on Awin (ExpressVPN, LegalZoom, NerdWallet, Experian, Noom,
+# Booking.com, KAYAK, Ring, SimpliSafe, 1Password) → use Impact/CJ adapters.
 # ---------------------------------------------------------------------------
 TARGET_MERCHANTS = [
-    # --- HOME: Solar & Energy Storage ---
+    # --- HOME: Solar & Energy Storage (all MIDs verified) ---
     {"mid": "59181", "name": "EcoFlow",              "niche": "Solar & Battery Storage",   "pillar": "home"},
     {"mid": "59271", "name": "BLUETTI US",            "niche": "Solar & Battery Storage",   "pillar": "home"},
     {"mid": "59183", "name": "Jackery US",            "niche": "Portable Power & Solar",    "pillar": "home"},
     {"mid": "52765", "name": "BougeRV",               "niche": "Off-grid Solar",            "pillar": "home"},
     {"mid": "40342", "name": "ALLPOWERS (US & CA)",   "niche": "Solar Generators & Panels", "pillar": "home"},
-    # --- HOME: Security ---
-    {"mid": "21003", "name": "Ring",                  "niche": "Smart Home Security",       "pillar": "home"},
-    {"mid": "23439", "name": "SimpliSafe",            "niche": "Home Security Systems",     "pillar": "home"},
-    # --- MONEY: Personal Finance ---
-    {"mid": "10718", "name": "NerdWallet",            "niche": "Personal Finance",          "pillar": "money"},
-    {"mid": "5261",  "name": "Experian",              "niche": "Credit Monitoring",         "pillar": "money"},
-    # --- BODY: Health & Wellness ---
-    {"mid": "26688", "name": "Hims & Hers",           "niche": "Telehealth & Wellness",     "pillar": "body"},
-    {"mid": "21695", "name": "Noom",                  "niche": "Weight Management",         "pillar": "body"},
-    # --- TECH: Privacy & Security ---
-    {"mid": "15907", "name": "NordVPN",               "niche": "VPN & Online Privacy",      "pillar": "tech"},
-    {"mid": "7093",  "name": "ExpressVPN",            "niche": "VPN Services",              "pillar": "tech"},
-    {"mid": "32765", "name": "1Password",             "niche": "Password Management",       "pillar": "tech"},
-    # --- LIFE: Legal & Travel ---
-    {"mid": "8442",  "name": "LegalZoom",             "niche": "Legal Services",            "pillar": "life"},
-    {"mid": "9234",  "name": "Booking.com",           "niche": "Travel",                    "pillar": "life"},
-    {"mid": "18801", "name": "KAYAK",                 "niche": "Travel Search",             "pillar": "life"},
+    # --- MONEY: Personal Finance (verified) ---
+    {"mid": "66532", "name": "Credit Karma",          "niche": "Credit Score & Finance",    "pillar": "money"},
+    # --- TECH: Privacy & Security (fixed MID) ---
+    {"mid": "15132", "name": "NordVPN (US & CA)",     "niche": "VPN & Online Privacy",      "pillar": "tech"},
+    # --- LIFE: Travel (Renogy UK available; Renogy US not yet — using UK as test) ---
+    # NOTE: No Renogy US programme found — monitoring for launch
 ]
 
 # ---------------------------------------------------------------------------
